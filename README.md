@@ -30,46 +30,33 @@
 
 ### 状态机生命周期的三个阶段
 
-```toml
-Enter：进入状态
-Update：更新状态
-Exit：退出状态
-```
+- Enter：进入状态
+- Update：更新状态
+- Exit：退出状态
 
 ### 状态转换条件[StateTransitionCondition]
 
-```toml
-HsmOnEnterCondition：进入状态的条件
-HsmOnExitCondition：退出状态的条件
-```
+- HsmOnEnterCondition：进入状态的条件
+- HsmOnExitCondition：退出状态的条件
 
 ### 分层状态
 
-```toml
-SuperState：父状态
-SubStates：子状态集合
-```
-
+- SuperState：父状态
+- SubStates：子状态集合
+- 
 ### 状态优先级[StateHistory]
 
-```toml
-允许你通过优先级从高到低遍历顺序来管理状态转换。
-优先级越高，越先被检查。
-```
+- 允许你通过优先级从高到低遍历顺序来管理状态转换。
+- 优先级越高，越先被检查。
 
 ### 状态过渡规划[StateTransitionStrategy]
 
-```toml
-允许当状态从子状态转换到父状态时，通过[StateTransitionStrategy]确定是否重置,继续和
-直接退出
-```
+- 允许当状态从子状态转换到父状态时，通过[StateTransitionStrategy]确定是否重置,继续和直接退出
 
 ### 组合条件[CombinationCondition]
 
-```toml
-允许你使用多个条件来组合多个条件，支持and,or,not操作符。
-同时允许使用combination_condition!(and("a","b"))或者CombinationCondition::parse("And(a,b)")编写组合条件。
-```
+- 允许你使用多个条件来组合多个条件，支持and,or,not操作符。
+- 同时允许使用combination_condition!(and("a","b"))或者CombinationCondition::parse("And(a,b)")编写组合条件。
 
 ## API 文档
 
