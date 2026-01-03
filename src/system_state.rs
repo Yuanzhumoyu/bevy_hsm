@@ -1,0 +1,382 @@
+use std::{fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc};
+
+use bevy::{
+    app::App,
+    ecs::{
+        component::ComponentId,
+        schedule::{IntoScheduleConfigs, ScheduleLabel},
+    },
+    platform::collections::{Equivalent, HashMap, HashSet},
+    prelude::*,
+};
+
+use crate::{
+    hook_system::HsmStateContext, state::HsmOnState,
+    system_state::system_state_trait::ExpandScheduleLabelFuction,
+};
+
+/// # 一个对状态机系统的抽象
+/// * In : 输入上下文
+/// * Out :
+///     * None: 下一帧将不再执行该状态
+///     * Some: 继续执行该状态, 里面的数量为0时将视为None,
+///         * 过滤条件 :
+///             * `OnUpdate`: 继续执行该状态
+///             * `OnExit` : 停止执行该状态
+pub trait IntoActionSystem<M> {
+    fn into_system(
+        self,
+    ) -> impl IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M>;
+}
+
+impl<F, M> IntoActionSystem<M> for F
+where
+    F: IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M>,
+{
+    fn into_system(
+        self,
+    ) -> impl IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M> {
+        self
+    }
+}
+
+pub trait SystemState {
+    fn add_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+        action_name: impl Into<String>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self;
+
+    fn add_action_system_anchor_point(
+        &mut self,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+    ) -> &mut Self;
+}
+
+impl SystemState for App {
+    fn add_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+        action_name: impl Into<String>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self {
+        let world = self.world_mut();
+        let action_name = Arc::new(action_name.into());
+
+        // 注册状态系统
+        schedule.add_system_info(world, action_name.clone());
+
+        // 添加系统
+        let mut schedules = world.resource_mut::<Schedules>();
+        schedule.add_system(&mut schedules, action_name, system);
+        self
+    }
+
+    fn add_action_system_anchor_point(
+        &mut self,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+    ) -> &mut Self {
+        let world = self.world_mut();
+        let action_name = Arc::new("".to_string());
+        // 注册状态系统
+        schedule.add_system_info(world, action_name.clone());
+
+        let mut schedules = world.resource_mut::<Schedules>();
+        schedule.add_system_anchor_point(&mut schedules, action_name);
+        self
+    }
+}
+
+pub type GetBufferId = Arc<
+    dyn Fn(&mut World, Box<dyn FnOnce(&mut World, &mut HsmActionSystemBuffer)>)
+        + Send
+        + Sync
+        + 'static,
+>;
+
+/// 状态机系统
+/// # 作用
+/// * 用于获取对应时间点的缓存资源入口
+/// * Key: "`ScheduleLabel`:`action_name`"
+/// * Value: `HsmActionSystemBuffer<T: ScheduleLabel>` 的 `ComponentId`
+#[derive(Resource, Default, Clone)]
+pub struct HsmActionSystems(HashMap<String, GetBufferId>);
+
+impl HsmActionSystems {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub(super) fn insert(&mut self, action_name: impl Into<String>, system_id: GetBufferId) {
+        let action_name = action_name.into();
+        self.0.insert(action_name, system_id);
+    }
+
+    pub(super) fn get<Q>(&self, action_name: &Q) -> Option<GetBufferId>
+    where
+        Q: Hash + Equivalent<String> + ?Sized,
+    {
+        self.0.get(action_name).cloned()
+    }
+}
+
+/// 状态机系统缓存管理器
+/// * Key: `ScheduleLabel`
+/// * Value: `HsmActionSystemBuffer<T: ScheduleLabel>` 的 `ComponentId`
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
+pub(super) struct HsmActionSystemBuffersManager(HashMap<String, ComponentId>);
+
+/// 状态机组系统缓存
+#[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
+pub(super) struct HsmActionSystemBuffers<T: ScheduleLabel = HsmOnState> {
+    buffers: HashMap<String, HsmActionSystemBuffer>,
+    _marker: PhantomData<T>,
+}
+
+impl<T: ScheduleLabel> HsmActionSystemBuffers<T> {
+    pub fn insert_buffer(&mut self, action_name: String, buffer: HsmActionSystemBuffer) {
+        self.buffers.insert(action_name, buffer);
+    }
+
+    pub fn get_buffer<Q>(&self, action_name: &Q) -> Option<&HsmActionSystemBuffer>
+    where
+        Q: Hash + Equivalent<String> + ?Sized,
+    {
+        self.buffers.get(action_name)
+    }
+
+    pub fn get_buffer_mut<Q>(&mut self, action_name: &Q) -> Option<&mut HsmActionSystemBuffer>
+    where
+        Q: Hash + Equivalent<String> + ?Sized,
+    {
+        self.buffers.get_mut(action_name)
+    }
+}
+
+/// 状态机系统缓存
+/// # 作用
+/// * 收集当前帧触发的实体, 并且在下一帧进行系统处理
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct HsmActionSystemBuffer {
+    /// 当前帧状态组
+    pub curr: Vec<HsmStateContext>,
+    /// 下一帧状态组
+    pub next: Vec<HsmStateContext>,
+    /// 过滤器，用于筛选掉下一帧的状态
+    filter: HashSet<HsmStateContext>,
+}
+
+impl HsmActionSystemBuffer {
+    /// 获取当前帧状态组
+    #[inline(always)]
+    pub fn get_curr(&self) -> Vec<HsmStateContext> {
+        self.curr.clone()
+    }
+
+    /// 更新为下一个状态组
+    #[inline(always)]
+    pub fn update(&mut self) {
+        let Self { curr, next, filter } = self;
+        swap(curr, next);
+        next.clear();
+
+        if !filter.is_empty() {
+            let old_curr = std::mem::take(curr);
+            *curr = old_curr
+                .into_iter()
+                .filter(|x| !filter.contains(x))
+                .collect::<Vec<_>>();
+            filter.clear();
+        }
+    }
+
+    /// 添加一个上下文
+    #[inline(always)]
+    pub fn add(&mut self, context: HsmStateContext) {
+        self.next.push(context);
+    }
+
+    /// 添加多个上下文
+    #[inline(always)]
+    pub fn adds<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = HsmStateContext>,
+    {
+        self.next.extend(iter);
+    }
+
+    pub fn add_filter(&mut self, context: HsmStateContext) {
+        self.filter.insert(context);
+    }
+
+    /// 将当前帧添加到下一帧
+    pub fn reflow(&mut self) {
+        self.next.extend(self.curr.iter());
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.curr.is_empty()
+    }
+}
+
+impl Debug for HsmActionSystemBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HsmActionSystemBuffer[curr: {:?}, next: {:?}, filter: {:?}]",
+            self.curr, self.next, self.filter
+        )
+    }
+}
+
+/// 状态机系统运行模式
+fn action_system_run_mode<T: ScheduleLabel>(
+    action_name: Arc<String>,
+) -> impl Fn(In<Option<Vec<HsmStateContext>>>, Option<ResMut<HsmActionSystemBuffers<T>>>) {
+    move |state_contexts: In<Option<Vec<HsmStateContext>>>,
+          action_system_buffers: Option<ResMut<HsmActionSystemBuffers<T>>>| {
+        if let Some(mut buffers) = action_system_buffers
+            && let Some(buffer) = buffers.get_buffer_mut(action_name.as_str())
+            && let bevy::prelude::In(Some(state_contexts)) = state_contexts
+            && !state_contexts.is_empty()
+        {
+            buffer.adds(state_contexts);
+        }
+    }
+}
+
+fn handle_on_update_anchor<T: ScheduleLabel>(
+    action_name: Arc<String>,
+) -> impl Fn(ResMut<HsmActionSystemBuffers<T>>) {
+    move |mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+        if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
+            buffer.reflow();
+        }
+    }
+}
+
+/// 运行动作系统的条件
+fn run_action_system_condition<T: ScheduleLabel>(
+    action_name: Arc<String>,
+) -> impl Fn(Option<Res<HsmActionSystemBuffers<T>>>) -> bool {
+    move |action_system_buffer: Option<Res<HsmActionSystemBuffers<T>>>| {
+        action_system_buffer.is_some_and(|buffers| {
+            buffers
+                .get_buffer(action_name.as_str())
+                .is_some_and(|buffer| !buffer.is_empty())
+        })
+    }
+}
+
+/// 更新状态机系统缓存
+fn update_buffer<T: ScheduleLabel>(
+    action_name: Arc<String>,
+) -> impl Fn(ResMut<HsmActionSystemBuffers<T>>) {
+    move |mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+        if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
+            buffer.update();
+        }
+    }
+}
+
+/// 获取状态机系统缓存
+fn buffer_input<T: ScheduleLabel>(
+    action_name: Arc<String>,
+) -> impl Fn(Res<HsmActionSystemBuffers<T>>) -> Vec<HsmStateContext> {
+    move |action_system_buffer: Res<HsmActionSystemBuffers<T>>| -> Vec<HsmStateContext> {
+        action_system_buffer
+            .get_buffer(action_name.as_str())
+            .map_or(vec![], |buffer| buffer.get_curr())
+    }
+}
+
+pub(super) mod system_state_trait {
+    use std::sync::Arc;
+
+    use bevy::ecs::{schedule::Schedules, world::World};
+
+    use crate::system_state::IntoActionSystem;
+
+    /// 系统状态
+    pub trait ExpandScheduleLabelFuction: Send + Sync + 'static {
+        fn add_system_info(&self, world: &mut World, action_name: Arc<String>);
+
+        fn add_system<M>(
+            self,
+            schedules: &mut Schedules,
+            action_name: Arc<String>,
+            system: impl IntoActionSystem<M>,
+        );
+
+        fn add_system_anchor_point(self, schedules: &mut Schedules, action_name: Arc<String>);
+    }
+}
+
+impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction for T {
+    #[inline]
+    fn add_system_info(&self, world: &mut World, action_name: Arc<String>) {
+        let mut buffers = world.get_resource_or_init::<HsmActionSystemBuffers<T>>();
+        buffers.insert_buffer(action_name.to_string(), HsmActionSystemBuffer::default());
+
+        let buffers_id = world.register_resource::<HsmActionSystemBuffers<T>>();
+        let mut hsm_action_systems = world.get_resource_or_init::<HsmActionSystems>();
+        let label = ShortName::of::<T>();
+        let name = match action_name.is_empty() {
+            false => format!("{}:{}", label, action_name),
+            true => label.to_string(),
+        };
+
+        let get_buffer_id =
+            move |world: &mut World, f: Box<dyn FnOnce(&mut World, &mut HsmActionSystemBuffer)>| {
+                world.resource_scope::<HsmActionSystemBuffers<T>, ()>(|world, mut buffers| {
+                    let Some(buffer) = buffers.get_buffer_mut(action_name.as_str()) else {
+                        warn!(
+                            "Buffer not found in buffers map, action_name: {}",
+                            action_name
+                        );
+                        return;
+                    };
+                    f(world, buffer)
+                });
+            };
+        hsm_action_systems.insert(name, Arc::new(get_buffer_id));
+
+        let mut hsm_action_system_buffer_manager =
+            world.get_resource_or_init::<HsmActionSystemBuffersManager>();
+        hsm_action_system_buffer_manager
+            .entry(label.to_string())
+            .or_insert(buffers_id);
+    }
+
+    #[inline]
+    fn add_system<M>(
+        self,
+        schedules: &mut Schedules,
+        action_name: Arc<String>,
+        system: impl IntoActionSystem<M>,
+    ) {
+        let action_system = buffer_input::<T>(action_name.clone())
+            .pipe(system.into_system())
+            .pipe(action_system_run_mode::<T>(action_name.clone()));
+
+        let system = (
+            action_system.run_if(run_action_system_condition::<T>(action_name.clone())),
+            update_buffer::<T>(action_name),
+        )
+            .chain();
+
+        schedules.add_systems(self, system);
+    }
+
+    fn add_system_anchor_point(self, schedules: &mut Schedules, action_name: Arc<String>) {
+        let system = (
+            handle_on_update_anchor::<T>(action_name.clone())
+                .run_if(run_action_system_condition::<T>(action_name.clone())),
+            update_buffer::<T>(action_name),
+        )
+            .chain();
+
+        schedules.add_systems(self, system);
+    }
+}

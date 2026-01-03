@@ -1,0 +1,36 @@
+[package]
+name = "bevy_hsm"
+version = "0.1.0"
+edition = "2024"
+resolver = "2"
+
+[dependencies]
+bevy_hsm_macros = { path = "crates/bevy_hsm_macros" }
+bevy = { version = "0.17.3", features = [
+  "dynamic_linking",     # 加快链接速度，在 Windows 上如果没有使用LLD 链接器，可能出错
+  "bevy_dev_tools",      # 内置的开发工具
+  "shader_format_spirv", # 接受 spirv 作为 shader
+] }
+smallvec = "1.15.1"
+
+# Rust 优化有 0-3 四个级别，开发模式下默认使用 0 级优化
+[profile.dev] # 项目在开发模式下使用 1 级优化
+opt-level = 1
+[profile.dev.package."*"] # 项目依赖在开发模式下使用 3 级优化
+opt-level = 3
+
+[lints.clippy]
+type_complexity = "allow"
+
+[[example]]
+name = "switch_state"
+path = "examples/switch_state.rs"
+
+
+[[example]]
+name = "more_states"
+path = "examples/more_states.rs"
+
+[[example]]
+name = "exit_actions"
+path = "examples/exit_actions.rs"

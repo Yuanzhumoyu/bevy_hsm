@@ -1,0 +1,15 @@
+[package]
+name = "bevy_hsm_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "bevy_hsm_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+darling = "0.23.0"
+proc-macro2 = "1.0.104"
+quote = "1.0.42"
+syn = "2.0.112"
