@@ -221,7 +221,7 @@ impl CombinationCondition {
 
     pub fn and(conditions: impl IntoIterator<Item = Self>) -> Self {
         let conditions: SmallVec<[Box<CombinationCondition>; 2]> =
-            conditions.into_iter().map(|c| Box::new(c)).collect();
+            conditions.into_iter().map(Box::new).collect();
 
         if conditions.len() < 2 {
             panic!("And condition must have at least 2 conditions");
@@ -231,20 +231,20 @@ impl CombinationCondition {
     }
 
     pub fn or(conditions: impl IntoIterator<Item = Self>) -> Self {
-        let conditions: SmallVec<[Box<CombinationCondition>; 2]> = conditions
-            .into_iter()
-            .map(|c| Box::new(c))
-            .collect();
-        
+        let conditions: SmallVec<[Box<CombinationCondition>; 2]> =
+            conditions.into_iter().map(Box::new).collect();
+
         if conditions.len() < 2 {
             panic!("Or condition must have at least 2 conditions");
         }
-        
+
         CombinationCondition::Or(conditions)
     }
 
+    #[inline(always)]
+    #[allow(clippy::should_implement_trait)]
     pub fn not(condition: CombinationCondition) -> Self {
-        CombinationCondition::Not(Box::new(condition))
+        condition.add_not()
     }
 
     pub fn add_and(self, condition: CombinationCondition) -> Self {
@@ -653,7 +653,7 @@ mod test {
         assert_eq!(format!("{}", condition), "And(a, Not(b), Or(c, b))");
     }
 
-     #[test]
+    #[test]
     fn test_combination_condition_creation() {
         // 测试新的构造方法
         let and_condition = CombinationCondition::and([
@@ -661,13 +661,13 @@ mod test {
             CombinationCondition::new("b"),
         ]);
         assert_eq!(format!("{}", and_condition), "And(a, b)");
-        
+
         let or_condition = CombinationCondition::or([
             CombinationCondition::new("a"),
             CombinationCondition::new("b"),
         ]);
         assert_eq!(format!("{}", or_condition), "Or(a, b)");
-        
+
         let not_condition = CombinationCondition::not(CombinationCondition::new("a"));
         assert_eq!(format!("{}", not_condition), "Not(a)");
     }

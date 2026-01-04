@@ -11,7 +11,8 @@ use bevy::{
 };
 
 use crate::{
-    hook_system::HsmStateContext, state::HsmOnState,
+    hook_system::HsmStateContext,
+    state::{HsmOnState, HsmOnUpdateSystem},
     system_state::system_state_trait::ExpandScheduleLabelFuction,
 };
 
@@ -165,6 +166,8 @@ pub struct HsmActionSystemBuffer {
     pub next: Vec<HsmStateContext>,
     /// 过滤器，用于筛选掉下一帧的状态
     filter: HashSet<HsmStateContext>,
+    /// 拦截器，用于筛选掉当前帧的状态
+    interceptor: HashSet<HsmStateContext>,
 }
 
 impl HsmActionSystemBuffer {
@@ -177,9 +180,10 @@ impl HsmActionSystemBuffer {
     /// 更新为下一个状态组
     #[inline(always)]
     pub fn update(&mut self) {
-        let Self { curr, next, filter } = self;
+        let Self {
+            curr, next, filter, ..
+        } = self;
         swap(curr, next);
-        next.clear();
 
         if !filter.is_empty() {
             let old_curr = std::mem::take(curr);
@@ -189,11 +193,29 @@ impl HsmActionSystemBuffer {
                 .collect::<Vec<_>>();
             filter.clear();
         }
+
+        next.clear();
+    }
+
+    /// 更新拦截器
+    fn update_interceptor(&mut self) {
+        if self.curr == self.next {
+            return;
+        }
+        if self.next.is_empty() {
+            self.interceptor.extend(self.curr.iter());
+            return;
+        }
+        let iter = self.next.iter().filter(|x| !self.curr.contains(x));
+        self.interceptor.extend(iter);
     }
 
     /// 添加一个上下文
     #[inline(always)]
     pub fn add(&mut self, context: HsmStateContext) {
+        if self.interceptor.contains(&context) {
+            return;
+        }
         self.next.push(context);
     }
 
@@ -203,11 +225,22 @@ impl HsmActionSystemBuffer {
     where
         I: IntoIterator<Item = HsmStateContext>,
     {
-        self.next.extend(iter);
+        self.next
+            .extend(iter.into_iter().filter(|c| !self.interceptor.contains(c)));
     }
 
+    /// 添加一个过滤器
     pub fn add_filter(&mut self, context: HsmStateContext) {
         self.filter.insert(context);
+    }
+
+    /// 添加一个拦截器
+    pub fn add_interceptor(&mut self, context: HsmStateContext) {
+        self.interceptor.insert(context);
+    }
+
+    pub fn remove_interceptor(&mut self, context: HsmStateContext) {
+        self.interceptor.remove(&context);
     }
 
     /// 将当前帧添加到下一帧
@@ -217,6 +250,31 @@ impl HsmActionSystemBuffer {
 
     pub fn is_empty(&self) -> bool {
         self.curr.is_empty()
+    }
+
+    /// 获取缓存作用域
+    /// # 作用
+    /// * 用于在系统中获取当前状态的缓存作用域
+    /// * 可以在作用域中添加或修改状态上下文
+    /// * 作用域结束后，会自动更新缓存
+    pub fn buffer_scope(
+        world: &mut World,
+        state_id: Entity,
+        f: impl FnOnce(&mut World, &mut HsmActionSystemBuffer) + 'static,
+    ) {
+        let Some(on_update_system) = world.get::<HsmOnUpdateSystem>(state_id) else {
+            return;
+        };
+        let action_systems = world.resource::<HsmActionSystems>();
+        let Some(get_buffer_scope) = action_systems.get(on_update_system.as_str()) else {
+            warn!("未找到系统: {}", on_update_system.as_str());
+            return;
+        };
+
+        (get_buffer_scope)(
+            unsafe { world.as_unsafe_world_cell().world_mut() },
+            Box::new(f),
+        );
     }
 }
 
@@ -233,16 +291,18 @@ impl Debug for HsmActionSystemBuffer {
 /// 状态机系统运行模式
 fn action_system_run_mode<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(In<Option<Vec<HsmStateContext>>>, Option<ResMut<HsmActionSystemBuffers<T>>>) {
+) -> impl Fn(In<Option<Vec<HsmStateContext>>>, ResMut<HsmActionSystemBuffers<T>>) {
     move |state_contexts: In<Option<Vec<HsmStateContext>>>,
-          action_system_buffers: Option<ResMut<HsmActionSystemBuffers<T>>>| {
-        if let Some(mut buffers) = action_system_buffers
-            && let Some(buffer) = buffers.get_buffer_mut(action_name.as_str())
-            && let bevy::prelude::In(Some(state_contexts)) = state_contexts
+          mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+        let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) else {
+            return;
+        };
+        if let bevy::prelude::In(Some(state_contexts)) = state_contexts
             && !state_contexts.is_empty()
         {
             buffer.adds(state_contexts);
         }
+        buffer.update_interceptor();
     }
 }
 

@@ -26,6 +26,9 @@ type_complexity = "allow"
 name = "switch_state"
 path = "examples/switch_state.rs"
 
+[[example]]
+name = "flashing_light"
+path = "examples/flashing_light.rs"
 
 [[example]]
 name = "more_states"

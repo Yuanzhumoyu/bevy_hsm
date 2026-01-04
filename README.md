@@ -32,7 +32,7 @@
 
 - Enter：进入状态
 - Update：更新状态
-- Exit：退出状态
+- Parallel：退出状态
 
 ### 状态转换条件[StateTransitionCondition]
 
@@ -43,7 +43,7 @@
 
 - SuperState：父状态
 - SubStates：子状态集合
-- 
+
 ### 状态优先级[StateHistory]
 
 - 允许你通过优先级从高到低遍历顺序来管理状态转换。

@@ -2,7 +2,7 @@ use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude
 
 use crate::{
     prelude::HsmStateContext,
-    state::{HsmOnState, HsmState, StateMachines},
+    state::{HsmOnState, HsmState, StateMachines, StationaryStateMachines},
     state_condition::{HsmOnEnterCondition, HsmOnExitCondition, StateConditions},
     sub_states::SubStates,
     super_state::SuperState,
@@ -10,37 +10,49 @@ use crate::{
 
 /// 状态转换策略，用于控制状态转换行为
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StateTransitionStrategy {
-    /// 重新进入状态
-    ReEnter,
-    /// 继续更新状态
+pub struct StateTransitionStrategy {
+    /// 状态转换类型
+    pub transition_type: StateTransitionType,
+    /// 退出子状态后，父状态在更新是否延续
+    pub resurrection: bool,
+}
+
+/// 状态转换类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StateTransitionType {
+    /// 子状态嵌套转换：父状态保持激活，子状态进入和退出发生在父状态内部
+    /// ```toml
+    ///    super_state: on_enter
+    ///    sub_state: on_enter
+    ///    sub_state: on_exit
+    ///    super_state: on_exit
+    /// ```
     #[default]
-    ContinueUpdate,
-    /// 直接退出状态
-    Exit,
+    Nested,
+    /// 平级转换：父状态先退出，然后子状态进入和退出，最后可能重新进入父状态
+    /// ```toml
+    ///    super_state: on_enter
+    ///    super_state: on_exit
+    ///    sub_state: on_enter
+    ///    sub_state: on_exit
+    /// ```
+    Parallel,
 }
 
 impl StateTransitionStrategy {
-    pub fn is_reenter(&self) -> bool {
-        matches!(self, Self::ReEnter)
+    pub fn new(transition_type: StateTransitionType, resurrection: bool) -> Self {
+        Self {
+            transition_type,
+            resurrection,
+        }
     }
 
-    pub fn is_continue_update(&self) -> bool {
-        matches!(self, Self::ContinueUpdate)
+    pub fn is_enter(&self) -> bool {
+        matches!(self.transition_type, StateTransitionType::Nested)
     }
 
     pub fn is_exit(&self) -> bool {
-        matches!(self, Self::Exit)
-    }
-}
-
-impl From<StateTransitionStrategy> for HsmOnState {
-    fn from(value: StateTransitionStrategy) -> Self {
-        match value {
-            StateTransitionStrategy::ReEnter => HsmOnState::Enter,
-            StateTransitionStrategy::ContinueUpdate => HsmOnState::Update,
-            StateTransitionStrategy::Exit => HsmOnState::Exit,
-        }
+        matches!(self.transition_type, StateTransitionType::Parallel)
     }
 }
 
@@ -62,7 +74,7 @@ pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
 /// 处理进入状态
 fn handle_on_enter_states(
     mut commands: Commands,
-    query_state_machines: Query<&StateMachines>,
+    query_state_machines: Query<&StateMachines, Without<StationaryStateMachines>>,
     query_states: Query<(&HsmState, &SubStates), With<HsmState>>,
     query_sub_states: Query<(Entity, &HsmOnEnterCondition), (With<HsmState>, With<SuperState>)>,
     mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
@@ -113,7 +125,18 @@ fn handle_on_enter_states(
                     .resource_mut::<CheckOnTransitionStates>()
                     .remove(&main_body_id);
 
-                let Some(name) = world.get::<Name>(sub_state_id).map(ToString::to_string) else {
+                let transition_strategy = world
+                    .get::<StateTransitionStrategy>(curr_state_id)
+                    .copied()
+                    .unwrap();
+                let Some(curr_state_name) =
+                    world.get::<Name>(curr_state_id).map(ToString::to_string)
+                else {
+                    warn!("{} 该实体不拥有[Name]", curr_state_id);
+                    return;
+                };
+                let Some(sub_state_name) = world.get::<Name>(sub_state_id).map(ToString::to_string)
+                else {
                     warn!("{} 该实体不拥有[Name]", sub_state_id);
                     continue;
                 };
@@ -122,8 +145,20 @@ fn handle_on_enter_states(
                     warn!("{} 该实体不拥有[StateMachines]", main_body_id);
                     return;
                 };
-                state_machines.next_state = Some(name);
-                main_body.insert(HsmOnState::Enter);
+
+                let next_on_state = match transition_strategy.transition_type {
+                    StateTransitionType::Nested => {
+                        state_machines.push_history(curr_state_name);
+                        state_machines.push_next_state(sub_state_name, HsmOnState::Enter);
+                        HsmOnState::Exit
+                    }
+                    StateTransitionType::Parallel => {
+                        state_machines.push_history(sub_state_name);
+                        HsmOnState::Enter
+                    }
+                };
+
+                main_body.insert(next_on_state);
 
                 return;
             }
@@ -137,8 +172,8 @@ fn handle_on_enter_states(
 /// 处理退出状态
 fn handle_on_exit_states(
     mut commands: Commands,
-    query_state_machines: Query<&StateMachines>,
-    query_states: Query<(Entity, &HsmState, &SuperState), With<HsmState>>,
+    query_state_machines: Query<&StateMachines, Without<StationaryStateMachines>>,
+    query_states: Query<(&HsmState, &SuperState), With<HsmState>>,
     query_condtitions: Query<&HsmOnExitCondition, With<HsmState>>,
     mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
     state_conditions: Res<StateConditions>,
@@ -150,15 +185,13 @@ fn handle_on_exit_states(
             warn!("Current state not found in states map",);
             return;
         };
-        let Ok((curr_state, hsm_state, super_state)) =
-            query_states.get(curr_state_id)
-        else {
+        let Ok((hsm_state, super_state)) = query_states.get(curr_state_id) else {
             continue;
         };
         let main_body_id = hsm_state.main_body;
         let super_state_id = super_state.0;
 
-        let Ok(condition) = query_condtitions.get(curr_state) else {
+        let Ok(condition) = query_condtitions.get(curr_state_id) else {
             condition_with_empty.push(main_body_id);
             continue;
         };
@@ -181,7 +214,17 @@ fn handle_on_exit_states(
                 .resource_mut::<CheckOnTransitionStates>()
                 .remove(&main_body_id);
 
-            let Some(name) = world.get::<Name>(super_state_id).map(ToString::to_string) else {
+            let transition_strategy = world
+                .get::<StateTransitionStrategy>(super_state_id)
+                .copied()
+                .unwrap();
+            let Some(curr_state_name) = world.get::<Name>(curr_state_id).map(ToString::to_string)
+            else {
+                warn!("{} 该实体不拥有[Name]", curr_state_id);
+                return;
+            };
+            let Some(super_state_name) = world.get::<Name>(super_state_id).map(ToString::to_string)
+            else {
                 warn!("{} 该实体不拥有[Name]", super_state_id);
                 return;
             };
@@ -191,7 +234,16 @@ fn handle_on_exit_states(
                 return;
             };
 
-            state_machines.next_state = Some(name);
+            state_machines.push_history(curr_state_name);
+            if transition_strategy.is_enter() {
+                state_machines.push_next_state(
+                    super_state_name,
+                    match transition_strategy.resurrection {
+                        true => HsmOnState::Update,
+                        false => HsmOnState::Enter,
+                    },
+                );
+            }
             main_body.insert(HsmOnState::Exit);
         });
     }

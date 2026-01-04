@@ -48,8 +48,8 @@ impl Plugin for HsmPlugin {
 
 pub mod prelude {
     pub use crate::{
-        HsmPlugin, hook_system::*, on_transition::StateTransitionStrategy, priority::*, state::*,
-        state_condition::*, sub_states::*, super_state::*, system_state::*,
+        HsmPlugin, hook_system::*, on_transition::*, priority::*, state::*, state_condition::*,
+        sub_states::*, super_state::*, system_state::*,
     };
 
     pub use crate::bevy_hsm_macros::combination_condition;
