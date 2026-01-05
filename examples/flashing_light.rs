@@ -57,7 +57,7 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("red"),
             HsmState::new(state_machines),
-            StateTransitionStrategy::new(StateTransitionType::Nested,false),
+            StateTransitionStrategy::Nested(false),
             HsmOnUpdateSystem::new("Update:debug_light"),
             HsmOnEnterSystem::new("debug_on_enter"),
             HsmOnExitSystem::new("debug_on_exit"),

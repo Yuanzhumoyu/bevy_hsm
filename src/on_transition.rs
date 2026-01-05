@@ -9,17 +9,8 @@ use crate::{
 };
 
 /// 状态转换策略，用于控制状态转换行为
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct StateTransitionStrategy {
-    /// 状态转换类型
-    pub transition_type: StateTransitionType,
-    /// 退出子状态后，父状态在更新是否延续
-    pub resurrection: bool,
-}
-
-/// 状态转换类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StateTransitionType {
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateTransitionStrategy {
     /// 子状态嵌套转换：父状态保持激活，子状态进入和退出发生在父状态内部
     /// ```toml
     ///    super_state: on_enter
@@ -27,8 +18,9 @@ pub enum StateTransitionType {
     ///    sub_state: on_exit
     ///    super_state: on_exit
     /// ```
-    #[default]
-    Nested,
+    ///
+    /// 接受bool值，表示退出sub_state后super_state中on_update是否延续(当状态处于截流时,不会触发)
+    Nested(bool),
     /// 平级转换：父状态先退出，然后子状态进入和退出，最后可能重新进入父状态
     /// ```toml
     ///    super_state: on_enter
@@ -40,19 +32,18 @@ pub enum StateTransitionType {
 }
 
 impl StateTransitionStrategy {
-    pub fn new(transition_type: StateTransitionType, resurrection: bool) -> Self {
-        Self {
-            transition_type,
-            resurrection,
-        }
+    pub fn is_nested(&self) -> bool {
+        matches!(self, Self::Nested(_))
     }
 
-    pub fn is_enter(&self) -> bool {
-        matches!(self.transition_type, StateTransitionType::Nested)
+    pub fn is_parallel(&self) -> bool {
+        matches!(self, Self::Parallel)
     }
+}
 
-    pub fn is_exit(&self) -> bool {
-        matches!(self.transition_type, StateTransitionType::Parallel)
+impl Default for StateTransitionStrategy {
+    fn default() -> Self {
+        Self::Nested(false)
     }
 }
 
@@ -146,13 +137,13 @@ fn handle_on_enter_states(
                     return;
                 };
 
-                let next_on_state = match transition_strategy.transition_type {
-                    StateTransitionType::Nested => {
+                let next_on_state = match transition_strategy {
+                    StateTransitionStrategy::Nested(_resurrection) => {
                         state_machines.push_history(curr_state_name);
                         state_machines.push_next_state(sub_state_name, HsmOnState::Enter);
                         HsmOnState::Exit
                     }
-                    StateTransitionType::Parallel => {
+                    StateTransitionStrategy::Parallel => {
                         state_machines.push_history(sub_state_name);
                         HsmOnState::Enter
                     }
@@ -235,10 +226,10 @@ fn handle_on_exit_states(
             };
 
             state_machines.push_history(curr_state_name);
-            if transition_strategy.is_enter() {
+            if let StateTransitionStrategy::Nested(resurrection) = transition_strategy {
                 state_machines.push_next_state(
                     super_state_name,
-                    match transition_strategy.resurrection {
+                    match resurrection {
                         true => HsmOnState::Update,
                         false => HsmOnState::Enter,
                     },
