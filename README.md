@@ -32,7 +32,7 @@
 
 - Enter：进入状态
 - Update：更新状态
-- Parallel：退出状态
+- Exit：退出状态
 
 ### 状态转换条件[StateTransitionCondition]
 
