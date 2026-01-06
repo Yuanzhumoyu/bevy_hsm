@@ -1,4 +1,4 @@
-use bevy::{platform::collections::HashMap, prelude::*};
+use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
 fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
@@ -40,23 +40,22 @@ fn register_condition(
 }
 
 fn setup(mut commands: Commands) {
+    let start_state_id = commands.spawn_empty().id();
     let state_machines = commands
-        .spawn(StateMachines::new(HashMap::new(),10, "OFF"))
+        .spawn(StateMachines::new(Vec::new(), 10, start_state_id))
         .id();
+
+    commands.entity(start_state_id).insert((
+        Name::new("OFF"),
+        HsmState::new(state_machines),
+        HsmOnEnterCondition::new("is_off"),
+        HsmOnEnterSystem::new("debug_on_enter"),
+        HsmOnExitSystem::new("debug_on_exit"),
+    ));
 
     let id = commands
         .spawn((
-            Name::new("OFF"),
-            HsmState::new(state_machines),
-            HsmOnEnterCondition::new("is_off"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
-        ))
-        .id();
-
-    let id = commands
-        .spawn((
-            SuperState(id),
+            SuperState(start_state_id),
             Name::new("ON1"),
             HsmState::new(state_machines),
             HsmOnEnterCondition::new("is_up"),
@@ -97,7 +96,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugins(HsmPlugin::default());
-    
+
     app.add_systems(Startup, (register_condition, setup).chain());
     app.run();
 }

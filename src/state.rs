@@ -2,7 +2,6 @@ use std::{collections::VecDeque, fmt::Debug, hash::Hash};
 
 use bevy::{
     ecs::{lifecycle::HookContext, schedule::ScheduleLabel, world::DeferredWorld},
-    platform::collections::HashMap,
     prelude::*,
 };
 
@@ -29,7 +28,7 @@ use crate::{
 #[derive(Component, Clone, PartialEq, Eq)]
 pub struct StateMachines {
     /// 状态映射表
-    pub states: HashMap<String, Entity>,
+    states: Vec<Entity>,
     /// 历史记录
     ///
     /// 记录实体的状态转换历史，用于回溯状态
@@ -38,16 +37,11 @@ pub struct StateMachines {
     /// 下一个状态
     ///
     /// 实体下一个要转换到的状态
-    next_state: VecDeque<(String, HsmOnState)>,
+    next_state: VecDeque<(Entity, HsmOnState)>,
 }
 
 impl StateMachines {
-    pub fn new(
-        states: HashMap<String, Entity>,
-        history_len: usize,
-        current_state: impl Into<String>,
-    ) -> Self {
-        let current_state = current_state.into();
+    pub fn new(states: Vec<Entity>, history_len: usize, current_state: Entity) -> Self {
         let mut history = StateHistory::new(history_len);
         history.push(current_state);
         Self {
@@ -57,42 +51,36 @@ impl StateMachines {
         }
     }
 
+    pub fn states(&self) -> &[Entity] {
+        &self.states
+    }
+
     pub fn curr_state_id(&self) -> Option<Entity> {
-        self.history
-            .get_current()
-            .and_then(|s| self.states.get(s))
-            .copied()
-    }
-
-    pub fn next_state_id(&self) -> Option<Entity> {
-        self.next_state
-            .front()
-            .and_then(|(s, _)| self.states.get(s).copied())
-    }
-
-    /// 获取当前状态名称
-    pub fn current_state_name(&self) -> Option<&str> {
         self.history.get_current()
     }
 
-    pub fn push_history(&mut self, state_name: impl Into<String>) {
-        self.history.push(state_name.into());
+    pub fn next_state_id(&self) -> Option<Entity> {
+        self.next_state.front().map(|(id, _)| *id)
+    }
+
+    pub fn push_history(&mut self, state: Entity) {
+        self.history.push(state);
     }
 
     /// 添加下一个状态
-    pub fn push_next_state(&mut self, state_name: impl Into<String>, on_state: HsmOnState) {
-        self.next_state.push_front((state_name.into(), on_state));
+    pub fn push_next_state(&mut self, state: Entity, on_state: HsmOnState) {
+        self.next_state.push_front((state, on_state));
     }
 
-    pub fn get_next_state(&self) -> Option<&str> {
-        self.next_state.front().map(|(s, _)| s.as_str())
+    pub fn get_next_state(&self) -> Option<Entity> {
+        self.next_state.front().map(|(id, _)| *id)
     }
 
     pub fn get_next_state_on_state(&self) -> Option<HsmOnState> {
         self.next_state.front().map(|(_, on_state)| *on_state)
     }
 
-    pub fn pop_next_state(&mut self) -> Option<(String, HsmOnState)> {
+    pub fn pop_next_state(&mut self) -> Option<(Entity, HsmOnState)> {
         self.next_state.pop_front()
     }
 
@@ -105,10 +93,7 @@ impl StateMachines {
 
     /// 获取上一个状态的ID
     pub fn prev_state_id(&self) -> Option<Entity> {
-        self.history
-            .get_previous()
-            .and_then(|s| self.states.get(s))
-            .copied()
+        self.history.get_previous()
     }
 
     /// 检查是否有上一个状态
@@ -117,7 +102,7 @@ impl StateMachines {
     }
 
     /// 获取状态历史记录
-    pub fn get_history(&self) -> Vec<&str> {
+    pub fn get_history(&self) -> Vec<Entity> {
         self.history.get_history()
     }
 }
@@ -260,7 +245,7 @@ impl HsmOnState {
                 let world = unsafe { world.as_unsafe_world_cell().world_mut() };
                 HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
                     buff.remove_interceptor(state_context);
-                                        
+
                     buff.add_filter(state_context);
                 });
 
@@ -310,20 +295,11 @@ impl HsmState {
     }
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
+        let state_id = hook_context.entity;
         let state_machines_id = world
-            .get::<HsmState>(hook_context.entity)
+            .get::<HsmState>(state_id)
             .map(|s| s.main_body)
             .unwrap();
-        let Some(name) = world
-            .get::<Name>(hook_context.entity)
-            .map(ToString::to_string)
-        else {
-            warn!(
-                "State entity<{}> does not have Name component",
-                hook_context.entity
-            );
-            return;
-        };
         let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machines_id) else {
             warn!(
                 "Main body entity<{:?}> does not have StateMachines component",
@@ -331,31 +307,23 @@ impl HsmState {
             );
             return;
         };
-        match state_machines.states.get(&name) {
-            Some(old_entity) => {
-                warn!("状态<{}:{}> 已存在", name, old_entity);
+
+        match state_machines.states.binary_search(&state_id) {
+            Ok(old_index) => {
+                warn!("状态<{}> 已存在", state_machines.states[old_index]);
             }
-            None => {
-                state_machines.states.insert(name, hook_context.entity);
+            Err(index) => {
+                state_machines.states.insert(index, state_id);
             }
         }
     }
 
     fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
+        let state_id = hook_context.entity;
         let state_machines_id = world
-            .get::<HsmState>(hook_context.entity)
+            .get::<HsmState>(state_id)
             .map(|s| s.main_body)
             .unwrap();
-        let Some(name) = world
-            .get::<Name>(hook_context.entity)
-            .map(ToString::to_string)
-        else {
-            warn!(
-                "State entity<{}> does not have Name component",
-                hook_context.entity
-            );
-            return;
-        };
         let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machines_id) else {
             warn!(
                 "Main body entity<{:?}> does not have StateMachines component",
@@ -363,7 +331,18 @@ impl HsmState {
             );
             return;
         };
-        state_machines.states.remove(&name);
+
+        match state_machines.states.binary_search(&state_id) {
+            Ok(index) => {
+                state_machines.states.remove(index);
+            }
+            Err(_) => {
+                warn!(
+                    "State<{:?}> does not exist in StateMachines<{:?}>",
+                    state_id, state_machines_id
+                );
+            }
+        }
     }
 }
 

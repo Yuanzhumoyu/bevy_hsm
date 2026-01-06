@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 
+use bevy::ecs::entity::Entity;
+
 /// 状态历史记录
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateHistory {
-    history: VecDeque<String>,
+    history: VecDeque<Entity>,
     max_size: usize,
 }
 
@@ -16,36 +18,36 @@ impl StateHistory {
     }
 
     /// 推送一个状态到历史记录中
-    pub fn push(&mut self, state: impl Into<String>) {
+    pub fn push(&mut self, state: Entity) {
         if self.history.len() >= self.max_size {
             self.history.pop_front();
         }
-        self.history.push_back(state.into());
+        self.history.push_back(state);
     }
 
     /// 获取状态历史记录
-    pub fn get_history(&self) -> Vec<&str> {
-        self.history.iter().map(|s| s.as_str()).collect()
+    pub fn get_history(&self) -> Vec<Entity> {
+        self.history.iter().copied().collect()
     }
 
     /// 获取当前状态
-    pub fn get_current(&self) -> Option<&str> {
-        self.history.back().map(|s| s.as_str())
+    pub fn get_current(&self) -> Option<Entity> {
+        self.history.back().copied()
     }
 
     /// 获取上一个状态
-    pub fn get_previous(&self) -> Option<&str> {
+    pub fn get_previous(&self) -> Option<Entity> {
         if self.history.len() < 2 {
             None
         } else {
-            self.history.iter().rev().nth(1).map(|s| s.as_str())
+            self.history.iter().rev().nth(1).copied()
         }
     }
 
     /// 获取指定索引的历史状态 (0是当前状态，1是上一个状态，等等)
-    pub fn get_at(&self, index: usize) -> Option<&str> {
+    pub fn get_at(&self, index: usize) -> Option<Entity> {
         if index < self.history.len() {
-            self.history.iter().rev().nth(index).map(|s| s.as_str())
+            self.history.iter().rev().nth(index).copied()
         } else {
             None
         }

@@ -120,17 +120,6 @@ fn handle_on_enter_states(
                     .get::<StateTransitionStrategy>(curr_state_id)
                     .copied()
                     .unwrap();
-                let Some(curr_state_name) =
-                    world.get::<Name>(curr_state_id).map(ToString::to_string)
-                else {
-                    warn!("{} 该实体不拥有[Name]", curr_state_id);
-                    return;
-                };
-                let Some(sub_state_name) = world.get::<Name>(sub_state_id).map(ToString::to_string)
-                else {
-                    warn!("{} 该实体不拥有[Name]", sub_state_id);
-                    continue;
-                };
                 let mut main_body = world.entity_mut(main_body_id);
                 let Some(mut state_machines) = main_body.get_mut::<StateMachines>() else {
                     warn!("{} 该实体不拥有[StateMachines]", main_body_id);
@@ -139,12 +128,12 @@ fn handle_on_enter_states(
 
                 let next_on_state = match transition_strategy {
                     StateTransitionStrategy::Nested(_resurrection) => {
-                        state_machines.push_history(curr_state_name);
-                        state_machines.push_next_state(sub_state_name, HsmOnState::Enter);
+                        state_machines.push_history(curr_state_id);
+                        state_machines.push_next_state(sub_state_id, HsmOnState::Enter);
                         HsmOnState::Exit
                     }
                     StateTransitionStrategy::Parallel => {
-                        state_machines.push_history(sub_state_name);
+                        state_machines.push_history(sub_state_id);
                         HsmOnState::Enter
                     }
                 };
@@ -209,26 +198,16 @@ fn handle_on_exit_states(
                 .get::<StateTransitionStrategy>(super_state_id)
                 .copied()
                 .unwrap();
-            let Some(curr_state_name) = world.get::<Name>(curr_state_id).map(ToString::to_string)
-            else {
-                warn!("{} 该实体不拥有[Name]", curr_state_id);
-                return;
-            };
-            let Some(super_state_name) = world.get::<Name>(super_state_id).map(ToString::to_string)
-            else {
-                warn!("{} 该实体不拥有[Name]", super_state_id);
-                return;
-            };
             let mut main_body = world.entity_mut(main_body_id);
             let Some(mut state_machines) = main_body.get_mut::<StateMachines>() else {
                 warn!("{} 该实体不拥有[StateMachines]", main_body_id);
                 return;
             };
 
-            state_machines.push_history(curr_state_name);
+            state_machines.push_history(curr_state_id);
             if let StateTransitionStrategy::Nested(resurrection) = transition_strategy {
                 state_machines.push_next_state(
-                    super_state_name,
+                    super_state_id,
                     match resurrection {
                         true => HsmOnState::Update,
                         false => HsmOnState::Enter,

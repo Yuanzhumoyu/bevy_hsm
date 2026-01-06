@@ -1,4 +1,4 @@
-use bevy::{platform::collections::HashMap, prelude::*};
+use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
 fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
@@ -49,23 +49,23 @@ fn register_condition(
 }
 
 fn setup(mut commands: Commands) {
+    let start_state_id = commands.spawn_empty().id();
     let state_machines = commands
-        .spawn(StateMachines::new(HashMap::new(), 10, "red"))
+        .spawn(StateMachines::new(Vec::new(), 10, start_state_id))
         .id();
 
-    let id1 = commands
-        .spawn((
+    commands.entity(start_state_id)
+        .insert((
             Name::new("red"),
             HsmState::new(state_machines),
             StateTransitionStrategy::Nested(false),
             HsmOnUpdateSystem::new("Update:debug_light"),
             HsmOnEnterSystem::new("debug_on_enter"),
             HsmOnExitSystem::new("debug_on_exit"),
-        ))
-        .id();
+        ));
 
     commands.spawn((
-        SuperState(id1),
+        SuperState(start_state_id),
         Name::new("yellow"),
         HsmState::new(state_machines),
         HsmOnUpdateSystem::new("Update:debug_light"),

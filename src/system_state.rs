@@ -124,7 +124,7 @@ impl HsmActionSystems {
 
 /// 状态机系统缓存管理器
 /// * Key: `ScheduleLabel`
-/// * Value: `HsmActionSystemBuffer<T: ScheduleLabel>` 的 `ComponentId`
+/// * Value: `HsmActionSystemBuffers<T: ScheduleLabel>` 的 `ComponentId`
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub(super) struct HsmActionSystemBuffersManager(HashMap<String, ComponentId>);
 
