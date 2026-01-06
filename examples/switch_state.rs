@@ -66,9 +66,7 @@ fn register_condition(
 
 fn startup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machines = commands
-        .spawn(StateMachines::new(Vec::new(), 10, start_state_id))
-        .id();
+    let state_machines = commands.spawn(StateMachines::new(10, start_state_id)).id();
 
     commands.entity(start_state_id).insert((
         Name::new("起点"),

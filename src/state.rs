@@ -41,18 +41,22 @@ pub struct StateMachines {
 }
 
 impl StateMachines {
-    pub fn new(states: Vec<Entity>, history_len: usize, current_state: Entity) -> Self {
+    pub fn new(history_len: usize, current_state: Entity) -> Self {
         let mut history = StateHistory::new(history_len);
         history.push(current_state);
         Self {
-            states,
             history,
+            states: Vec::new(),
             next_state: VecDeque::new(),
         }
     }
 
     pub fn states(&self) -> &[Entity] {
         &self.states
+    }
+
+    pub fn contains(&self, state: Entity) -> bool {
+        self.states.binary_search(&state).is_ok()
     }
 
     pub fn curr_state_id(&self) -> Option<Entity> {
