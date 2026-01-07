@@ -12,7 +12,9 @@ use crate::{
     prelude::StateEntity, priority::StatePriority, state::HsmState, sub_states::SubStates,
 };
 
-/// 用于存储父状态
+/// 用于存储父状态的组件
+///
+/// Component used to store parent state
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 #[require(Name = Name::new("state"))]
 #[component(on_insert=<Self as Relationship>::on_insert, on_replace=<Self as Relationship>::on_replace)]

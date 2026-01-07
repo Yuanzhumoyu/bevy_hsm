@@ -13,11 +13,16 @@ pub struct SubStates {
 
 impl SubStates {
     /// 添加子状态
-    ///   #  参数
+    ///
+    /// Add Child states
+    ///  #  参数\Parameters
     ///  * `entity`  - 状态实体
-    ///  # 返回值
+    ///  - `entity`  - State entity
+    ///  # 返回值\Return Value
     ///  * `Some(old_priority)` -  如果状态已经存在，则返回旧的优先级
+    ///  - `Some(new_priority)` -  If state already exists, returns the old priority
     ///  * `None` -  如果状态不存在，则返回None
+    ///  -  `None` -  If state doesn't exist, returns None
     pub(super) fn add(&mut self, entity: StateEntity) -> Option<u32> {
         let Self { collection } = self;
         match collection.0.binary_search(&entity) {
@@ -37,11 +42,16 @@ impl SubStates {
     }
 
     ///  移除一个状态
-    ///  #  参数
+    ///
+    ///  Remove a state
+    ///  #  参数\ Parameters
     ///  * `name`  - 状态名称
-    ///  # 返回值
+    ///  - `name`  - Staet name
+    ///  # 返回值\  Return Value
     ///  * `Some(entity)` -  移除返回状态的实体
+    ///  - `Some(entity)` -  Returns the removed state entity
     ///  * `None` -  没有这个状态
+    ///  - `None` -  No such state
     pub(super) fn remove(&mut self, entity: &StateEntity) -> Option<Entity> {
         let Self { collection } = self;
         let Ok(index) = collection.0.binary_search(entity) else {
@@ -121,6 +131,9 @@ impl Debug for StateEntity {
     }
 }
 
+///  用于存储状态实体的集合, 为了对接[RelationshipTarget]::Collection, 其实现的[RelationshipSourceCollection]api无用
+///
+///  Used to store a collection of state entities, to interface with [RelationshipTarget]::Collection, the [RelationshipSourceCollection] api it implements is useless
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StateEntityCollection(pub Vec<StateEntity>);
 

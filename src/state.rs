@@ -13,30 +13,43 @@ use crate::{
     priority::StatePriority,
 };
 
-/// 状态机
-///
-/// 管理实体的状态转换，包括当前状态、下一状态以及状态映射表
-///
-/// # 示例
+/// 状态机\State Machines
+/// # 作用\Effect
+/// * 管理实体的状态转换，包括当前状态、下一状态以及状态映射表
+/// - Manages entity state transitions, including current state, next state, and state mapping table
+/// # 示例\Example
 ///
 /// ```rust
-/// # use bevy_hsm::StateMachines;
-/// # use bevy::platform::collections::HashMap;
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
 ///
-/// let mut state_machines = StateMachines::new(HashMap::new(), "初始状态");
+/// # fn  foo(mut commands: Commands) {
+/// let start_state_id = commands.spawn_empty().id();
+/// let state_machines = StateMachines::new(10, start_state_id);
+/// # }
 /// ```
 #[derive(Component, Clone, PartialEq, Eq)]
 pub struct StateMachines {
     /// 状态映射表
+    /// State mapping table
     states: Vec<Entity>,
     /// 历史记录
     ///
+    /// History
+    ///
     /// 记录实体的状态转换历史，用于回溯状态
     /// 最后一个状态始终为最新的状态
+    ///
+    /// Records entity's state transition history, used for state backtracking
+    /// The last state is always the most recent state
     pub history: StateHistory,
     /// 下一个状态
     ///
+    /// Next state
+    ///
     /// 实体下一个要转换到的状态
+    ///
+    /// Next state to transition to for the entity
     next_state: VecDeque<(Entity, HsmOnState)>,
 }
 
@@ -51,43 +64,72 @@ impl StateMachines {
         }
     }
 
+    /// 获取状态列表
+    ///
+    /// Get state list
     pub fn states(&self) -> &[Entity] {
         &self.states
     }
 
+    /// 检查状态是否存在
+    ///
+    /// Check if state exists
     pub fn contains(&self, state: Entity) -> bool {
         self.states.binary_search(&state).is_ok()
     }
 
+    /// 获取当前状态的ID
+    ///
+    /// Get the ID of the current state
     pub fn curr_state_id(&self) -> Option<Entity> {
         self.history.get_current()
     }
 
+    /// 获取下一个状态的ID
+    ///
+    /// Get the ID of the next state
     pub fn next_state_id(&self) -> Option<Entity> {
         self.next_state.front().map(|(id, _)| *id)
     }
 
+    /// 添加历史记录
+    ///
+    /// Add history record
     pub fn push_history(&mut self, state: Entity) {
         self.history.push(state);
     }
 
     /// 添加下一个状态
+    ///
+    /// Add next state
     pub fn push_next_state(&mut self, state: Entity, on_state: HsmOnState) {
         self.next_state.push_front((state, on_state));
     }
 
+    /// 获取下一个状态的ID
+    ///
+    /// Get the ID of the next state
     pub fn get_next_state(&self) -> Option<Entity> {
         self.next_state.front().map(|(id, _)| *id)
     }
 
+    /// 获取下一个状态的OnState
+    ///
+    /// Get the OnState of the next state
     pub fn get_next_state_on_state(&self) -> Option<HsmOnState> {
         self.next_state.front().map(|(_, on_state)| *on_state)
     }
 
+    /// 弹出下一个状态
+    ///
+    /// Pop next state
     pub fn pop_next_state(&mut self) -> Option<(Entity, HsmOnState)> {
         self.next_state.pop_front()
     }
 
+    /// 更新状态
+    ///
+    /// Update state
     pub fn update(&mut self) {
         let Some((curr_state, _)) = self.next_state.pop_front() else {
             return;
@@ -96,16 +138,22 @@ impl StateMachines {
     }
 
     /// 获取上一个状态的ID
+    ///
+    /// Get the ID of the previous state
     pub fn prev_state_id(&self) -> Option<Entity> {
         self.history.get_previous()
     }
 
     /// 检查是否有上一个状态
+    ///
+    /// Check if there is a previous state
     pub fn has_prev_state(&self) -> bool {
         self.prev_state_id().is_some()
     }
 
     /// 获取状态历史记录
+    ///
+    /// Get state history
     pub fn get_history(&self) -> Vec<Entity> {
         self.history.get_history()
     }
@@ -121,9 +169,11 @@ impl Debug for StateMachines {
     }
 }
 
-/// # 状态机组件
-/// - 用于静止所在状态机的状态
-/// - 如果存在, 系统不会在运行状态机的状态转换
+/// # 状态机组件\State Machine Component
+/// * 用于静止拥有该组件的状态机
+/// - Used for state machines that statically possess this component
+/// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的OnEnter、OnExit、OnUpdate系统
+/// - If it exists, the OnEnter, OnExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[component(on_insert = Self::on_insert,on_remove = Self::on_remove)]
 pub struct StationaryStateMachines;
@@ -166,16 +216,18 @@ impl StationaryStateMachines {
     }
 }
 
-/// 用于检测状态变化，实时更新状态
+/// # 状态变化检测组件\State Change Detection Component
+/// * 用于检测状态变化，实时更新状态机的状态
+/// - Used for detecting state changes and updating the state machine's state in real time
 #[derive(Component, ScheduleLabel, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[component(immutable, storage = "SparseSet", on_insert = Self::on_insert)]
 pub enum HsmOnState {
-    /// 进入
+    /// 进入状态\Enter State
     #[default]
     Enter,
-    /// 更新
+    /// 更新状态\Update State
     Update,
-    /// 退出
+    /// 退出状态\Exit State
     Exit,
 }
 
@@ -285,7 +337,9 @@ impl HsmOnState {
     }
 }
 
-/// 标记状态的组件，需要绑定[`StateMachines`]所在实体的id
+/// # 状态组件\State Component
+/// * 标记状态的组件，需要绑定[`StateMachines`]所在实体的id
+/// - Used to mark a state component, which requires the id of the entity that has the [`StateMachines`] component
 #[derive(Component, ScheduleLabel, Hash, Debug, Clone, PartialEq, Eq)]
 #[component(immutable, on_insert = Self::on_insert, on_remove = Self::on_remove)]
 #[require(StatePriority, StateTransitionStrategy)]
@@ -351,7 +405,9 @@ impl HsmState {
 }
 
 /// 进入状态前调用
-/// # 示例
+///
+/// Enter state before calling
+/// # 示例\Example
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -369,10 +425,16 @@ impl HsmOnEnterSystem {
 }
 
 /// 更新状态时调用
-/// # 使用方法
-///  由于注册动作系统时，通过[`ScheduleLabel`]来确定系统调用时间，
-///  所以在使用对应[`ScheduleLabel`]的系统时，需要特定格式。
-/// - 正常格式: `ScheduleLabel` + `:` + `方法名称`
+///
+/// Update state when calling
+/// # 使用方法\Usage
+///  由于注册动作系统时，通过[ScheduleLabel]来确定系统调用时间，
+///  所以在使用对应[ScheduleLabel]的系统时，需要特定格式。
+///
+///  When registering an action system, the system call time is determined through [ScheduleLabel],
+///  Therefore, when using the system corresponding to [ScheduleLabel], a specific format is required.
+/// * 正常格式: `ScheduleLabel` + `:` + `方法名称`
+/// - Normal format: `ScheduleLabel` + `:` + `method name`
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -387,7 +449,8 @@ impl HsmOnEnterSystem {
 /// commands.spawn(HsmOnUpdateSystem::new("Update:add"));
 /// # }
 /// ```
-/// - 特殊格式: `ScheduleLabel`
+/// * 特殊格式: `ScheduleLabel`
+/// - Special format: `ScheduleLabel`
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -411,7 +474,9 @@ impl HsmOnUpdateSystem {
 }
 
 /// 退出状态后调用
-/// # 示例
+///
+/// Exit state after calling
+/// # 示例\Example
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;

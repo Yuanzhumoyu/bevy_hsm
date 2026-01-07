@@ -83,7 +83,7 @@ fn setup(mut commands: Commands) {
         .insert((Name::new("More States"), HsmOnState::default()));
 }
 
-/// # 流程图
+/// # 流程图\Flowchart
 ///    [`OFF`]
 ///
 ///  is_up↓↑is_dowm

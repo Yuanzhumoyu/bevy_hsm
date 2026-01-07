@@ -22,7 +22,9 @@ impl Count {
             println!("{} 计数: {}", name, count.0);
         }
         // 当返回值为 Some 时, 状态会延长更新
+        // When return value is Some, the state will continue updating
         // 当返回值为 None 时, 状态则会截流, 后续的状态更新会被忽略
+        // When return value is None, the state will be intercepted and subsequent updates will be ignored
         Some(states.0)
         // None
     }
@@ -58,9 +60,9 @@ fn register_condition(
     let id = commands.register_system(Switch::condition_with_close);
     action_systems.insert("is_close", id);
 
-    let id = commands.register_system(debug_on_state("进入状态"));
+    let id = commands.register_system(debug_on_state("Entering state."));
     on_enter_disposable_systems.insert("debug_on_enter", id);
-    let id = commands.register_system(debug_on_state("退出状态"));
+    let id = commands.register_system(debug_on_state("Exiting state."));
     on_exit_disposable_systems.insert("debug_on_exit", id);
 }
 
@@ -69,7 +71,7 @@ fn startup(mut commands: Commands) {
     let state_machines = commands.spawn(StateMachines::new(10, start_state_id)).id();
 
     commands.entity(start_state_id).insert((
-        Name::new("起点"),
+        Name::new("Start"),
         HsmState::new(state_machines),
         HsmOnEnterSystem::new("debug_on_enter"),
         HsmOnExitSystem::new("debug_on_exit"),
@@ -77,7 +79,7 @@ fn startup(mut commands: Commands) {
 
     commands.spawn((
         SuperState(start_state_id),
-        Name::new("计数"),
+        Name::new("Counter"),
         HsmState::new(state_machines),
         HsmOnEnterCondition::new("is_open"),
         HsmOnExitCondition::new("is_close"),
@@ -86,10 +88,10 @@ fn startup(mut commands: Commands) {
         HsmOnExitSystem::new("debug_on_exit"),
     ));
 
-    println!("状态机: {:?}", state_machines);
+    println!("State Machines: {:?}", state_machines);
 
     commands.entity(state_machines).insert((
-        Name::new("开关计数"),
+        Name::new("Switch Counter"),
         Count(0),
         HsmOnState::default(),
         Switch::Close,
@@ -108,17 +110,21 @@ fn key_event(input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Switch>) {
     }
 }
 ///
-/// # 状态机示例
+/// # 状态机示例\State Machine Example
 ///
 /// 本示例演示了如何使用 bevy_hsm 库创建一个简单的状态机
 ///
-/// ## 实体说明
+/// This example demonstrates how to use the bevy_hsm library to create a simple state machine
+/// ## 实体说明\Entity Description
 /// * [Count] - 计数器组件，用于在"计数"状态下增加计数
+/// - [Count] - Counter component, used to increase the counter in the "counting" state
 /// * [StateMachines] - 状态机组件，管理当前状态和状态转换
+/// - [StateMachines] - State machine component, managing the current state and state transitions
 ///
 ///
-/// ## 状态转换
-/// [起点] <-> [计数] - 通过切换开关状态来在两个状态间转换
+/// ## 状态转换\State Transition
+/// [Start] <-> [Counter] - 通过切换开关状态来在两个状态间转换
+/// [Start] <-> [Counter] - Transition between two states by switching the switch status
 ///
 fn main() {
     let mut app = App::new();

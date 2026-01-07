@@ -13,7 +13,7 @@ fn debug_light(
     query: Query<&Name>,
 ) -> Option<Vec<HsmStateContext>> {
     for light in query.iter_many(states.0.iter().map(|a| a.state)) {
-        println!("当前灯: {}", light);
+        println!("Current light: {}", light);
     }
     None
 }
@@ -42,9 +42,9 @@ fn register_condition(
     let id = commands.register_system(LightTimer::light_timer);
     action_systems.insert("light_timer", id);
 
-    let id = commands.register_system(debug_on_state("进入状态"));
+    let id = commands.register_system(debug_on_state("Entering state."));
     on_enter_disposable_systems.insert("debug_on_enter", id);
-    let id = commands.register_system(debug_on_state("退出状态"));
+    let id = commands.register_system(debug_on_state("Exiting state."));
     on_exit_disposable_systems.insert("debug_on_exit", id);
 }
 
@@ -72,10 +72,10 @@ fn setup(mut commands: Commands) {
         HsmOnExitCondition::new("light_timer"),
     ));
 
-    println!("状态机: {:?}", state_machines);
+    println!("State Machines: {:?}", state_machines);
 
     commands.entity(state_machines).insert((
-        Name::new("闪烁灯暂停"),
+        Name::new("Blinking Light Paused"),
         HsmOnState::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),
     ));
@@ -91,11 +91,11 @@ fn blinking_pause(
         entity.queue(|mut entity: EntityWorldMut<'_>| {
             match entity.get::<StationaryStateMachines>().is_some() {
                 true => {
-                    info!("恢复闪烁灯");
+                    info!("Resuming blinking light");
                     entity.remove::<StationaryStateMachines>();
                 }
                 false => {
-                    info!("暂停闪烁灯");
+                    info!("Pausing blinking light");
                     entity.insert(StationaryStateMachines);
                 }
             };
@@ -104,15 +104,28 @@ fn blinking_pause(
 }
 
 ///
-/// # 状态机示例
+/// # 状态机示例\State Machine Example
 ///
 /// 本示例演示了如何使用 bevy_hsm 库创建一个具有暂停功能的状态机
 ///
-/// ## 状态转换
-/// [red] <-> [yellow] - 通过计时器来在两个状态间转换
+/// This example demonstrates how to use the bevy_hsm library to create a state machine with a pause feature.
 ///
-/// ## 状态机暂停
+/// ## 实体说明
+/// * [LightTimer] - 计时器组件，用于控制灯的闪烁
+/// - [LightTimer] - Timer component used to control the blinking
+/// * [StateMachines] - 状态机组件，管理当前状态和状态转换
+/// - [StateMachines] - State machine component, managing the current state and state transitions
+/// * [StationaryStateMachines] - 状态机组件，用于暂停状态机
+/// - [StationaryStateMachines] - State machine component used to pause the state machine
+///
+/// ## 状态转换\State Transitions
+/// [red] <-> [yellow] - 通过计时器来在两个状态间转换
+/// [red] <-> [yellow] - Transition between states through the timer
+///
+/// ## 状态机暂停\State Machine Pause
 /// 通过切换按键空格来暂停和恢复状态机
+///
+/// Toggle the space key to pause and resume the state machine
 ///
 fn main() {
     let mut app = App::new();

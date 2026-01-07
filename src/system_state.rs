@@ -16,14 +16,20 @@ use crate::{
     system_state::system_state_trait::ExpandScheduleLabelFuction,
 };
 
-/// # 一个对状态机系统的抽象
+/// # 一个对状态机系统的抽象\An abstraction of a state machine system
 /// * In : 输入上下文
+/// - In : Input context
 /// * Out :
 ///     * None: 下一帧将不再执行该状态
-///     * Some: 继续执行该状态, 里面的数量为0时将视为None,
+///     - None: The next frame will no longer execute this state
+///     * Some: 继续执行该状态, 里面的数量为空时将视为None
+///     - Some: Continue executing this state. When the quantity inside is empty, it will be treated as None
 ///         * 过滤条件 :
+///         * Filter Condition:
 ///             * `OnUpdate`: 继续执行该状态
-///             * `OnExit` : 停止执行该状态
+///             - `OnUpdate`: Continue executing this state
+///             * `OnExit`  : 停止执行该状态
+///             - `OnExit`  : Stop executing this state
 pub trait IntoActionSystem<M> {
     fn into_system(
         self,
@@ -97,10 +103,14 @@ pub type GetBufferId = Arc<
 >;
 
 /// 状态机系统
-/// # 作用
+///
+/// Status machine system
+/// # 作用\Effect
 /// * 用于获取对应时间点的缓存资源入口
+/// - Used to get the entry point of the cache resource at a certain time
 /// * Key: "`ScheduleLabel`:`action_name`"
-/// * Value: `HsmActionSystemBuffer<T: ScheduleLabel>` 的 `ComponentId`
+/// * Value: 是如何通过[World]获取缓存[HsmActionSystemBuffer]的方法
+/// - Value: How to get the cache resource through [World]
 #[derive(Resource, Default, Clone)]
 pub struct HsmActionSystems(HashMap<String, GetBufferId>);
 
@@ -123,12 +133,16 @@ impl HsmActionSystems {
 }
 
 /// 状态机系统缓存管理器
+///
+/// Status machine system cache manager
 /// * Key: `ScheduleLabel`
 /// * Value: `HsmActionSystemBuffers<T: ScheduleLabel>` 的 `ComponentId`
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub(super) struct HsmActionSystemBuffersManager(HashMap<String, ComponentId>);
 
 /// 状态机组系统缓存
+///
+/// Status machine system cache manager
 #[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
 pub(super) struct HsmActionSystemBuffers<T: ScheduleLabel = HsmOnState> {
     buffers: HashMap<String, HsmActionSystemBuffer>,
@@ -156,28 +170,43 @@ impl<T: ScheduleLabel> HsmActionSystemBuffers<T> {
 }
 
 /// 状态机系统缓存
-/// # 作用
+///
+/// Status machine system cache
+/// # 作用\Effect
 /// * 收集当前帧触发的实体, 并且在下一帧进行系统处理
+/// - Collect entities triggered by the current frame and perform system processing in the next frame
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct HsmActionSystemBuffer {
     /// 当前帧状态组
+    ///
+    /// Current frame status group
     pub curr: Vec<HsmStateContext>,
     /// 下一帧状态组
+    ///
+    /// Next frame status group
     pub next: Vec<HsmStateContext>,
-    /// 过滤器，用于筛选掉下一帧的状态
+    /// 过滤器: 用于筛选掉下一帧的状态
+    ///
+    /// Filter: used to filter out the next frame's status
     filter: HashSet<HsmStateContext>,
-    /// 拦截器，用于筛选掉当前帧的状态
+    /// 拦截器: 用于筛选掉当前帧的状态
+    ///
+    /// Interceptor: Use to filter out the current frame's status
     interceptor: HashSet<HsmStateContext>,
 }
 
 impl HsmActionSystemBuffer {
     /// 获取当前帧状态组
+    ///
+    /// Get the current state group
     #[inline(always)]
     pub fn get_curr(&self) -> Vec<HsmStateContext> {
         self.curr.clone()
     }
 
     /// 更新为下一个状态组
+    ///
+    /// Update to the next state group
     #[inline(always)]
     pub fn update(&mut self) {
         let Self {
@@ -198,6 +227,8 @@ impl HsmActionSystemBuffer {
     }
 
     /// 更新拦截器
+    ///
+    /// Update interceptor
     fn update_interceptor(&mut self) {
         if self.curr == self.next {
             return;
@@ -211,6 +242,8 @@ impl HsmActionSystemBuffer {
     }
 
     /// 添加一个上下文
+    ///
+    /// Add a context
     #[inline(always)]
     pub fn add(&mut self, context: HsmStateContext) {
         if self.interceptor.contains(&context) {
@@ -220,6 +253,8 @@ impl HsmActionSystemBuffer {
     }
 
     /// 添加多个上下文
+    ///
+    /// Add multiple contexts
     #[inline(always)]
     pub fn adds<I>(&mut self, iter: I)
     where
@@ -230,20 +265,29 @@ impl HsmActionSystemBuffer {
     }
 
     /// 添加一个过滤器
+    ///
+    /// Add a filter
     pub fn add_filter(&mut self, context: HsmStateContext) {
         self.filter.insert(context);
     }
 
     /// 添加一个拦截器
+    ///
+    /// Add an interceptor
     pub fn add_interceptor(&mut self, context: HsmStateContext) {
         self.interceptor.insert(context);
     }
 
+    /// 移除一个拦截器
+    ///
+    /// Remove an interceptor
     pub fn remove_interceptor(&mut self, context: HsmStateContext) {
         self.interceptor.remove(&context);
     }
 
     /// 将当前帧添加到下一帧
+    ///
+    /// Add the current frame to the next frame
     pub fn reflow(&mut self) {
         self.next.extend(self.curr.iter());
     }
@@ -253,10 +297,15 @@ impl HsmActionSystemBuffer {
     }
 
     /// 获取缓存作用域
-    /// # 作用
+    ///
+    /// Get the buffer scope
+    /// # 作用\Effect
     /// * 用于在系统中获取当前状态的缓存作用域
+    /// - Used to get the cache scope of the current state
     /// * 可以在作用域中添加或修改状态上下文
+    /// - Can add or modify state contexts in the scope
     /// * 作用域结束后，会自动更新缓存
+    /// - The scope will automatically update the cache after ending
     pub fn buffer_scope(
         world: &mut World,
         state_id: Entity,
@@ -289,6 +338,8 @@ impl Debug for HsmActionSystemBuffer {
 }
 
 /// 状态机系统运行模式
+///
+/// State machine system run mode
 fn action_system_run_mode<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(In<Option<Vec<HsmStateContext>>>, ResMut<HsmActionSystemBuffers<T>>) {
@@ -317,6 +368,8 @@ fn handle_on_update_anchor<T: ScheduleLabel>(
 }
 
 /// 运行动作系统的条件
+///
+/// Run action system condition
 fn run_action_system_condition<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(Option<Res<HsmActionSystemBuffers<T>>>) -> bool {
@@ -330,6 +383,8 @@ fn run_action_system_condition<T: ScheduleLabel>(
 }
 
 /// 更新状态机系统缓存
+///
+/// Update state machine system cache
 fn update_buffer<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(ResMut<HsmActionSystemBuffers<T>>) {
@@ -341,6 +396,8 @@ fn update_buffer<T: ScheduleLabel>(
 }
 
 /// 获取状态机系统缓存
+///
+/// Get state machine system cache
 fn buffer_input<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(Res<HsmActionSystemBuffers<T>>) -> Vec<HsmStateContext> {

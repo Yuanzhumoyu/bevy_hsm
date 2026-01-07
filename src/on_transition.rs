@@ -9,9 +9,13 @@ use crate::{
 };
 
 /// 状态转换策略，用于控制状态转换行为
+///
+/// State transition strategy, used to control state transition behavior
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateTransitionStrategy {
     /// 子状态嵌套转换：父状态保持激活，子状态进入和退出发生在父状态内部
+    ///
+    /// Sub state nested transition: The parent state remains active, and the sub state enters and exits occur within the parent state
     /// ```toml
     ///    super_state: on_enter
     ///    sub_state: on_enter
@@ -20,8 +24,12 @@ pub enum StateTransitionStrategy {
     /// ```
     ///
     /// 接受bool值，表示退出sub_state后super_state中on_update是否延续(当状态处于截流时,不会触发)
+    ///
+    /// Accepts a bool value indicating whether to continue the on_update function in super_state after exiting sub_state (it will not be triggered when the state is in throttling)
     Nested(bool),
     /// 平级转换：父状态先退出，然后子状态进入和退出，最后可能重新进入父状态
+    ///
+    /// Level-to-level transition: The parent state exits first, followed by the entry and exit of the child state, and finally, the parent state may be re-entered
     /// ```toml
     ///    super_state: on_enter
     ///    super_state: on_exit
@@ -48,6 +56,8 @@ impl Default for StateTransitionStrategy {
 }
 
 /// 检查能否过渡状态的实体
+///
+/// Check whether the entity can transition
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub(super) struct CheckOnTransitionStates(HashSet<Entity>);
 
@@ -62,7 +72,6 @@ pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
     );
 }
 
-/// 处理进入状态
 fn handle_on_enter_states(
     mut commands: Commands,
     query_state_machines: Query<&StateMachines, Without<StationaryStateMachines>>,
@@ -149,7 +158,6 @@ fn handle_on_enter_states(
     });
 }
 
-/// 处理退出状态
 fn handle_on_exit_states(
     mut commands: Commands,
     query_state_machines: Query<&StateMachines, Without<StationaryStateMachines>>,

@@ -5,7 +5,14 @@ use bevy::{
 
 use crate::prelude::{StateEntity, SubStates, SuperState};
 
-/// 当拥有该组件时, 状态的优先级会被设置为该组件的值。
+/// 状态优先级
+///
+/// State priority
+/// # 作用\Purpose
+/// * 状态优先级越大，优先级越高
+/// - The higher the state priority, the higher the priority
+/// * 状态优先级相同时，会根据实体的 ID 排序
+/// - When state priorities are the same, they will be sorted by entity ID
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[component(immutable,on_insert=Self::on_insert, on_replace = Self::on_replace)]
 pub struct StatePriority(pub u32);

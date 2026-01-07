@@ -8,6 +8,17 @@
 //! - 支持层次化状态（父状态和子状态）
 //! - 支持状态转换条件
 //! - 支持状态机系统和条件系统注册
+//! -------------------------------------------------------
+//! # Bevy HSM (Hierarchical State Machine)
+//!
+//! A hierarchical state machine system for the Bevy engine that implements hierarchical state machine functionality.
+//!
+//! ## Features
+//!
+//! - Supports state lifecycle phases: enter, update, and exit
+//! - Supports hierarchical states (parent and child states)
+//! - Supports state transition conditions
+//! - Supports state machine system and condition system registration
 
 pub extern crate bevy_hsm_macros;
 

@@ -13,10 +13,17 @@ use smallvec::SmallVec;
 use crate::prelude::HsmStateContext;
 
 /// 状态条件的系统ID
+///
 /// 用于判断[`HsmState`]是否满足进入或退出的条件,其中上下文中的实体是当前检测的实体
+///
+/// State condition system ID
+///
+/// Used to determine if [`HsmState`] meets the conditions for entering or exiting, where the context entity is the entity currently being checked
 pub type StateConditionId = SystemId<In<HsmStateContext>, bool>;
 
 /// 注册用于判断[`HsmState`]是否满足进入或退出的条件
+///
+/// Register to determine if [`HsmState`] meets the conditions for entering or exiting
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -61,6 +68,8 @@ impl StateConditions {
     }
 
     /// 获取一个条件
+    //
+    /// Get a condition
     pub fn get<Q>(&self, name: &Q) -> Option<StateConditionId>
     where
         Q: Hash + Equivalent<String>,
@@ -69,6 +78,8 @@ impl StateConditions {
     }
 
     /// 插入一个条件
+    ///
+    /// Insert a condition
     pub fn insert(
         &mut self,
         name: impl Into<String>,
@@ -78,6 +89,8 @@ impl StateConditions {
     }
 
     /// 移除一个条件
+    ///
+    /// Remove a condition
     pub fn remove<Q>(&mut self, name: &Q) -> Option<StateConditionId>
     where
         Q: Hash + Equivalent<String>,
@@ -97,6 +110,8 @@ impl StateConditions {
 }
 
 /// 进入该状态的条件
+///
+/// Condition for entering this state
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
 pub struct HsmOnEnterCondition(pub CombinationCondition);
 
@@ -107,6 +122,8 @@ impl HsmOnEnterCondition {
 }
 
 /// 退出该状态的条件
+///
+/// Condition for exiting this state
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
 pub struct HsmOnExitCondition(pub CombinationCondition);
 
@@ -117,6 +134,8 @@ impl HsmOnExitCondition {
 }
 
 /// 组合条件ID
+///
+/// Combination condition ID
 #[derive(Clone, PartialEq, Eq)]
 pub enum CombinationConditionId {
     And(SmallVec<[Box<CombinationConditionId>; 2]>),
@@ -185,21 +204,27 @@ impl CombinationConditionId {
 
 /// 组合条件
 ///
+/// Combination condition
+///
 /// 用于组合多个状态条件，支持AND、OR、NOT操作。
 ///
-/// # 用法示例
+/// Use to combine multiple state conditions, support AND, OR, NOT operations.
+/// # 示例\Example
 ///
 /// ```rust
 /// use bevy_hsm::prelude::*;
 ///
 /// # fn main(){
 /// // 使用宏创建组合条件
+/// // Using macro to create combination conditions
 /// let condition1 = combination_condition!(and("condition_a", "condition_b"));
 ///
 /// // 使用解析方法创建
+/// // Using the parsing method to create
 /// let condition2 = CombinationCondition::parse("And(condition_a, condition_b)").unwrap();
 ///
 /// // 使用构造方法创建
+/// // Using the constructor method to create   
 /// let condition3 = CombinationCondition::new("condition_a").add_and(CombinationCondition::new("condition_b"));
 ///
 /// assert_eq!(condition1, condition3);
@@ -219,6 +244,9 @@ impl CombinationCondition {
         Self::Id(name.into())
     }
 
+    /// 创建一个and组合条件, 相同条件则合并
+    ///
+    /// Create an and combination condition, same condition will be merged
     pub fn and(conditions: impl IntoIterator<Item = Self>) -> Self {
         let conditions: SmallVec<[Box<CombinationCondition>; 2]> =
             conditions.into_iter().map(Box::new).collect();
@@ -230,6 +258,9 @@ impl CombinationCondition {
         CombinationCondition::And(conditions)
     }
 
+    /// 创建一个or组合条件, 相同条件则合并
+    ///
+    /// Create an or combination condition, same condition will be merged
     pub fn or(conditions: impl IntoIterator<Item = Self>) -> Self {
         let conditions: SmallVec<[Box<CombinationCondition>; 2]> =
             conditions.into_iter().map(Box::new).collect();
@@ -241,6 +272,9 @@ impl CombinationCondition {
         CombinationCondition::Or(conditions)
     }
 
+    /// 创建一个not组合条件，相同条件则不变
+    ///
+    /// Create a not combination condition, same condition will not change
     #[inline(always)]
     #[allow(clippy::should_implement_trait)]
     pub fn not(condition: CombinationCondition) -> Self {
@@ -270,7 +304,7 @@ impl CombinationCondition {
 }
 
 impl CombinationCondition {
-    ///# 编写规则
+    ///# 编写规则\Write rules
     ///- combination_condition := not_condition | and_condition | or_condition | id_condition
     ///- not_condition := `Not` `(` combination_condition `)`
     ///- and_condition := `And` `(` combination_condition `,` ( combination_condition )+ `)`
@@ -406,10 +440,8 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(id)) if id == "And" => self.parse_and_condition(),
             Some(Token::Identifier(id)) if id == "Or" => self.parse_or_condition(),
             Some(Token::Identifier(id)) => {
-                //检查是否后面跟着括号，如果是，则这是一个无效的操作符
                 let next_token = self.lexer.peek();
                 if matches!(next_token, Some('(')) {
-                    // 如果标识符后面跟着括号，但不是预定义的操作符，则返回错误
                     return Err(format!(
                         "combination_condition: invalid operator '{}', only 'And', 'Or', 'Not' are allowed",
                         id
@@ -556,6 +588,7 @@ mod test {
     #[test]
     fn test_combination_condition() {
         // 测试从原子条件开始，添加AND条件
+        // Test adding AND condition from atomic condition
         let conditions = CombinationCondition::new("a").add_and(CombinationCondition::new("b"));
         assert_eq!(
             conditions,
@@ -566,6 +599,7 @@ mod test {
         );
 
         // 从原子条件开始，添加OR条件
+        // Test adding OR condition from atomic condition
         let conditions = CombinationCondition::new("a").add_or(CombinationCondition::new("c"));
         assert_eq!(
             conditions,
@@ -576,6 +610,7 @@ mod test {
         );
 
         // 测试链式操作：(a AND b) OR c
+        // Test chain operation: (a AND b) OR c
         let conditions = CombinationCondition::new("a")
             .add_and(CombinationCondition::new("b"))
             .add_or(CombinationCondition::new("c"));
@@ -656,6 +691,7 @@ mod test {
     #[test]
     fn test_combination_condition_creation() {
         // 测试新的构造方法
+        // Test new construction method
         let and_condition = CombinationCondition::and([
             CombinationCondition::new("a"),
             CombinationCondition::new("b"),
@@ -675,10 +711,21 @@ mod test {
     #[test]
     fn test_parse_error_handling() {
         // 测试错误处理
-        assert!(CombinationCondition::parse("And(a)").is_err()); // 至少需要2个条件
-        assert!(CombinationCondition::parse("Or(b)").is_err()); // 至少需要2个条件
-        assert!(CombinationCondition::parse("").is_err()); // 空输入
-        assert!(CombinationCondition::parse("InvalidOp(a, b)").is_err()); // 无效的操作符
-        assert!(CombinationCondition::parse("And(Op(a, b), c)").is_err()); // 无效的操作符
+        // Test error handling
+        // 至少需要2个条件
+        // Need at least 2 conditions
+        assert!(CombinationCondition::parse("And(a)").is_err());
+        // 至少需要2个条件
+        // Need at least 2 conditions
+        assert!(CombinationCondition::parse("Or(b)").is_err());
+        // 空输入
+        // Empty input
+        assert!(CombinationCondition::parse("").is_err());
+        // 无效的操作符
+        // Invalid operator
+        assert!(CombinationCondition::parse("InvalidOp(a, b)").is_err());
+        // 无效的操作符
+        // Invalid operator
+        assert!(CombinationCondition::parse("And(Op(a, b), c)").is_err());
     }
 }
