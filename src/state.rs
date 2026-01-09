@@ -9,7 +9,7 @@ use crate::{
     history::StateHistory,
     hook_system::{HsmOnEnterDisposableSystems, HsmOnExitDisposableSystems, HsmStateContext},
     on_transition::CheckOnTransitionStates,
-    prelude::{HsmActionSystemBuffer, StateTransitionStrategy},
+    prelude::{HsmActionSystemBuffer, ServiceTarget, StateTransitionStrategy},
     priority::StatePriority,
 };
 
@@ -192,7 +192,14 @@ impl StationaryStateMachines {
         let Some(curr_state_id) = state_machines.curr_state_id() else {
             return;
         };
-        let state_context = HsmStateContext::new(entity, curr_state_id);
+        let state_context = HsmStateContext::new(
+            match world.get::<ServiceTarget>(entity) {
+                Some(service_target) => service_target.0,
+                None => entity,
+            },
+            entity,
+            curr_state_id,
+        );
 
         let world = unsafe { world.as_unsafe_world_cell().world_mut() };
         HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
@@ -207,7 +214,14 @@ impl StationaryStateMachines {
         let Some(curr_state_id) = state_machines.curr_state_id() else {
             return;
         };
-        let state_context = HsmStateContext::new(entity, curr_state_id);
+        let state_context = HsmStateContext::new(
+            match world.get::<ServiceTarget>(entity) {
+                Some(service_target) => service_target.0,
+                None => entity,
+            },
+            entity,
+            curr_state_id,
+        );
 
         let world = unsafe { world.as_unsafe_world_cell().world_mut() };
         HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
@@ -233,11 +247,11 @@ pub enum HsmOnState {
 
 impl HsmOnState {
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let main_body_id = hook_context.entity;
-        let Some(hsm_state) = world.get::<HsmOnState>(main_body_id).copied() else {
+        let state_machine_id = hook_context.entity;
+        let Some(hsm_state) = world.get::<HsmOnState>(state_machine_id).copied() else {
             return;
         };
-        let Some(mut state_machines) = world.get_mut::<StateMachines>(main_body_id) else {
+        let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machine_id) else {
             return;
         };
         match hsm_state {
@@ -258,12 +272,21 @@ impl HsmOnState {
                 else {
                     return;
                 };
-                let state_context = HsmStateContext::new(main_body_id, curr_state_id);
+                let state_context = HsmStateContext::new(
+                    match world.get::<ServiceTarget>(state_machine_id) {
+                        Some(service_target) => service_target.0,
+                        None => state_machine_id,
+                    },
+                    state_machine_id,
+                    curr_state_id,
+                );
                 world.commands().queue(move |world: &mut World| {
                     if let Err(e) = world.run_system_with(action_system_id, state_context) {
                         warn!("Error running enter system: {:?}", e);
                     }
-                    world.entity_mut(main_body_id).insert(HsmOnState::Update);
+                    world
+                        .entity_mut(state_machine_id)
+                        .insert(HsmOnState::Update);
                 });
             }
             HsmOnState::Update => {
@@ -279,11 +302,18 @@ impl HsmOnState {
                 {
                     let mut check_on_transition_states =
                         world.resource_mut::<CheckOnTransitionStates>();
-                    check_on_transition_states.insert(main_body_id);
+                    check_on_transition_states.insert(state_machine_id);
                 }
 
                 // 运行更新系统
-                let state_context = HsmStateContext::new(main_body_id, curr_state_id);
+                let state_context = HsmStateContext::new(
+                    match world.get::<ServiceTarget>(state_machine_id) {
+                        Some(service_target) => service_target.0,
+                        None => state_machine_id,
+                    },
+                    state_machine_id,
+                    curr_state_id,
+                );
 
                 let world = unsafe { world.as_unsafe_world_cell().world_mut() };
                 HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
@@ -295,7 +325,14 @@ impl HsmOnState {
                     warn!("Current state not found in states map",);
                     return;
                 };
-                let state_context = HsmStateContext::new(main_body_id, curr_state_id);
+                let state_context = HsmStateContext::new(
+                    match world.get::<ServiceTarget>(state_machine_id) {
+                        Some(service_target) => service_target.0,
+                        None => state_machine_id,
+                    },
+                    state_machine_id,
+                    curr_state_id,
+                );
 
                 // 过滤条件
                 let world = unsafe { world.as_unsafe_world_cell().world_mut() };
@@ -320,17 +357,19 @@ impl HsmOnState {
                     if let Err(e) = world.run_system_with(action_system_id, state_context) {
                         warn!("Error running exit system: {:?}", e);
                     }
-                    let Some(mut state_machines) = world.get_mut::<StateMachines>(main_body_id)
+                    let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machine_id)
                     else {
-                        warn!("StateMachines not found: {}", main_body_id);
+                        warn!("StateMachines not found: {}", state_machine_id);
                         return;
                     };
                     let Some((curr_state, on_state)) = state_machines.pop_next_state() else {
-                        world.entity_mut(main_body_id).insert(HsmOnState::Update);
+                        world
+                            .entity_mut(state_machine_id)
+                            .insert(HsmOnState::Update);
                         return;
                     };
                     state_machines.push_history(curr_state);
-                    world.entity_mut(main_body_id).insert(on_state);
+                    world.entity_mut(state_machine_id).insert(on_state);
                 });
             }
         };
@@ -344,19 +383,19 @@ impl HsmOnState {
 #[component(immutable, on_insert = Self::on_insert, on_remove = Self::on_remove)]
 #[require(StatePriority, StateTransitionStrategy)]
 pub struct HsmState {
-    pub main_body: Entity,
+    pub state_machine: Entity,
 }
 
 impl HsmState {
-    pub fn new(main_body: Entity) -> Self {
-        Self { main_body }
+    pub fn new(state_machine: Entity) -> Self {
+        Self { state_machine }
     }
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
         let state_id = hook_context.entity;
         let state_machines_id = world
             .get::<HsmState>(state_id)
-            .map(|s| s.main_body)
+            .map(|s| s.state_machine)
             .unwrap();
         let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machines_id) else {
             warn!(
@@ -380,7 +419,7 @@ impl HsmState {
         let state_id = hook_context.entity;
         let state_machines_id = world
             .get::<HsmState>(state_id)
-            .map(|s| s.main_body)
+            .map(|s| s.state_machine)
             .unwrap();
         let Some(mut state_machines) = world.get_mut::<StateMachines>(state_machines_id) else {
             warn!(

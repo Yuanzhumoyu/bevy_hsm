@@ -1,7 +1,7 @@
 use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude::*};
 
 use crate::{
-    prelude::HsmStateContext,
+    prelude::{HsmStateContext, ServiceTarget},
     state::{HsmOnState, HsmState, StateMachines, StationaryStateMachines},
     state_condition::{HsmOnEnterCondition, HsmOnExitCondition, StateConditions},
     sub_states::SubStates,
@@ -103,16 +103,26 @@ fn handle_on_enter_states(
                 }
             })
             .collect::<Vec<_>>();
-        let main_body_id = hsm_state.main_body;
+        let state_machine_id = hsm_state.state_machine;
 
         if collected.is_empty() {
-            condition_with_empty.push(main_body_id);
+            condition_with_empty.push(state_machine_id);
             continue;
         }
 
         commands.queue(move |world: &mut World| {
             for (sub_state_id, condition_id) in collected {
-                match condition_id.run(world, HsmStateContext::new(main_body_id, sub_state_id)) {
+                match condition_id.run(
+                    world,
+                    HsmStateContext::new(
+                        match world.get::<ServiceTarget>(state_machine_id) {
+                            Some(service_target) => service_target.0,
+                            None => state_machine_id,
+                        },
+                        state_machine_id,
+                        sub_state_id,
+                    ),
+                ) {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(e) => {
@@ -123,15 +133,15 @@ fn handle_on_enter_states(
 
                 world
                     .resource_mut::<CheckOnTransitionStates>()
-                    .remove(&main_body_id);
+                    .remove(&state_machine_id);
 
                 let transition_strategy = world
                     .get::<StateTransitionStrategy>(curr_state_id)
                     .copied()
                     .unwrap();
-                let mut main_body = world.entity_mut(main_body_id);
-                let Some(mut state_machines) = main_body.get_mut::<StateMachines>() else {
-                    warn!("{} 该实体不拥有[StateMachines]", main_body_id);
+                let mut service_target = world.entity_mut(state_machine_id);
+                let Some(mut state_machines) = service_target.get_mut::<StateMachines>() else {
+                    warn!("{} 该实体不拥有[StateMachines]", state_machine_id);
                     return;
                 };
 
@@ -147,7 +157,7 @@ fn handle_on_enter_states(
                     }
                 };
 
-                main_body.insert(next_on_state);
+                service_target.insert(next_on_state);
 
                 return;
             }
@@ -176,11 +186,11 @@ fn handle_on_exit_states(
         let Ok((hsm_state, super_state)) = query_states.get(curr_state_id) else {
             continue;
         };
-        let main_body_id = hsm_state.main_body;
+        let state_machine_id = hsm_state.state_machine;
         let super_state_id = super_state.0;
 
         let Ok(condition) = query_condtitions.get(curr_state_id) else {
-            condition_with_empty.push(main_body_id);
+            condition_with_empty.push(state_machine_id);
             continue;
         };
         let Some(condition_id) = state_conditions.to_combinator_condition_id(condition) else {
@@ -189,7 +199,17 @@ fn handle_on_exit_states(
         };
 
         commands.queue(move |world: &mut World| {
-            match condition_id.run(world, HsmStateContext::new(main_body_id, super_state_id)) {
+            match condition_id.run(
+                world,
+                HsmStateContext::new(
+                    match world.get::<ServiceTarget>(state_machine_id) {
+                        Some(service_target) => service_target.0,
+                        None => state_machine_id,
+                    },
+                    state_machine_id,
+                    super_state_id,
+                ),
+            ) {
                 Ok(true) => {}
                 Ok(false) => return,
                 Err(e) => {
@@ -200,15 +220,15 @@ fn handle_on_exit_states(
 
             world
                 .resource_mut::<CheckOnTransitionStates>()
-                .remove(&main_body_id);
+                .remove(&state_machine_id);
 
             let transition_strategy = world
                 .get::<StateTransitionStrategy>(super_state_id)
                 .copied()
                 .unwrap();
-            let mut main_body = world.entity_mut(main_body_id);
-            let Some(mut state_machines) = main_body.get_mut::<StateMachines>() else {
-                warn!("{} 该实体不拥有[StateMachines]", main_body_id);
+            let mut service_target = world.entity_mut(state_machine_id);
+            let Some(mut state_machines) = service_target.get_mut::<StateMachines>() else {
+                warn!("{} 该实体不拥有[StateMachines]", state_machine_id);
                 return;
             };
 
@@ -222,7 +242,7 @@ fn handle_on_exit_states(
                     },
                 );
             }
-            main_body.insert(HsmOnState::Exit);
+            service_target.insert(HsmOnState::Exit);
         });
     }
     condition_with_empty.iter().for_each(|e| {

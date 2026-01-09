@@ -19,7 +19,13 @@ pub struct HsmStateContext {
     /// 主体实体
     ///
     /// Main body entity
-    pub main_body: Entity,
+    /// + 当状态机拥有[ServiceTarget]时,该成员为[ServiceTarget]的值,否则默认为该状态的状态机[Entity]
+    /// - When the state machine possesses [ServiceTarget], this member is the value of [ServiceTarget]; otherwise, it defaults to the state machine's [Entity] state
+    pub service_target: Entity,
+    /// 状态机实体
+    ///
+    /// State machine entity
+    pub state_machine: Entity,
     /// 当前状态实体
     ///
     /// Current state entity
@@ -27,8 +33,12 @@ pub struct HsmStateContext {
 }
 
 impl HsmStateContext {
-    pub fn new(main_body: Entity, state: Entity) -> Self {
-        Self { main_body, state }
+    pub fn new(service_target: Entity, state_machine: Entity, state: Entity) -> Self {
+        Self {
+            service_target,
+            state_machine,
+            state,
+        }
     }
 }
 
@@ -163,3 +173,13 @@ impl HsmOnExitDisposableSystems {
         self.0.get(name)
     }
 }
+
+/// 状态机服务目标
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[relationship(relationship_target = StateMachineForest)]
+pub struct ServiceTarget(pub Entity);
+
+/// 状态机森林
+#[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[relationship_target(relationship = ServiceTarget)]
+pub struct StateMachineForest(Vec<Entity>);

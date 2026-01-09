@@ -27,7 +27,7 @@ impl LightTimer {
         time: Res<Time<Fixed>>,
         mut query: Query<&mut LightTimer>,
     ) -> bool {
-        let mut timer = query.get_mut(entity.main_body).unwrap();
+        let mut timer = query.get_mut(entity.service_target).unwrap();
         timer.0.tick(time.delta());
         timer.0.is_finished()
     }

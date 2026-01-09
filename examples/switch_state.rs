@@ -16,7 +16,7 @@ impl Count {
         states: In<Vec<HsmStateContext>>,
         mut query: Query<(&Name, &mut Count)>,
     ) -> Option<Vec<HsmStateContext>> {
-        let mut iter = query.iter_many_mut(states.0.iter().map(|a| a.main_body));
+        let mut iter = query.iter_many_mut(states.0.iter().map(|a| a.service_target));
         while let Some((name, mut count)) = iter.fetch_next() {
             count.0 += 1;
             println!("{} 计数: {}", name, count.0);
@@ -39,12 +39,12 @@ pub enum Switch {
 
 impl Switch {
     fn condition_with_open(entity: In<HsmStateContext>, query: Query<&Switch>) -> bool {
-        let switch = query.get(entity.main_body).unwrap();
+        let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Open)
     }
 
     fn condition_with_close(entity: In<HsmStateContext>, query: Query<&Switch>) -> bool {
-        let switch = query.get(entity.main_body).unwrap();
+        let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Close)
     }
 }
