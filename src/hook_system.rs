@@ -59,7 +59,7 @@ impl HsmStateContext {
 /// ```
 ///
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct HsmOnEnterDisposableSystems(HashMap<String, DisposableSystemId>);
+pub struct HsmOnEnterDisposableSystems(pub(super) HashMap<String, DisposableSystemId>);
 
 impl HsmOnEnterDisposableSystems {
     pub fn new() -> Self {
@@ -124,7 +124,7 @@ impl HsmOnEnterDisposableSystems {
 /// on_exit_disposable_systems.insert("on_exit", system_id);
 /// # }
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct HsmOnExitDisposableSystems(HashMap<String, DisposableSystemId>);
+pub struct HsmOnExitDisposableSystems(pub(super) HashMap<String, DisposableSystemId>);
 
 impl HsmOnExitDisposableSystems {
     pub fn new() -> Self {
@@ -180,6 +180,6 @@ impl HsmOnExitDisposableSystems {
 pub struct ServiceTarget(pub Entity);
 
 /// 状态机森林
-#[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref)]
 #[relationship_target(relationship = ServiceTarget)]
 pub struct StateMachineForest(Vec<Entity>);

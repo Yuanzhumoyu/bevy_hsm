@@ -68,11 +68,11 @@ fn register_condition(
 
 fn startup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machines = commands.spawn(StateMachines::new(10, start_state_id)).id();
+    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
 
     commands.entity(start_state_id).insert((
         Name::new("Start"),
-        HsmState::new(state_machines),
+        HsmState::with_id(state_machine),
         HsmOnEnterSystem::new("debug_on_enter"),
         HsmOnExitSystem::new("debug_on_exit"),
     ));
@@ -80,7 +80,7 @@ fn startup(mut commands: Commands) {
     commands.spawn((
         SuperState(start_state_id),
         Name::new("Counter"),
-        HsmState::new(state_machines),
+        HsmState::with_id(state_machine),
         HsmOnEnterCondition::new("is_open"),
         HsmOnExitCondition::new("is_close"),
         HsmOnEnterSystem::new("debug_on_enter"),
@@ -88,9 +88,9 @@ fn startup(mut commands: Commands) {
         HsmOnExitSystem::new("debug_on_exit"),
     ));
 
-    println!("State Machines: {:?}", state_machines);
+    println!("State Machines: {:?}", state_machine);
 
-    commands.entity(state_machines).insert((
+    commands.entity(state_machine).insert((
         Name::new("Switch Counter"),
         Count(0),
         HsmOnState::default(),
@@ -118,8 +118,8 @@ fn key_event(input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Switch>) {
 /// ## 实体说明\Entity Description
 /// * [Count] - 计数器组件，用于在"计数"状态下增加计数
 /// - [Count] - Counter component, used to increase the counter in the "counting" state
-/// * [StateMachines] - 状态机组件，管理当前状态和状态转换
-/// - [StateMachines] - State machine component, managing the current state and state transitions
+/// * [StateMachine] - 状态机组件，管理当前状态和状态转换
+/// - [StateMachine] - State machine component, managing the current state and state transitions
 ///
 ///
 /// ## 状态转换\State Transition

@@ -33,14 +33,14 @@ fn main() {
 
 ## Core Concepts
 
-- StateMachines: Manages entity state transitions, including current state, next state, and state mapping table
+- StateMachine: Manages entity state transitions, including current state, next state, and state mapping table
 - HsmOnState: State lifecycle management, used to manage state entering, updating, and exiting
 - SuperState: Component used to store parent states
 - SubStates: Collection used to store child state entities
 - StationaryStateMachines: Used to pause state machines
+- Terminated: Component used to indicate that a state machine has terminated
 - StateConditions: State transition condition system for determining if states meet conditions for entering or exiting
-- HsmState: Represents a state, associated with the main entity (the entity that owns the StateMachines component)
-- StateTransitionStrategy: State transition planning, used to determine whether to reset, continue, or exit directly when transitioning from a child state to a parent state
+- HsmState: Represents a state, associated with the main entity (the entity that owns the StateMachine component)
 - StatePriority: State priority management, used to set state priorities
 - HsmOnEnterCondition: Condition for entering a state
 - HsmOnExitCondition: Condition for exiting a state

@@ -50,12 +50,11 @@ fn register_condition(
 
 fn setup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machines = commands.spawn(StateMachines::new(10, start_state_id)).id();
+    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
 
     commands.entity(start_state_id).insert((
         Name::new("red"),
-        HsmState::new(state_machines),
-        StateTransitionStrategy::Nested(false),
+        HsmState::with_id(state_machine),
         HsmOnUpdateSystem::new("Update:debug_light"),
         HsmOnEnterSystem::new("debug_on_enter"),
         HsmOnExitSystem::new("debug_on_exit"),
@@ -64,7 +63,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         SuperState(start_state_id),
         Name::new("yellow"),
-        HsmState::new(state_machines),
+        HsmState::with_id(state_machine),
         HsmOnUpdateSystem::new("Update:debug_light"),
         HsmOnEnterSystem::new("debug_on_enter"),
         HsmOnExitSystem::new("debug_on_exit"),
@@ -72,9 +71,9 @@ fn setup(mut commands: Commands) {
         HsmOnExitCondition::new("light_timer"),
     ));
 
-    println!("State Machines: {:?}", state_machines);
+    println!("State Machines: {:?}", state_machine);
 
-    commands.entity(state_machines).insert((
+    commands.entity(state_machine).insert((
         Name::new("Blinking Light Paused"),
         HsmOnState::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),
@@ -84,10 +83,10 @@ fn setup(mut commands: Commands) {
 fn blinking_pause(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    state_machines: Single<Entity, With<StateMachines>>,
+    state_machine: Single<Entity, With<StateMachine>>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        let mut entity = commands.entity(state_machines.entity());
+        let mut entity = commands.entity(state_machine.entity());
         entity.queue(|mut entity: EntityWorldMut<'_>| {
             match entity.get::<StationaryStateMachines>().is_some() {
                 true => {
@@ -113,8 +112,8 @@ fn blinking_pause(
 /// ## 实体说明
 /// * [LightTimer] - 计时器组件，用于控制灯的闪烁
 /// - [LightTimer] - Timer component used to control the blinking
-/// * [StateMachines] - 状态机组件，管理当前状态和状态转换
-/// - [StateMachines] - State machine component, managing the current state and state transitions
+/// * [StateMachine] - 状态机组件，管理当前状态和状态转换
+/// - [StateMachine] - State machine component, managing the current state and state transitions
 /// * [StationaryStateMachines] - 状态机组件，用于暂停状态机
 /// - [StationaryStateMachines] - State machine component used to pause the state machine
 ///

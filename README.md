@@ -33,14 +33,14 @@ fn main() {
 
 ## 核心概念
 
-- StateMachines: 管理实体的状态转换，包括当前状态、下一状态以及状态映射表
+- StateMachine: 管理实体的状态转换，包括当前状态、下一状态以及状态映射表
 - HsmOnState: 状态生命周期管理，用于管理状态的进入、更新和退出
 - SuperState: 用于存储父状态的组件
 - SubStates: 用于存储子状态实体的集合
 - StationaryStateMachines：用于将状态机静止
+- Terminated: 用于表示状态机已终止
 - StateConditions: 状态转换条件系统，用于判断状态是否满足进入或退出的条件
-- HsmState: 表示一个状态，与主实体（拥有 StateMachines 组件的实体）相关联
-- StateTransitionStrategy: 状态过渡规划，用于确定状态从子状态转换到父状态时，是否重置,继续和直接退出
+- HsmState: 表示一个状态，与主实体（拥有 StateMachine 组件的实体）相关联
 - StatePriority: 状态优先级管理，用于设置状态的优先级
 - HsmOnEnterCondition: 进入状态的条件
 - HsmOnExitCondition: 退出状态的条件

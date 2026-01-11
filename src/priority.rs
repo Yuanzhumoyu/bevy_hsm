@@ -59,7 +59,7 @@ mod tests {
     fn test_priority() {
         let mut world = World::new();
         let super_id = world
-            .spawn((Name::new("state"), HsmState::new(Entity::from_bits(1))))
+            .spawn((Name::new("state"), HsmState::with_id(Entity::from_bits(1))))
             .id();
 
         [10, 8, 1, 6, 2, 7, 4]
@@ -70,7 +70,7 @@ mod tests {
                     Name::new(format!("state{}", i)),
                     StatePriority(p),
                     SuperState(super_id),
-                    HsmState::new(Entity::from_bits(1)),
+                    HsmState::with_id(Entity::from_bits(1)),
                 ));
             });
         let sub_states = world.get::<SubStates>(super_id).unwrap();
@@ -89,7 +89,7 @@ mod tests {
     fn test_priority_replace() {
         let mut world = World::new();
         let super_id = world
-            .spawn((Name::new("state"), HsmState::new(Entity::from_bits(1))))
+            .spawn((Name::new("state"), HsmState::with_id(Entity::from_bits(1))))
             .id();
 
         let sub_states = [10, 8, 1, 6, 2, 7, 4]
@@ -101,7 +101,7 @@ mod tests {
                         Name::new(format!("state{}", i)),
                         StatePriority(p),
                         SuperState(super_id),
-                        HsmState::new(Entity::from_bits(1)),
+                        HsmState::with_id(Entity::from_bits(1)),
                     ))
                     .id()
             })

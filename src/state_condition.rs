@@ -36,7 +36,7 @@ pub type StateConditionId = SystemId<In<HsmStateContext>, bool>;
 /// # }
 /// ```
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
-pub struct StateConditions(HashMap<String, StateConditionId>);
+pub struct StateConditions(pub(super) HashMap<String, StateConditionId>);
 
 impl StateConditions {
     pub fn to_combinator_condition_id(
@@ -130,6 +130,10 @@ pub struct HsmOnExitCondition(pub CombinationCondition);
 impl HsmOnExitCondition {
     pub fn new(name: impl Into<String>) -> Self {
         Self(CombinationCondition::Id(name.into()))
+    }
+
+    pub fn parse(s: impl AsRef<str>) -> Result<Self> {
+        Ok(Self(CombinationCondition::parse(s)?))
     }
 }
 

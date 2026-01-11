@@ -41,11 +41,11 @@ fn register_condition(
 
 fn setup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machines = commands.spawn(StateMachines::new(10, start_state_id)).id();
+    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
 
     commands.entity(start_state_id).insert((
         Name::new("OFF"),
-        HsmState::new(state_machines),
+        HsmState::with_id(state_machine),
         HsmOnEnterCondition::new("is_off"),
         HsmOnEnterSystem::new("debug_on_enter"),
         HsmOnExitSystem::new("debug_on_exit"),
@@ -55,7 +55,7 @@ fn setup(mut commands: Commands) {
         .spawn((
             SuperState(start_state_id),
             Name::new("ON1"),
-            HsmState::new(state_machines),
+            HsmState::with_id(state_machine),
             HsmOnEnterCondition::new("is_up"),
             HsmOnExitCondition::new("is_down"),
             HsmOnEnterSystem::new("debug_on_enter"),
@@ -67,7 +67,7 @@ fn setup(mut commands: Commands) {
         .spawn((
             SuperState(id),
             Name::new("ON2"),
-            HsmState::new(state_machines),
+            HsmState::with_id(state_machine),
             HsmOnEnterCondition::new("is_up"),
             HsmOnExitCondition::new("is_down"),
             HsmOnEnterSystem::new("debug_on_enter"),
@@ -78,7 +78,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         SuperState(id),
         Name::new("ON3"),
-        HsmState::new(state_machines),
+        HsmState::with_id(state_machine),
         HsmOnEnterCondition::new("is_up"),
         HsmOnExitCondition::new("is_down"),
         HsmOnEnterSystem::new("debug_on_enter"),
@@ -86,7 +86,7 @@ fn setup(mut commands: Commands) {
     ));
 
     commands
-        .entity(state_machines)
+        .entity(state_machine)
         .insert((Name::new("More States"), HsmOnState::default()));
 }
 
