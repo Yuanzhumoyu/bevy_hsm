@@ -2,7 +2,7 @@ use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude
 
 use crate::{
     prelude::{HsmStateContext, ServiceTarget},
-    state::{HsmOnState, HsmState, NextState, StateMachine, StationaryStateMachines},
+    state::{HsmOnState, HsmState, NextState, StateMachine, StationaryStateMachine},
     state_condition::{HsmOnEnterCondition, HsmOnExitCondition, StateConditions},
     sub_states::SubStates,
     super_state::SuperState,
@@ -22,6 +22,7 @@ pub enum StateTransitionStrategy {
     ///    sub_state: on_exit
     ///    super_state: on_exit
     /// ```
+    #[default]
     Nested,
     /// 平级转换：父状态先退出，然后子状态进入和退出，最后可能重新进入父状态
     ///
@@ -32,7 +33,6 @@ pub enum StateTransitionStrategy {
     ///    sub_state: on_enter
     ///    sub_state: on_exit
     /// ```
-    #[default]
     Parallel,
 }
 
@@ -63,13 +63,13 @@ pub enum ExitTransitionBehavior {
     /// 从sub_state退出后，进入super_state的on_update阶段
     ///
     /// From sub_state exit, enter the super_state's on_update phase
+    #[default]
     Resurrection,
     /// # 死亡\Death
     ///
     /// 从sub_state退出后，不再进入super_state, 而是向上层状态继续判断[ExitTransitionBehavior]和[StateTransitionStrategy]
     ///
     /// From sub_state exit, do not enter super_state, but continue to judge [ExitTransitionBehavior] and [StateTransitionStrategy] to the upper state
-    #[default]
     Death,
 }
 
@@ -122,9 +122,7 @@ fn get_on_exit_next_states(
             while let Some(state) = curr_state_ref.get::<SuperState>().copied()
                 && let state_ref = world.entity(state.0)
                 && let Some(HsmState {
-                    state_machine: _,
-                    strategy,
-                    behavior,
+                    strategy, behavior, ..
                 }) = state_ref.get::<HsmState>().copied()
             {
                 if !state_ref.contains::<SuperState>() {
@@ -154,9 +152,9 @@ fn get_on_exit_next_states(
         (StateTransitionStrategy::Parallel, ExitTransitionBehavior::Death) => {
             while let Some(state) = world.get::<SuperState>(state_id).copied()
                 && let Some(HsmState {
-                    state_machine: _,
                     strategy,
                     behavior: new_behavior,
+                    ..
                 }) = world.get::<HsmState>(state.0).copied()
             {
                 if !(strategy == StateTransitionStrategy::Parallel
@@ -201,8 +199,8 @@ pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
 
 fn handle_on_enter_states(
     mut commands: Commands,
-    query_state_machines: Query<&StateMachine, Without<StationaryStateMachines>>,
     query_states: Query<(&HsmState, &SubStates), With<HsmState>>,
+    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
     query_sub_states: Query<(Entity, &HsmOnEnterCondition), (With<HsmState>, With<SuperState>)>,
     mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
     state_conditions: Res<StateConditions>,
@@ -210,7 +208,9 @@ fn handle_on_enter_states(
     // 条件为空的状态
     let mut condition_with_empty = Vec::new();
 
-    for state_machine in query_state_machines.iter_many(check_on_transition_states.iter()) {
+    for (state_machine_id, state_machine) in
+        query_state_machines.iter_many(check_on_transition_states.iter())
+    {
         let Some(curr_state_id) = state_machine.curr_state_id() else {
             warn!("Current state not found in states map",);
             return;
@@ -231,7 +231,6 @@ fn handle_on_enter_states(
             })
             .collect::<Vec<_>>();
         let strategy = hsm_state.strategy;
-        let state_machine_id = hsm_state.state_machine;
 
         if collected.is_empty() {
             condition_with_empty.push(state_machine_id);
@@ -295,23 +294,24 @@ fn handle_on_enter_states(
 
 fn handle_on_exit_states(
     mut commands: Commands,
-    query_state_machines: Query<&StateMachine, Without<StationaryStateMachines>>,
-    query_states: Query<(&HsmState, &SuperState), With<HsmState>>,
+    query_states: Query<&SuperState, With<HsmState>>,
     query_condtitions: Query<&HsmOnExitCondition, With<HsmState>>,
     mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
+    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
     state_conditions: Res<StateConditions>,
 ) {
     // 条件为空的状态
     let mut condition_with_empty = Vec::new();
-    for state_machine in query_state_machines.iter_many(check_on_transition_states.iter()) {
+    for (state_machine_id, state_machine) in
+        query_state_machines.iter_many(check_on_transition_states.iter())
+    {
         let Some(curr_state_id) = state_machine.curr_state_id() else {
             warn!("Current state not found in states map",);
             return;
         };
-        let Ok((hsm_state, super_state)) = query_states.get(curr_state_id) else {
+        let Ok(super_state) = query_states.get(curr_state_id) else {
             continue;
         };
-        let state_machine_id = hsm_state.state_machine;
         let super_state_id = super_state.0;
 
         let Ok(condition) = query_condtitions.get(curr_state_id) else {
@@ -467,10 +467,7 @@ mod tests {
         world.insert_resource(DebugInfoCollector(Vec::new()));
 
         let start_id = world.spawn_empty().id();
-        let state_machine_id = world
-            .spawn_empty()
-            .insert(StateMachine::new(10, start_id))
-            .id();
+        let state_machine_id = world.spawn_empty().id();
 
         let mut curr_state_id = world
             .entity_mut(start_id)
@@ -502,6 +499,7 @@ mod tests {
             .insert(HsmOnUpdateSystem::new("set_condition_false"));
 
         world.entity_mut(state_machine_id).insert((
+            StateMachine::new(10, start_id),
             Name::new("StateMachines"),
             HsmOnState::default(),
             Condition(true),

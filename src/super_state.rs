@@ -2,7 +2,7 @@ use bevy::{
     ecs::{
         error::CommandWithEntity,
         lifecycle::HookContext,
-        relationship::{Relationship, RelationshipHookMode, RelationshipSourceCollection},
+        relationship::{Relationship, RelationshipHookMode},
         world::DeferredWorld,
     },
     prelude::*,
@@ -54,7 +54,7 @@ impl Relationship for SuperState {
             }
         }
         let entity_ref = world.entity(entity);
-        if entity_ref.get::<HsmState>().is_none() {
+        if !entity_ref.contains::<HsmState>() {
             warn!(
                 "Entity {:?} does not have a HsmState component, cannot create SuperState relationship",
                 entity
@@ -81,20 +81,6 @@ impl Relationship for SuperState {
             );
             world.commands().entity(entity).remove::<Self>();
             return;
-        }
-        // For one-to-one relationships, remove existing relationship before adding new one
-        let current_source_to_remove = world
-            .get_entity(target_entity)
-            .ok()
-            .and_then(|target_entity_ref| target_entity_ref.get::<Self::RelationshipTarget>())
-            .and_then(|relationship_target| {
-                relationship_target
-                    .collection()
-                    .source_to_remove_before_add()
-            });
-
-        if let Some(current_source) = current_source_to_remove {
-            world.commands().entity(current_source).try_remove::<Self>();
         }
     }
 
@@ -126,7 +112,7 @@ impl Relationship for SuperState {
             }
         {
             relationship_target.remove(&StateEntity::new(priority.0, entity));
-            if relationship_target.len() == 0 {
+            if relationship_target.is_empty() {
                 let command = |mut entity: EntityWorldMut| {
                     // this "remove" operation must check emptiness because in the event that an identical
                     // relationship is inserted on top, this despawn would result in the removal of that identical

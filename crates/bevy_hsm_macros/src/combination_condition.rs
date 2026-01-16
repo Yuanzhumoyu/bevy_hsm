@@ -87,10 +87,10 @@ impl Parse for CombinationCondition {
                         "not condition must have exactly one argument",
                     ));
                 }
-                CombinationCondition::Not(Box::new(conditions[0].clone()))
+                CombinationCondition::Not(Box::new(conditions.into_iter().next().unwrap()))
             }
             _ => CombinationCondition::Id(Expr::Path(syn::ExprPath {
-                attrs: vec![],
+                attrs: Vec::new(),
                 qself: None,
                 path: syn::Path::from(ident),
             })),
@@ -105,10 +105,7 @@ impl CombinationCondition {
         syn::parenthesized!(content in input);
         let conditions = content.parse_terminated(CombinationCondition::parse, Token![,])?;
 
-        let mut result = Vec::new();
-        for condition in conditions {
-            result.push(condition);
-        }
+        let result = conditions.into_iter().collect();
         Ok(result)
     }
 }

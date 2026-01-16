@@ -68,7 +68,7 @@ fn register_condition(
 
 fn startup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
+    let state_machine = commands.spawn_empty().id();
 
     commands.entity(start_state_id).insert((
         Name::new("Start"),
@@ -91,10 +91,11 @@ fn startup(mut commands: Commands) {
     println!("State Machines: {:?}", state_machine);
 
     commands.entity(state_machine).insert((
+        StateMachine::new(10, start_state_id),
         Name::new("Switch Counter"),
-        Count(0),
         HsmOnState::default(),
         Switch::Close,
+        Count(0),
     ));
 }
 

@@ -1,9 +1,12 @@
 use bevy::{
-    ecs::{lifecycle::HookContext, world::DeferredWorld},
+    ecs::{lifecycle::HookContext, relationship::Relationship, world::DeferredWorld},
     prelude::*,
 };
 
-use crate::prelude::{StateEntity, SubStates, SuperState};
+use crate::{
+    prelude::{StateEntity, SubStates, SuperState},
+    state::HsmState,
+};
 
 /// 状态优先级
 ///
@@ -19,14 +22,28 @@ pub struct StatePriority(pub u32);
 
 impl StatePriority {
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
-        let Some(super_state) = world.get::<SuperState>(entity).copied() else {
+        let Some(super_state_id) = world.get::<SuperState>(entity).copied() else {
             return;
         };
         let priority = world.get::<StatePriority>(entity).unwrap().0;
         let state_entity = StateEntity::new(priority, entity);
+        if let Some(super_state) = world.entity(super_state_id.0).get::<HsmState>()
+            && let Some(curr_state) = world.entity(entity).get::<HsmState>()
+        {
+            if super_state.get() != curr_state.get() {
+                warn!(
+                    "The currnet state<{}:{}> and its super state<{}:{}> do not belong to the same set.",
+                    entity,
+                    curr_state.get(),
+                    super_state_id.0,
+                    super_state.get()
+                );
+                return;
+            }
+        }
         world
             .commands()
-            .entity(super_state.0)
+            .entity(super_state_id.0)
             .entry::<SubStates>()
             .and_modify(move |mut sub| {
                 sub.add(state_entity);

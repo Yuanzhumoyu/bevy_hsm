@@ -35,7 +35,7 @@ fn register_condition(
 
 fn setup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
+    let state_machine = commands.spawn_empty().id();
 
     commands.entity(start_state_id).insert((
         Name::new("OFF"),
@@ -78,9 +78,11 @@ fn setup(mut commands: Commands) {
         HsmOnExitSystem::new("debug_on_exit"),
     ));
 
-    commands
-        .entity(state_machine)
-        .insert((Name::new("More States"), HsmOnState::default()));
+    commands.entity(state_machine).insert((
+        StateMachine::new(10, start_state_id),
+        Name::new("More States"),
+        HsmOnState::default(),
+    ));
 }
 
 /// # 流程图\Flowchart

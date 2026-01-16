@@ -1,7 +1,13 @@
 use std::{collections::VecDeque, fmt::Debug, hash::Hash};
 
 use bevy::{
-    ecs::{lifecycle::HookContext, schedule::ScheduleLabel, world::DeferredWorld},
+    ecs::{
+        error::CommandWithEntity,
+        lifecycle::HookContext,
+        relationship::{Relationship, RelationshipHookMode},
+        schedule::ScheduleLabel,
+        world::DeferredWorld,
+    },
     prelude::*,
 };
 
@@ -17,8 +23,8 @@ use crate::{
 
 /// 状态机\State Machines
 /// # 作用\Effect
-/// * 管理实体的状态转换，包括当前状态、下一状态以及状态映射表
-/// - Manages entity state transitions, including current state, next state, and state mapping table
+/// * 管理实体的状态转换，包括当前状态、下一状态
+/// - Manages entity state transitions, including current state, next state
 /// # 示例\Example
 ///
 /// ```rust
@@ -32,9 +38,6 @@ use crate::{
 /// ```
 #[derive(Component, Clone, PartialEq, Eq)]
 pub struct StateMachine {
-    /// 状态映射表
-    /// State mapping table
-    states: Vec<Entity>,
     /// 历史记录
     ///
     /// History
@@ -65,24 +68,9 @@ impl StateMachine {
         history.push(current_state);
         Self {
             history,
-            states: Vec::new(),
             next_state: VecDeque::new(),
             initial_state: current_state,
         }
-    }
-
-    /// 获取状态列表
-    ///
-    /// Get state list
-    pub fn states(&self) -> &[Entity] {
-        &self.states
-    }
-
-    /// 检查状态是否存在
-    ///
-    /// Check if state exists
-    pub fn contains(&self, state: Entity) -> bool {
-        self.states.binary_search(&state).is_ok()
     }
 
     /// 获取当前状态的ID
@@ -192,7 +180,6 @@ impl StateMachine {
 impl Debug for StateMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StateMachine")
-            .field("states", &self.states)
             .field("history", &self.history.get_history())
             .field("next_state", &self.next_state)
             .finish()
@@ -218,7 +205,7 @@ pub enum NextState {
 /// Indicates that the state machine has terminated and no longer processes state transitions
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[component(on_remove = Self::on_remove)]
-#[require(StationaryStateMachines)]
+#[require(StationaryStateMachine)]
 pub struct Terminated;
 
 impl Terminated {
@@ -239,14 +226,14 @@ impl Terminated {
 /// - If it exists, the OnEnter, OnExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[component(on_insert = Self::on_insert,on_remove = Self::on_remove)]
-pub struct StationaryStateMachines;
+pub struct StationaryStateMachine;
 
-impl StationaryStateMachines {
+impl StationaryStateMachine {
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(state_machine) = world.get::<StateMachine>(entity) else {
             world.commands().entity(entity).remove::<Self>();
             warn!(
-                "StationaryStateMachines component added to non-StateMachine entity<{}>",
+                "StationaryStateMachine component added to non-StateMachine entity<{}>",
                 entity
             );
             return;
@@ -443,34 +430,68 @@ impl HsmOnState {
     }
 }
 
+/// 状态组
+#[derive(Component, Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[relationship_target(relationship = HsmState)]
+pub struct HsmStateGroup(Vec<Entity>);
+
+impl HsmStateGroup {
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.0.binary_search(&entity).is_ok()
+    }
+
+    pub fn add(&mut self, entity: Entity) {
+        let Err(index) = self.0.binary_search(&entity) else {
+            return;
+        };
+        self.0.insert(index, entity);
+    }
+
+    pub fn remove(&mut self, entity: Entity) -> Option<usize> {
+        let Ok(index) = self.0.binary_search(&entity) else {
+            return None;
+        };
+        self.0.remove(index);
+        Some(index)
+    }
+
+    pub const fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// # 状态组件\State Component
 /// * 标记状态的组件，需要绑定[`StateMachine`]所在实体的id
 /// - Used to mark a state component, which requires the id of the entity that has the [`StateMachine`] component
 #[derive(Component, ScheduleLabel, Hash, Debug, Clone, Copy, PartialEq, Eq)]
-#[component(immutable, on_insert = Self::on_insert, on_remove = Self::on_remove)]
+#[component(immutable, on_insert = <Self as Relationship>::on_insert, on_replace = <Self as Relationship>::on_replace)]
 #[require(StatePriority)]
 pub struct HsmState {
-    pub state_machine: Entity,
+    state_group_id: Entity,
     pub strategy: StateTransitionStrategy,
     pub behavior: ExitTransitionBehavior,
 }
 
 impl HsmState {
-    pub fn with_id(state_machine: Entity) -> Self {
+    pub fn with_id(state_group_id: Entity) -> Self {
         Self {
-            state_machine,
+            state_group_id,
             strategy: StateTransitionStrategy::default(),
             behavior: ExitTransitionBehavior::default(),
         }
     }
 
     pub fn with(
-        state_machine: Entity,
+        state_group_id: Entity,
         strategy: StateTransitionStrategy,
         behavior: ExitTransitionBehavior,
     ) -> Self {
         Self {
-            state_machine,
+            state_group_id,
             strategy,
             behavior,
         }
@@ -487,54 +508,120 @@ impl HsmState {
         self.behavior = behavior;
         self
     }
+}
 
-    fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let state_id = hook_context.entity;
-        let state_machines_id = world
-            .get::<HsmState>(state_id)
-            .map(|s| s.state_machine)
-            .unwrap();
-        let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machines_id) else {
+impl Relationship for HsmState {
+    type RelationshipTarget = HsmStateGroup;
+
+    fn get(&self) -> Entity {
+        self.state_group_id
+    }
+
+    fn from(entity: Entity) -> Self {
+        Self::with_id(entity)
+    }
+
+    fn set_risky(&mut self, entity: Entity) {
+        self.state_group_id = entity;
+    }
+
+    fn on_insert(
+        mut world: DeferredWorld,
+        HookContext {
+            entity,
+            caller,
+            relationship_hook_mode,
+            ..
+        }: HookContext,
+    ) {
+        match relationship_hook_mode {
+            RelationshipHookMode::Run => {}
+            RelationshipHookMode::Skip => return,
+            RelationshipHookMode::RunIfNotLinked => {
+                if <Self::RelationshipTarget as RelationshipTarget>::LINKED_SPAWN {
+                    return;
+                }
+            }
+        }
+        let target_entity = world.entity(entity).get::<Self>().unwrap().get();
+        if target_entity == entity {
             warn!(
-                "Main body entity<{:?}> does not have StateMachine component",
-                state_machines_id
+                "{}The {}({target_entity:?}) relationship on entity {entity:?} points to itself. The invalid {} relationship has been removed.",
+                caller
+                    .map(|location| format!("{location}: "))
+                    .unwrap_or_default(),
+                DebugName::type_name::<Self>(),
+                DebugName::type_name::<Self>()
             );
+            world.commands().entity(entity).remove::<Self>();
             return;
-        };
+        }
 
-        match state_machine.states.binary_search(&state_id) {
-            Ok(old_index) => {
-                warn!("状态<{}> 已存在", state_machine.states[old_index]);
-            }
-            Err(index) => {
-                state_machine.states.insert(index, state_id);
-            }
+        if let Ok(mut entity_commands) = world.commands().get_entity(target_entity) {
+            // Deferring is necessary for batch mode
+            entity_commands
+                .entry::<Self::RelationshipTarget>()
+                .and_modify(move |mut relationship_target| {
+                    relationship_target.add(entity);
+                })
+                .or_insert_with(move || {
+                    let mut target = Self::RelationshipTarget::with_capacity(1);
+                    target.add(entity);
+                    target
+                });
+        } else {
+            warn!(
+                "{}The {}({target_entity:?}) relationship on entity {entity:?} relates to an entity that does not exist. The invalid {} relationship has been removed.",
+                caller
+                    .map(|location| format!("{location}: "))
+                    .unwrap_or_default(),
+                DebugName::type_name::<Self>(),
+                DebugName::type_name::<Self>()
+            );
+            world.commands().entity(entity).remove::<Self>();
         }
     }
 
-    fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
-        let state_id = hook_context.entity;
-        let state_machines_id = world
-            .get::<HsmState>(state_id)
-            .map(|s| s.state_machine)
-            .unwrap();
-        let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machines_id) else {
-            warn!(
-                "Main body entity<{:?}> does not have StateMachine component",
-                state_machines_id
-            );
-            return;
-        };
-
-        match state_machine.states.binary_search(&state_id) {
-            Ok(index) => {
-                state_machine.states.remove(index);
+    fn on_replace(
+        mut world: DeferredWorld,
+        HookContext {
+            entity,
+            relationship_hook_mode,
+            ..
+        }: HookContext,
+    ) {
+        match relationship_hook_mode {
+            RelationshipHookMode::Run => {}
+            RelationshipHookMode::Skip => return,
+            RelationshipHookMode::RunIfNotLinked => {
+                if <Self::RelationshipTarget as RelationshipTarget>::LINKED_SPAWN {
+                    return;
+                }
             }
-            Err(_) => {
-                warn!(
-                    "State<{:?}> does not exist in StateMachine<{:?}>",
-                    state_id, state_machines_id
-                );
+        }
+        let target_entity = world.entity(entity).get::<Self>().unwrap().state_group_id;
+        if let Ok(mut target_entity_mut) = world.get_entity_mut(target_entity) {
+            if let Some(mut relationship_target) =
+                target_entity_mut.get_mut::<Self::RelationshipTarget>()
+            {
+                relationship_target.remove(entity);
+                if relationship_target.is_empty() {
+                    let command = |mut entity: EntityWorldMut| {
+                        // this "remove" operation must check emptiness because in the event that an identical
+                        // relationship is inserted on top, this despawn would result in the removal of that identical
+                        // relationship ... not what we want!
+                        if entity
+                            .get::<Self::RelationshipTarget>()
+                            .is_some_and(RelationshipTarget::is_empty)
+                        {
+                            entity.remove::<Self::RelationshipTarget>();
+                        }
+                    };
+
+                    world
+                        .commands()
+                        .queue_silenced(command.with_entity(target_entity));
+                }
             }
         }
     }

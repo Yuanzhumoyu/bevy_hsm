@@ -50,7 +50,7 @@ fn register_condition(
 
 fn setup(mut commands: Commands) {
     let start_state_id = commands.spawn_empty().id();
-    let state_machine = commands.spawn(StateMachine::new(10, start_state_id)).id();
+    let state_machine = commands.spawn_empty().id();
 
     commands.entity(start_state_id).insert((
         Name::new("red"),
@@ -74,6 +74,7 @@ fn setup(mut commands: Commands) {
     println!("State Machines: {:?}", state_machine);
 
     commands.entity(state_machine).insert((
+        StateMachine::new(10, start_state_id),
         Name::new("Blinking Light Paused"),
         HsmOnState::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),
@@ -88,14 +89,14 @@ fn blinking_pause(
     if keyboard.just_pressed(KeyCode::Space) {
         let mut entity = commands.entity(state_machine.entity());
         entity.queue(|mut entity: EntityWorldMut<'_>| {
-            match entity.get::<StationaryStateMachines>().is_some() {
+            match entity.get::<StationaryStateMachine>().is_some() {
                 true => {
                     info!("Resuming blinking light");
-                    entity.remove::<StationaryStateMachines>();
+                    entity.remove::<StationaryStateMachine>();
                 }
                 false => {
                     info!("Pausing blinking light");
-                    entity.insert(StationaryStateMachines);
+                    entity.insert(StationaryStateMachine);
                 }
             };
         });
@@ -114,8 +115,8 @@ fn blinking_pause(
 /// - [LightTimer] - Timer component used to control the blinking
 /// * [StateMachine] - 状态机组件，管理当前状态和状态转换
 /// - [StateMachine] - State machine component, managing the current state and state transitions
-/// * [StationaryStateMachines] - 状态机组件，用于暂停状态机
-/// - [StationaryStateMachines] - State machine component used to pause the state machine
+/// * [StationaryStateMachine] - 状态机组件，用于暂停状态机
+/// - [StationaryStateMachine] - State machine component used to pause the state machine
 ///
 /// ## 状态转换\State Transitions
 /// [red] <-> [yellow] - 通过计时器来在两个状态间转换
