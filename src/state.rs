@@ -175,6 +175,36 @@ impl StateMachine {
     pub fn get_history(&self) -> Vec<Entity> {
         self.history.get_history()
     }
+
+    /// 获取历史记录长度
+    ///
+    /// Obtain the length of historical records
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// 检查是否处于指定状态
+    ///
+    /// Check if in specified state
+    pub fn is_in_state(&self, state: Entity) -> bool {
+        self.curr_state_id() == Some(state)
+    }
+
+    /// 清空下一个状态队列
+    ///
+    /// Clear the next state queue
+    pub fn clear_next_states(&mut self) {
+        self.next_state.clear();
+    }
+
+    /// 检查是否正在转换状态
+    ///
+    /// Check if the state is transitioning
+    pub fn is_transitioning(&self) -> bool {
+        self.next_state
+            .front()
+            .map_or(false, |n| *n != NextState::None)
+    }
 }
 
 impl Debug for StateMachine {
@@ -317,10 +347,13 @@ impl HsmOnState {
                     return;
                 };
                 let disposable_systems = world.resource::<HsmOnEnterDisposableSystems>();
-                let Some(action_system_id) =
-                    disposable_systems.get(on_enter_system.as_str()).copied()
-                else {
-                    return;
+                let action_system_id = disposable_systems.get(on_enter_system.as_str()).copied();
+                if action_system_id.is_none() {
+                    warn!(
+                        "状态<{}>在OnEnter系统中的{}不存在.",
+                        curr_state_id,
+                        on_enter_system.as_str()
+                    );
                 };
                 let state_context = HsmStateContext::new(
                     match world.get::<ServiceTarget>(state_machine_id) {
@@ -331,7 +364,9 @@ impl HsmOnState {
                     curr_state_id,
                 );
                 world.commands().queue(move |world: &mut World| {
-                    if let Err(e) = world.run_system_with(action_system_id, state_context) {
+                    if let Some(action_system_id) = action_system_id
+                        && let Err(e) = world.run_system_with(action_system_id, state_context)
+                    {
                         warn!("Error running enter system: {:?}", e);
                     }
                     world
@@ -397,14 +432,20 @@ impl HsmOnState {
                     return;
                 };
                 let disposable_systems = world.resource::<HsmOnExitDisposableSystems>();
-                let Some(action_system_id) =
-                    disposable_systems.get(on_exit_system.as_str()).copied()
-                else {
-                    return;
+                let action_system_id = disposable_systems.get(on_exit_system.as_str()).copied();
+
+                if action_system_id.is_none() {
+                    warn!(
+                        "状态<{}>在OnExit系统中的{}不存在.",
+                        curr_state_id,
+                        on_exit_system.as_str()
+                    );
                 };
 
                 world.commands().queue(move |world: &mut World| {
-                    if let Err(e) = world.run_system_with(action_system_id, state_context) {
+                    if let Some(action_system_id) = action_system_id
+                        && let Err(e) = world.run_system_with(action_system_id, state_context)
+                    {
                         warn!("Error running exit system: {:?}", e);
                     }
                     let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machine_id)
