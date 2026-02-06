@@ -3,8 +3,8 @@ use bevy_hsm::prelude::*;
 
 fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
     move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
-        let state_name = query.get(context.state).unwrap();
-        println!("[{}]{}: {}", context.state, state_name, info);
+        let state_name = query.get(context.state()).unwrap();
+        println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
@@ -12,7 +12,7 @@ fn debug_light(
     states: In<Vec<HsmStateContext>>,
     query: Query<&Name>,
 ) -> Option<Vec<HsmStateContext>> {
-    for light in query.iter_many(states.0.iter().map(|a| a.state)) {
+    for light in query.iter_many(states.0.iter().map(|c| c.state())) {
         println!("Current light: {}", light);
     }
     None
@@ -23,7 +23,7 @@ struct LightTimer(Timer);
 
 impl LightTimer {
     fn light_timer(
-        entity: In<HsmStateContext>,
+        entity: In<HsmStateConditionContext>,
         time: Res<Time<Fixed>>,
         mut query: Query<&mut LightTimer>,
     ) -> bool {
@@ -36,45 +36,52 @@ impl LightTimer {
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut on_enter_disposable_systems: ResMut<HsmOnEnterDisposableSystems>,
-    mut on_exit_disposable_systems: ResMut<HsmOnExitDisposableSystems>,
+    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
 ) {
     let id = commands.register_system(LightTimer::light_timer);
     action_systems.insert("light_timer", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    on_enter_disposable_systems.insert("debug_on_enter", id);
+    disposable_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    on_exit_disposable_systems.insert("debug_on_exit", id);
+    disposable_systems.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
-    let start_state_id = commands.spawn_empty().id();
+    let red = commands
+        .spawn((
+            Name::new("red"),
+            HsmState::with(
+                StateTransitionStrategy::Parallel,
+                ExitTransitionBehavior::Rebirth,
+            ),
+            HsmOnUpdateSystem::new("Update:debug_light"),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnExitSystem::new("debug_on_exit"),
+        ))
+        .id();
+
+    let yellow = commands
+        .spawn((
+            Name::new("yellow"),
+            HsmState::default(),
+            HsmOnUpdateSystem::new("Update:debug_light"),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnExitSystem::new("debug_on_exit"),
+            HsmOnEnterCondition::new("light_timer"),
+            HsmOnExitCondition::new("light_timer"),
+        ))
+        .id();
+
     let state_machine = commands.spawn_empty().id();
-
-    commands.entity(start_state_id).insert((
-        Name::new("red"),
-        HsmState::with_id(state_machine),
-        HsmOnUpdateSystem::new("Update:debug_light"),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnExitSystem::new("debug_on_exit"),
-    ));
-
-    commands.spawn((
-        SuperState(start_state_id),
-        Name::new("yellow"),
-        HsmState::with_id(state_machine),
-        HsmOnUpdateSystem::new("Update:debug_light"),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnExitSystem::new("debug_on_exit"),
-        HsmOnEnterCondition::new("light_timer"),
-        HsmOnExitCondition::new("light_timer"),
-    ));
-
     println!("State Machines: {:?}", state_machine);
 
+    let traversal = TraversalStrategy::default();
+    let state_tree = StateTree::new(red, traversal.clone()).with_add(red, yellow, traversal);
+
     commands.entity(state_machine).insert((
-        StateMachine::new(10, start_state_id),
+        state_tree,
+        StateMachine::new(10, TreeStateId::new(state_machine, red)),
         Name::new("Blinking Light Paused"),
         HsmOnState::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),

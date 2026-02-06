@@ -33,7 +33,3 @@ path = "examples/flashing_light.rs"
 [[example]]
 name = "more_states"
 path = "examples/more_states.rs"
-
-[[example]]
-name = "exit_actions"
-path = "examples/exit_actions.rs"

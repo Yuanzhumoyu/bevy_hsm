@@ -1,24 +1,19 @@
 use std::{collections::VecDeque, fmt::Debug, hash::Hash};
 
 use bevy::{
-    ecs::{
-        error::CommandWithEntity,
-        lifecycle::HookContext,
-        relationship::{Relationship, RelationshipHookMode},
-        schedule::ScheduleLabel,
-        world::DeferredWorld,
-    },
+    ecs::{lifecycle::HookContext, schedule::ScheduleLabel, world::DeferredWorld},
     prelude::*,
 };
+use smallvec::SmallVec;
 
 use crate::{
-    history::StateHistory,
-    hook_system::{HsmOnEnterDisposableSystems, HsmOnExitDisposableSystems, HsmStateContext},
+    history::{HistoricalNode, StateHistory, StateHistoryIterator},
+    hook_system::{HsmOnStateDisposableSystems, HsmStateContext},
     on_transition::CheckOnTransitionStates,
     prelude::{
         ExitTransitionBehavior, HsmActionSystemBuffer, ServiceTarget, StateTransitionStrategy,
     },
-    priority::StatePriority,
+    state_tree::TreeStateId,
 };
 
 /// 状态机\State Machines
@@ -55,20 +50,32 @@ pub struct StateMachine {
     /// 实体下一个要转换到的状态
     ///
     /// Next state to transition to for the entity
-    next_state: VecDeque<NextState>,
+    next_states: VecDeque<NextState>,
+    /// 当前状态栈
+    ///
+    /// Current state stack
+    ///
+    /// 用于处理当出现需要同时运行多个状态,
+    curr_states: Vec<TreeStateId>,
+    /// 更新数量, 用于处理push进curr_states中的数量
+    ///
+    /// Update quantity, used to process the number of push into curr_states
+    update_quantity: usize,
     /// 初始状态
     ///
     /// Initial state
-    initial_state: Entity,
+    initial_state: TreeStateId,
 }
 
 impl StateMachine {
-    pub fn new(history_len: usize, current_state: Entity) -> Self {
-        let mut history = StateHistory::new(history_len);
-        history.push(current_state);
+    pub fn new(history_len: usize, current_state: TreeStateId) -> Self {
+        let history = StateHistory::new(history_len);
+        // history.push(current_state);
         Self {
             history,
-            next_state: VecDeque::new(),
+            update_quantity: 1,
+            curr_states: vec![current_state],
+            next_states: VecDeque::new(),
             initial_state: current_state,
         }
     }
@@ -76,36 +83,36 @@ impl StateMachine {
     /// 获取当前状态的ID
     ///
     /// Get the ID of the current state
-    pub fn curr_state_id(&self) -> Option<Entity> {
-        self.history.get_current()
+    pub fn curr_state_ids(&self) -> &[TreeStateId] {
+        self.curr_states.as_slice()
     }
 
     /// 获取下一个状态的ID
     ///
     /// Get the ID of the next state
     pub fn next_state_id(&self) -> Option<&NextState> {
-        self.next_state.front()
+        self.next_states.front()
     }
 
     /// 设置初始状态
     ///
     /// Set the initial state
-    pub fn set_initial_state(&mut self, state: Entity) {
+    pub fn set_initial_state(&mut self, state: TreeStateId) {
         self.initial_state = state;
     }
 
     /// 添加历史记录
     ///
     /// Add history record
-    pub fn push_history(&mut self, state: Entity) {
-        self.history.push(state);
+    fn push_history(&mut self, node: HistoricalNode) {
+        self.history.push(node);
     }
 
     /// 添加下一个状态
     ///
     /// Add next state
     pub fn push_next_state(&mut self, next_state: NextState) {
-        self.next_state.push_front(next_state);
+        self.next_states.push_front(next_state);
     }
 
     /// 批量添加下一个状态
@@ -115,15 +122,31 @@ impl StateMachine {
     where
         I: IntoIterator<Item = NextState>,
     {
-        self.next_state.extend(iter);
+        self.next_states.extend(iter);
+    }
+
+    /// 添加当前状态
+    ///
+    /// Add current state
+    pub fn push_curr_state(&mut self, curr_state: TreeStateId) {
+        self.curr_states.push(curr_state);
+        self.update_quantity = 1;
+    }
+
+    /// 添加多个当前状态
+    ///
+    /// Add multiple current states
+    pub fn push_curr_states(&mut self, state_ids: &[TreeStateId]) {
+        self.curr_states.extend_from_slice(state_ids);
+        self.update_quantity = state_ids.len();
     }
 
     /// 获取下一个状态的ID
     ///
     /// Get the ID of the next state
-    pub fn get_next_state(&self) -> Option<Entity> {
-        self.next_state.front().and_then(|next| match next {
-            NextState::Next((id, _)) => Some(*id),
+    pub fn get_next_state(&self) -> Option<TreeStateId> {
+        self.next_states.front().and_then(|next| match next {
+            NextState::Next((state_id, _)) => Some(*state_id),
             NextState::None => None,
         })
     }
@@ -132,48 +155,38 @@ impl StateMachine {
     ///
     /// Get the OnState of the next state
     pub fn get_next_state_on_state(&self) -> Option<HsmOnState> {
-        self.next_state.front().and_then(|next| match next {
+        self.next_states.front().and_then(|next| match next {
             NextState::Next((_, on_state)) => Some(*on_state),
             NextState::None => None,
         })
+    }
+
+    /// 获取当前正在更新的状态
+    ///
+    /// Get the currently updating state
+    pub fn curr_update_states(&self) -> &[TreeStateId] {
+        &self.curr_states[self.curr_states.len().saturating_sub(self.update_quantity)..]
     }
 
     /// 弹出下一个状态
     ///
     /// Pop next state
     pub fn pop_next_state(&mut self) -> Option<NextState> {
-        self.next_state.pop_front()
+        self.next_states.pop_front()
     }
 
-    /// 更新状态
+    /// 截断当前状态
     ///
-    /// Update state
-    pub fn update(&mut self) {
-        let Some(NextState::Next((curr_state, _))) = self.next_state.pop_front() else {
-            return;
-        };
-        self.history.push(curr_state);
-    }
-
-    /// 获取上一个状态的ID
-    ///
-    /// Get the ID of the previous state
-    pub fn prev_state_id(&self) -> Option<Entity> {
-        self.history.get_previous()
-    }
-
-    /// 检查是否有上一个状态
-    ///
-    /// Check if there is a previous state
-    pub fn has_prev_state(&self) -> bool {
-        self.prev_state_id().is_some()
+    /// Truncate current state
+    pub fn truncate_curr_state(&mut self, index: usize) {
+        self.curr_states.truncate(index);
     }
 
     /// 获取状态历史记录
     ///
     /// Get state history
-    pub fn get_history(&self) -> Vec<Entity> {
-        self.history.get_history()
+    pub fn history_iter(&self) -> StateHistoryIterator<'_> {
+        self.history.iter()
     }
 
     /// 获取历史记录长度
@@ -186,22 +199,46 @@ impl StateMachine {
     /// 检查是否处于指定状态
     ///
     /// Check if in specified state
-    pub fn is_in_state(&self, state: Entity) -> bool {
-        self.curr_state_id() == Some(state)
+    pub fn is_in_state(&self, state: &[TreeStateId]) -> bool {
+        self.curr_state_ids() == state
+    }
+
+    /// 清空当前状态
+    ///
+    /// Clear current state
+    pub fn clear_curr_states(&mut self) {
+        self.update_quantity = 0;
+        self.curr_states.clear();
+    }
+
+    /// 清空更新状态
+    ///
+    /// Clear update states
+    pub fn clear_update_states(&mut self) {
+        self.curr_states
+            .truncate(self.curr_states.len().saturating_sub(self.update_quantity));
+        self.update_quantity = 0;
     }
 
     /// 清空下一个状态队列
     ///
     /// Clear the next state queue
     pub fn clear_next_states(&mut self) {
-        self.next_state.clear();
+        self.next_states.clear();
+    }
+
+    /// 清空状态历史队列
+    ///
+    /// Clear the state history queue
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     /// 检查是否正在转换状态
     ///
     /// Check if the state is transitioning
     pub fn is_transitioning(&self) -> bool {
-        self.next_state
+        self.next_states
             .front()
             .map_or(false, |n| *n != NextState::None)
     }
@@ -210,8 +247,8 @@ impl StateMachine {
 impl Debug for StateMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StateMachine")
-            .field("history", &self.history.get_history())
-            .field("next_state", &self.next_state)
+            .field("history", &self.history.iter().collect::<Vec<_>>())
+            .field("next_states", &self.next_states)
             .finish()
     }
 }
@@ -222,7 +259,7 @@ pub enum NextState {
     /// 下一个状态的ID和OnState
     ///
     /// The ID of the next state and OnState
-    Next((Entity, HsmOnState)),
+    Next((TreeStateId, HsmOnState)),
     /// 无下一个状态
     ///
     /// No next state
@@ -243,9 +280,12 @@ impl Terminated {
         let Some(mut state_machine) = world.get_mut::<StateMachine>(entity) else {
             return;
         };
-        state_machine.next_state.clear();
-        let curr_state = state_machine.initial_state;
-        state_machine.history.push(curr_state);
+        state_machine.clear_curr_states();
+        state_machine.clear_next_states();
+        state_machine.clear_history();
+
+        let init_state = state_machine.initial_state;
+        state_machine.push_curr_state(init_state);
     }
 }
 
@@ -269,44 +309,51 @@ impl StationaryStateMachine {
             return;
         };
         // 查看当前状态是否有HsmOnUpdateSystem,则将其添加进延期表中
-        let Some(curr_state_id) = state_machine.curr_state_id() else {
-            return;
-        };
-        let state_context = HsmStateContext::new(
-            match world.get::<ServiceTarget>(entity) {
-                Some(service_target) => service_target.0,
-                None => entity,
-            },
-            entity,
-            curr_state_id,
-        );
 
-        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-        HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
-            buff.add(state_context);
-        });
+        for curr_state_id in state_machine.curr_state_ids().to_vec() {
+            let state_context = HsmStateContext::<Entity>::new(
+                match world.get::<ServiceTarget>(entity) {
+                    Some(service_target) => service_target.0,
+                    None => entity,
+                },
+                entity,
+                curr_state_id.state(),
+            );
+
+            let unsafe_world_cell = world.as_unsafe_world_cell();
+            HsmActionSystemBuffer::buffer_scope(
+                unsafe_world_cell,
+                curr_state_id.state(),
+                move |_world, buff| {
+                    buff.add(state_context);
+                },
+            );
+        }
     }
 
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(state_machine) = world.get::<StateMachine>(entity) else {
             return;
         };
-        let Some(curr_state_id) = state_machine.curr_state_id() else {
-            return;
-        };
-        let state_context = HsmStateContext::new(
-            match world.get::<ServiceTarget>(entity) {
-                Some(service_target) => service_target.0,
-                None => entity,
-            },
-            entity,
-            curr_state_id,
-        );
+        for curr_state_id in state_machine.curr_state_ids().to_vec() {
+            let state_context = HsmStateContext::<Entity>::new(
+                match world.get::<ServiceTarget>(entity) {
+                    Some(service_target) => service_target.0,
+                    None => entity,
+                },
+                entity,
+                curr_state_id.state(),
+            );
 
-        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-        HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
-            buff.add(state_context);
-        });
+            let unsafe_world_cell = world.as_unsafe_world_cell();
+            HsmActionSystemBuffer::buffer_scope(
+                unsafe_world_cell,
+                curr_state_id.state(),
+                move |_world, buff| {
+                    buff.add(state_context);
+                },
+            );
+        }
     }
 }
 
@@ -334,120 +381,133 @@ impl HsmOnState {
         let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machine_id) else {
             return;
         };
+        let mut state_stack = SmallVec::<[TreeStateId; 1]>::new();
         match hsm_state {
             HsmOnState::Enter => {
-                state_machine.update();
-                let Some(curr_state_id) = state_machine.curr_state_id() else {
-                    warn!("Current state not found in states map",);
-                    return;
-                };
+                state_stack.extend_from_slice(state_machine.curr_state_ids());
+                state_machine.push_history(HistoricalNode::new(state_stack.to_vec(), hsm_state));
+                for curr_state_id in state_stack {
+                    // 运行进入系统
+                    let Some(on_enter_system) =
+                        world.get::<HsmOnEnterSystem>(curr_state_id.state())
+                    else {
+                        continue;
+                    };
+                    let disposable_systems = world.resource::<HsmOnStateDisposableSystems>();
 
-                // 运行进入系统
-                let Some(on_enter_system) = world.get::<HsmOnEnterSystem>(curr_state_id) else {
-                    return;
-                };
-                let disposable_systems = world.resource::<HsmOnEnterDisposableSystems>();
-                let action_system_id = disposable_systems.get(on_enter_system.as_str()).copied();
-                if action_system_id.is_none() {
-                    warn!(
-                        "状态<{}>在OnEnter系统中的{}不存在.",
-                        curr_state_id,
-                        on_enter_system.as_str()
+                    let Some(action_system_id) =
+                        disposable_systems.get(on_enter_system.as_str()).copied()
+                    else {
+                        warn!(
+                            "状态<{}>在OnEnter系统中的{}不存在.",
+                            curr_state_id,
+                            on_enter_system.as_str()
+                        );
+                        continue;
+                    };
+                    let state_context = HsmStateContext::<Entity>::new(
+                        match world.get::<ServiceTarget>(state_machine_id) {
+                            Some(service_target) => service_target.0,
+                            None => state_machine_id,
+                        },
+                        state_machine_id,
+                        curr_state_id.state(),
                     );
-                };
-                let state_context = HsmStateContext::new(
-                    match world.get::<ServiceTarget>(state_machine_id) {
-                        Some(service_target) => service_target.0,
-                        None => state_machine_id,
-                    },
-                    state_machine_id,
-                    curr_state_id,
-                );
-                world.commands().queue(move |world: &mut World| {
-                    if let Some(action_system_id) = action_system_id
-                        && let Err(e) = world.run_system_with(action_system_id, state_context)
+                    if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
+                        .run_system_with(action_system_id, state_context)
                     {
                         warn!("Error running enter system: {:?}", e);
                     }
-                    world
-                        .entity_mut(state_machine_id)
-                        .insert(HsmOnState::Update);
-                });
+                }
+                unsafe { world.as_unsafe_world_cell().world_mut() }
+                    .entity_mut(state_machine_id)
+                    .insert(HsmOnState::Update);
             }
             HsmOnState::Update => {
-                let Some(curr_state_id) = state_machine.curr_state_id() else {
-                    warn!("Current state not found in states map",);
-                    return;
-                };
+                state_stack.extend_from_slice(state_machine.curr_state_ids());
+                state_machine.push_history(HistoricalNode::new(state_stack.to_vec(), hsm_state));
 
-                // 添加过渡条件检查系统
-                let curr_state = world.entity(curr_state_id);
-                if curr_state.contains::<HsmOnEnterSystem>()
-                    && curr_state.contains::<HsmOnExitSystem>()
-                {
-                    let mut check_on_transition_states =
-                        world.resource_mut::<CheckOnTransitionStates>();
-                    check_on_transition_states.insert(state_machine_id);
+                for curr_state_id in state_stack {
+                    // 添加过渡条件检查系统
+                    let curr_state = world.entity(curr_state_id.state());
+                    if curr_state.contains::<HsmOnEnterSystem>()
+                        || curr_state.contains::<HsmOnExitSystem>()
+                    {
+                        let mut check_on_transition_states =
+                            world.resource_mut::<CheckOnTransitionStates>();
+                        check_on_transition_states.insert(state_machine_id);
+                    }
+
+                    // 运行更新系统
+                    let state_context = HsmStateContext::<Entity>::new(
+                        match world.get::<ServiceTarget>(state_machine_id) {
+                            Some(service_target) => service_target.0,
+                            None => state_machine_id,
+                        },
+                        state_machine_id,
+                        curr_state_id.state(),
+                    );
+
+                    HsmActionSystemBuffer::buffer_scope(
+                        world.as_unsafe_world_cell(),
+                        curr_state_id.state(),
+                        move |_world, buff| {
+                            buff.add(state_context);
+                        },
+                    );
                 }
-
-                // 运行更新系统
-                let state_context = HsmStateContext::new(
-                    match world.get::<ServiceTarget>(state_machine_id) {
-                        Some(service_target) => service_target.0,
-                        None => state_machine_id,
-                    },
-                    state_machine_id,
-                    curr_state_id,
-                );
-
-                let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-                HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
-                    buff.add(state_context);
-                });
             }
             HsmOnState::Exit => {
-                let Some(curr_state_id) = state_machine.curr_state_id() else {
-                    warn!("Current state not found in states map",);
-                    return;
-                };
-                let state_context = HsmStateContext::new(
-                    match world.get::<ServiceTarget>(state_machine_id) {
-                        Some(service_target) => service_target.0,
-                        None => state_machine_id,
-                    },
-                    state_machine_id,
-                    curr_state_id,
-                );
+                state_stack.extend_from_slice(state_machine.curr_update_states());
+                state_machine.push_history(HistoricalNode::new(state_stack.to_vec(), hsm_state));
+                state_machine.clear_update_states();
 
-                // 过滤条件
-                let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-                HsmActionSystemBuffer::buffer_scope(world, curr_state_id, move |_world, buff| {
-                    buff.remove_interceptor(state_context);
-
-                    buff.add_filter(state_context);
-                });
-
-                // 运行退出系统
-                let Some(on_exit_system) = world.get::<HsmOnExitSystem>(curr_state_id) else {
-                    return;
-                };
-                let disposable_systems = world.resource::<HsmOnExitDisposableSystems>();
-                let action_system_id = disposable_systems.get(on_exit_system.as_str()).copied();
-
-                if action_system_id.is_none() {
-                    warn!(
-                        "状态<{}>在OnExit系统中的{}不存在.",
-                        curr_state_id,
-                        on_exit_system.as_str()
+                for curr_state_id in state_stack.into_iter().rev() {
+                    let state_context = HsmStateContext::<Entity>::new(
+                        match world.get::<ServiceTarget>(state_machine_id) {
+                            Some(service_target) => service_target.0,
+                            None => state_machine_id,
+                        },
+                        state_machine_id,
+                        curr_state_id.state(),
                     );
-                };
+                    // 过滤条件
+                    HsmActionSystemBuffer::buffer_scope(
+                        world.as_unsafe_world_cell(),
+                        curr_state_id.state(),
+                        move |_world, buff| {
+                            buff.remove_interceptor(state_context);
+
+                            buff.add_filter(state_context);
+                        },
+                    );
+                    // 运行退出系统
+                    'on_exit: {
+                        let Some(on_exit_system) =
+                            world.get::<HsmOnExitSystem>(curr_state_id.state())
+                        else {
+                            break 'on_exit;
+                        };
+                        let disposable_systems = world.resource::<HsmOnStateDisposableSystems>();
+                        let Some(action_system_id) =
+                            disposable_systems.get(on_exit_system.as_str()).copied()
+                        else {
+                            warn!(
+                                "状态<{}>在OnEnter系统中的{}不存在.",
+                                curr_state_id,
+                                on_exit_system.as_str()
+                            );
+                            break 'on_exit;
+                        };
+                        if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
+                            .run_system_with(action_system_id, state_context)
+                        {
+                            error!("Error running exit system: {:?}", e);
+                        };
+                    }
+                }
 
                 world.commands().queue(move |world: &mut World| {
-                    if let Some(action_system_id) = action_system_id
-                        && let Err(e) = world.run_system_with(action_system_id, state_context)
-                    {
-                        warn!("Error running exit system: {:?}", e);
-                    }
                     let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machine_id)
                     else {
                         warn!("StateMachine not found: {}", state_machine_id);
@@ -463,7 +523,7 @@ impl HsmOnState {
                         world.entity_mut(state_machine_id).insert(Terminated);
                         return;
                     };
-                    state_machine.push_history(curr_state);
+                    state_machine.push_curr_state(curr_state);
                     world.entity_mut(state_machine_id).insert(on_state);
                 });
             }
@@ -471,71 +531,18 @@ impl HsmOnState {
     }
 }
 
-/// 状态组
-#[derive(Component, Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[relationship_target(relationship = HsmState)]
-pub struct HsmStateGroup(Vec<Entity>);
-
-impl HsmStateGroup {
-    pub fn contains(&self, entity: Entity) -> bool {
-        self.0.binary_search(&entity).is_ok()
-    }
-
-    pub fn add(&mut self, entity: Entity) {
-        let Err(index) = self.0.binary_search(&entity) else {
-            return;
-        };
-        self.0.insert(index, entity);
-    }
-
-    pub fn remove(&mut self, entity: Entity) -> Option<usize> {
-        let Ok(index) = self.0.binary_search(&entity) else {
-            return None;
-        };
-        self.0.remove(index);
-        Some(index)
-    }
-
-    pub const fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
 /// # 状态组件\State Component
 /// * 标记状态的组件，需要绑定[`StateMachine`]所在实体的id
 /// - Used to mark a state component, which requires the id of the entity that has the [`StateMachine`] component
-#[derive(Component, ScheduleLabel, Hash, Debug, Clone, Copy, PartialEq, Eq)]
-#[component(immutable, on_insert = <Self as Relationship>::on_insert, on_replace = <Self as Relationship>::on_replace)]
-#[require(StatePriority)]
+#[derive(Component, ScheduleLabel, Hash, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HsmState {
-    state_group_id: Entity,
     pub strategy: StateTransitionStrategy,
     pub behavior: ExitTransitionBehavior,
 }
 
 impl HsmState {
-    pub fn with_id(state_group_id: Entity) -> Self {
-        Self {
-            state_group_id,
-            strategy: StateTransitionStrategy::default(),
-            behavior: ExitTransitionBehavior::default(),
-        }
-    }
-
-    pub fn with(
-        state_group_id: Entity,
-        strategy: StateTransitionStrategy,
-        behavior: ExitTransitionBehavior,
-    ) -> Self {
-        Self {
-            state_group_id,
-            strategy,
-            behavior,
-        }
+    pub fn with(strategy: StateTransitionStrategy, behavior: ExitTransitionBehavior) -> Self {
+        Self { strategy, behavior }
     }
 
     #[inline]
@@ -548,123 +555,6 @@ impl HsmState {
     pub fn set_behavior(mut self, behavior: ExitTransitionBehavior) -> Self {
         self.behavior = behavior;
         self
-    }
-}
-
-impl Relationship for HsmState {
-    type RelationshipTarget = HsmStateGroup;
-
-    fn get(&self) -> Entity {
-        self.state_group_id
-    }
-
-    fn from(entity: Entity) -> Self {
-        Self::with_id(entity)
-    }
-
-    fn set_risky(&mut self, entity: Entity) {
-        self.state_group_id = entity;
-    }
-
-    fn on_insert(
-        mut world: DeferredWorld,
-        HookContext {
-            entity,
-            caller,
-            relationship_hook_mode,
-            ..
-        }: HookContext,
-    ) {
-        match relationship_hook_mode {
-            RelationshipHookMode::Run => {}
-            RelationshipHookMode::Skip => return,
-            RelationshipHookMode::RunIfNotLinked => {
-                if <Self::RelationshipTarget as RelationshipTarget>::LINKED_SPAWN {
-                    return;
-                }
-            }
-        }
-        let target_entity = world.entity(entity).get::<Self>().unwrap().get();
-        if target_entity == entity {
-            warn!(
-                "{}The {}({target_entity:?}) relationship on entity {entity:?} points to itself. The invalid {} relationship has been removed.",
-                caller
-                    .map(|location| format!("{location}: "))
-                    .unwrap_or_default(),
-                DebugName::type_name::<Self>(),
-                DebugName::type_name::<Self>()
-            );
-            world.commands().entity(entity).remove::<Self>();
-            return;
-        }
-
-        if let Ok(mut entity_commands) = world.commands().get_entity(target_entity) {
-            // Deferring is necessary for batch mode
-            entity_commands
-                .entry::<Self::RelationshipTarget>()
-                .and_modify(move |mut relationship_target| {
-                    relationship_target.add(entity);
-                })
-                .or_insert_with(move || {
-                    let mut target = Self::RelationshipTarget::with_capacity(1);
-                    target.add(entity);
-                    target
-                });
-        } else {
-            warn!(
-                "{}The {}({target_entity:?}) relationship on entity {entity:?} relates to an entity that does not exist. The invalid {} relationship has been removed.",
-                caller
-                    .map(|location| format!("{location}: "))
-                    .unwrap_or_default(),
-                DebugName::type_name::<Self>(),
-                DebugName::type_name::<Self>()
-            );
-            world.commands().entity(entity).remove::<Self>();
-        }
-    }
-
-    fn on_replace(
-        mut world: DeferredWorld,
-        HookContext {
-            entity,
-            relationship_hook_mode,
-            ..
-        }: HookContext,
-    ) {
-        match relationship_hook_mode {
-            RelationshipHookMode::Run => {}
-            RelationshipHookMode::Skip => return,
-            RelationshipHookMode::RunIfNotLinked => {
-                if <Self::RelationshipTarget as RelationshipTarget>::LINKED_SPAWN {
-                    return;
-                }
-            }
-        }
-        let target_entity = world.entity(entity).get::<Self>().unwrap().state_group_id;
-        if let Ok(mut target_entity_mut) = world.get_entity_mut(target_entity) {
-            if let Some(mut relationship_target) =
-                target_entity_mut.get_mut::<Self::RelationshipTarget>()
-            {
-                relationship_target.remove(entity);
-                if relationship_target.is_empty() {
-                    let command = |mut entity: EntityWorldMut| {
-                        // this "remove" operation must check emptiness because in the event that an identical
-                        // relationship is inserted on top, this despawn would result in the removal of that identical
-                        // relationship ... not what we want!
-                        if entity
-                            .get::<Self::RelationshipTarget>()
-                            .is_some_and(RelationshipTarget::is_empty)
-                        {
-                            entity.remove::<Self::RelationshipTarget>();
-                        }
-                    };
-
-                    world
-                        .commands()
-                        .queue_silenced(command.with_entity(target_entity));
-                }
-            }
-        }
     }
 }
 

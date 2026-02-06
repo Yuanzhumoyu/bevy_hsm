@@ -3,24 +3,23 @@ use bevy_hsm::prelude::*;
 
 fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
     move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
-        let state_name = query.get(context.state).unwrap();
-        println!("[{}]{}: {}", context.state, state_name, info);
+        let state_name = query.get(context.state()).unwrap();
+        println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
-fn is_up(_entity: In<HsmStateContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+fn is_up(_entity: In<HsmStateConditionContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
     input.just_pressed(KeyCode::ArrowUp)
 }
 
-fn is_down(_entity: In<HsmStateContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+fn is_down(_entity: In<HsmStateConditionContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
     input.just_pressed(KeyCode::ArrowDown)
 }
 
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut on_enter_disposable_systems: ResMut<HsmOnEnterDisposableSystems>,
-    mut on_exit_disposable_systems: ResMut<HsmOnExitDisposableSystems>,
+    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
 ) {
     let id = commands.register_system(is_up);
     action_systems.insert("is_up", id);
@@ -28,27 +27,25 @@ fn register_condition(
     action_systems.insert("is_down", id);
 
     let id = commands.register_system(debug_on_state("进入状态"));
-    on_enter_disposable_systems.insert("debug_on_enter", id);
+    disposable_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("退出状态"));
-    on_exit_disposable_systems.insert("debug_on_exit", id);
+    disposable_systems.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
-    let start_state_id = commands.spawn_empty().id();
-    let state_machine = commands.spawn_empty().id();
-
-    commands.entity(start_state_id).insert((
-        Name::new("OFF"),
-        HsmState::with_id(state_machine),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnExitSystem::new("debug_on_exit"),
-    ));
-
-    let id = commands
+    let start_id = commands
         .spawn((
-            SuperState(start_state_id),
+            Name::new("OFF"),
+            HsmState::default(),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnExitSystem::new("debug_on_exit"),
+        ))
+        .id();
+
+    let id1 = commands
+        .spawn((
             Name::new("ON1"),
-            HsmState::with_id(state_machine),
+            HsmState::default(),
             HsmOnEnterCondition::new("is_up"),
             HsmOnExitCondition::new("is_down"),
             HsmOnEnterSystem::new("debug_on_enter"),
@@ -56,11 +53,10 @@ fn setup(mut commands: Commands) {
         ))
         .id();
 
-    let id = commands
+    let id2 = commands
         .spawn((
-            SuperState(id),
             Name::new("ON2"),
-            HsmState::with_id(state_machine),
+            HsmState::default(),
             HsmOnEnterCondition::new("is_up"),
             HsmOnExitCondition::new("is_down"),
             HsmOnEnterSystem::new("debug_on_enter"),
@@ -68,18 +64,27 @@ fn setup(mut commands: Commands) {
         ))
         .id();
 
-    commands.spawn((
-        SuperState(id),
-        Name::new("ON3"),
-        HsmState::with_id(state_machine),
-        HsmOnEnterCondition::new("is_up"),
-        HsmOnExitCondition::new("is_down"),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnExitSystem::new("debug_on_exit"),
-    ));
+    let id3 = commands
+        .spawn((
+            Name::new("ON3"),
+            HsmState::default(),
+            HsmOnEnterCondition::new("is_up"),
+            HsmOnExitCondition::new("is_down"),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnExitSystem::new("debug_on_exit"),
+        ))
+        .id();
 
+    let traversal = TraversalStrategy::default();
+    let state_tree = StateTree::new(start_id, traversal.clone())
+        .with_add(start_id, id1, traversal.clone())
+        .with_add(id1, id2, traversal.clone())
+        .with_add(id2, id3, traversal.clone());
+
+    let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
-        StateMachine::new(10, start_state_id),
+        state_tree,
+        StateMachine::new(10, TreeStateId::new(state_machine, start_id)),
         Name::new("More States"),
         HsmOnState::default(),
     ));

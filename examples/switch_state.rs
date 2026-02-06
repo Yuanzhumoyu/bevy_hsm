@@ -3,8 +3,8 @@ use bevy_hsm::prelude::*;
 
 fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
     move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
-        let state_name = query.get(context.state).unwrap();
-        println!("[{}]{}: {}", context.state, state_name, info);
+        let state_name = query.get(context.state()).unwrap();
+        println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
@@ -38,12 +38,12 @@ pub enum Switch {
 }
 
 impl Switch {
-    fn condition_with_open(entity: In<HsmStateContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_open(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Open)
     }
 
-    fn condition_with_close(entity: In<HsmStateContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_close(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Close)
     }
@@ -52,8 +52,7 @@ impl Switch {
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut on_enter_disposable_systems: ResMut<HsmOnEnterDisposableSystems>,
-    mut on_exit_disposable_systems: ResMut<HsmOnExitDisposableSystems>,
+    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
 ) {
     let id = commands.register_system(Switch::condition_with_open);
     action_systems.insert("is_open", id);
@@ -61,40 +60,45 @@ fn register_condition(
     action_systems.insert("is_close", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    on_enter_disposable_systems.insert("debug_on_enter", id);
+    disposable_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    on_exit_disposable_systems.insert("debug_on_exit", id);
+    disposable_systems.insert("debug_on_exit", id);
 }
 
 fn startup(mut commands: Commands) {
-    let start_state_id = commands.spawn_empty().id();
+    let start_id = commands
+        .spawn((
+            Name::new("Start"),
+            HsmState::default(),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnExitSystem::new("debug_on_exit"),
+        ))
+        .id();
+
+    let id = commands
+        .spawn((
+            Name::new("Counter"),
+            HsmState::default(),
+            HsmOnEnterCondition::new("is_open"),
+            HsmOnExitCondition::new("is_close"),
+            HsmOnEnterSystem::new("debug_on_enter"),
+            HsmOnUpdateSystem::new("Update:计数"),
+            HsmOnExitSystem::new("debug_on_exit"),
+        ))
+        .id();
+
     let state_machine = commands.spawn_empty().id();
-
-    commands.entity(start_state_id).insert((
-        Name::new("Start"),
-        HsmState::with_id(state_machine),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnExitSystem::new("debug_on_exit"),
-    ));
-
-    commands.spawn((
-        SuperState(start_state_id),
-        Name::new("Counter"),
-        HsmState::with_id(state_machine),
-        HsmOnEnterCondition::new("is_open"),
-        HsmOnExitCondition::new("is_close"),
-        HsmOnEnterSystem::new("debug_on_enter"),
-        HsmOnUpdateSystem::new("Update:计数"),
-        HsmOnExitSystem::new("debug_on_exit"),
-    ));
-
     println!("State Machines: {:?}", state_machine);
 
+    let traversal = TraversalStrategy::default();
+    let state_tree = StateTree::new(start_id, traversal.clone()).with_add(start_id, id, traversal);
+
     commands.entity(state_machine).insert((
-        StateMachine::new(10, start_state_id),
+        StateMachine::new(10, TreeStateId::new(state_machine, start_id)),
         Name::new("Switch Counter"),
         HsmOnState::default(),
         Switch::Close,
+        state_tree,
         Count(0),
     ));
 }

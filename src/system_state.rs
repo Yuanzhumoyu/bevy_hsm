@@ -4,7 +4,7 @@ use bevy::{
     app::App,
     ecs::{
         component::ComponentId,
-        schedule::{IntoScheduleConfigs, ScheduleLabel},
+        schedule::{IntoScheduleConfigs, ScheduleLabel}, world::unsafe_world_cell::UnsafeWorldCell,
     },
     platform::collections::{Equivalent, HashMap, HashSet},
     prelude::*,
@@ -307,10 +307,11 @@ impl HsmActionSystemBuffer {
     /// * 作用域结束后，会自动更新缓存
     /// - The scope will automatically update the cache after ending
     pub fn buffer_scope(
-        world: &mut World,
+        world: UnsafeWorldCell,
         state_id: Entity,
         f: impl FnOnce(&mut World, &mut HsmActionSystemBuffer) + 'static,
     ) {
+        let world=unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<HsmOnUpdateSystem>(state_id) else {
             return;
         };

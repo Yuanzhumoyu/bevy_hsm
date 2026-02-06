@@ -10,7 +10,7 @@ use bevy::{
 };
 use smallvec::SmallVec;
 
-use crate::prelude::HsmStateContext;
+use crate::prelude::HsmStateConditionContext;
 
 /// 状态条件的系统ID
 ///
@@ -19,7 +19,7 @@ use crate::prelude::HsmStateContext;
 /// State condition system ID
 ///
 /// Used to determine if [`HsmState`] meets the conditions for entering or exiting, where the context entity is the entity currently being checked
-pub type StateConditionId = SystemId<In<HsmStateContext>, bool>;
+pub type StateConditionId = SystemId<In<HsmStateConditionContext>, bool>;
 
 /// 注册用于判断[`HsmState`]是否满足进入或退出的条件
 ///
@@ -181,8 +181,8 @@ impl CombinationConditionId {
     pub fn run(
         &self,
         world: &mut World,
-        input: HsmStateContext,
-    ) -> Result<bool, RegisteredSystemError<In<HsmStateContext>, bool>> {
+        input: HsmStateConditionContext,
+    ) -> Result<bool, RegisteredSystemError<In<HsmStateConditionContext>, bool>>{
         match self {
             CombinationConditionId::And(ids) => {
                 for id in ids {

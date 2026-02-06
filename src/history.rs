@@ -1,13 +1,13 @@
 use std::collections::VecDeque;
 
-use bevy::ecs::entity::Entity;
+use crate::{state::HsmOnState, state_tree::TreeStateId};
 
 /// 状态历史记录
 ///
 /// State history record
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateHistory {
-    history: VecDeque<Entity>,
+    history: VecDeque<HistoricalNode>,
     /// 最大历史记录长度
     ///
     /// Max history size
@@ -25,57 +25,43 @@ impl StateHistory {
     /// 推送一个状态到历史记录中
     ///
     /// Push a state into the history
-    pub fn push(&mut self, state: Entity) {
+    pub fn push(&mut self, node: HistoricalNode) {
         if self.history.len() >= self.max_size {
             self.history.pop_front();
         }
-        self.history.push_back(state);
+        self.history.push_back(node);
     }
 
     /// 获取状态历史记录
     ///
     /// Get the history
-    pub fn get_history(&self) -> Vec<Entity> {
-        self.history.iter().copied().collect()
-    }
-
-    /// 获取当前状态
-    ///
-    /// Get the current state
-    pub fn get_current(&self) -> Option<Entity> {
-        self.history.back().copied()
-    }
-
-    /// 获取上一个状态
-    ///
-    /// Get the previous state
-    pub fn get_previous(&self) -> Option<Entity> {
-        if self.history.len() < 2 {
-            None
-        } else {
-            self.history.iter().rev().nth(1).copied()
+    pub fn iter(&self) -> StateHistoryIterator<'_> {
+        StateHistoryIterator {
+            history: self,
+            down: 0,
+            up: self.history.len(),
         }
     }
 
-    /// 获取指定索引的历史状态 (0是当前状态，1是上一个状态，等等)
+    /// 获取当前最新记录的历史
     ///
-    /// Get the history state at the specified index (0 is the current state, 1 is the previous state, etc.)
-    pub fn get_at(&self, index: usize) -> Option<Entity> {
-        if index < self.history.len() {
-            self.history.iter().rev().nth(index).copied()
-        } else {
-            None
-        }
+    /// Retrieve the latest historical records   
+    pub fn get_current(&self) -> Option<&HistoricalNode> {
+        self.history.back()
     }
 
-    /// 清除历史记录（保留当前状态）
+    /// 获取指定索引的历史状态
     ///
-    /// Clear the history (keep the current state)
-    pub fn clear_history_except_current(&mut self) {
-        if let Some(current) = self.history.back().cloned() {
-            self.history.clear();
-            self.history.push_back(current);
-        }
+    /// Get the history state at the specified index
+    pub fn get_at(&self, index: usize) -> Option<&HistoricalNode> {
+        self.history.get(self.history.len() - index)
+    }
+
+    /// 清除历史记录
+    ///
+    /// Clear the history
+    pub fn clear(&mut self) {
+        self.history.clear();
     }
 
     /// 获取历史记录长度
@@ -99,5 +85,54 @@ impl Default for StateHistory {
             history: VecDeque::with_capacity(10),
             max_size: 10,
         }
+    }
+}
+
+pub struct StateHistoryIterator<'a> {
+    history: &'a StateHistory,
+    down: usize,
+    up: usize,
+}
+
+impl<'a> Iterator for StateHistoryIterator<'a> {
+    type Item = &'a HistoricalNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.down >= self.up {
+            return None;
+        }
+        let node = &self.history.history[self.down];
+        self.down += 1;
+        Some(node)
+    }
+}
+
+impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.down >= self.up {
+            return None;
+        }
+        self.up -= 1;
+        Some(&self.history.history[self.up])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoricalNode {
+    data: Vec<TreeStateId>,
+    on_state: HsmOnState,
+}
+
+impl HistoricalNode {
+    pub fn new(data: Vec<TreeStateId>, on_state: HsmOnState) -> Self {
+        Self { data, on_state }
+    }
+
+    pub fn states(&self) -> &[TreeStateId] {
+        &self.data
+    }
+
+    pub fn on_state(&self) -> HsmOnState {
+        self.on_state
     }
 }

@@ -25,17 +25,19 @@ pub extern crate bevy_hsm_macros;
 pub mod history;
 pub mod hook_system;
 mod on_transition;
-pub mod priority;
+// pub mod priority;
 pub mod state;
 pub mod state_condition;
-pub mod sub_states;
-pub mod super_state;
+pub mod state_traversal;
+pub mod state_tree;
+// pub mod sub_states;
+// pub mod super_state;
 pub mod system_state;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
 use crate::{
-    hook_system::{HsmOnEnterDisposableSystems, HsmOnExitDisposableSystems},
+    hook_system::HsmOnStateDisposableSystems,
     on_transition::{CheckOnTransitionStates, add_handle_on_state},
     state_condition::StateConditions,
 };
@@ -49,8 +51,7 @@ pub struct HsmPlugin<T: ScheduleLabel = Last> {
 impl Plugin for HsmPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StateConditions>();
-        app.init_resource::<HsmOnEnterDisposableSystems>();
-        app.init_resource::<HsmOnExitDisposableSystems>();
+        app.init_resource::<HsmOnStateDisposableSystems>();
         app.init_resource::<CheckOnTransitionStates>();
 
         add_handle_on_state(app, self.transition_schedule.clone());
@@ -59,8 +60,8 @@ impl Plugin for HsmPlugin {
 
 pub mod prelude {
     pub use crate::{
-        HsmPlugin, hook_system::*, on_transition::*, priority::*, state::*, state_condition::*,
-        sub_states::*, super_state::*, system_state::*,
+        HsmPlugin, hook_system::*, on_transition::*, state::*, state_condition::*,
+        state_traversal::*, state_tree::*, system_state::*,
     };
 
     pub use crate::bevy_hsm_macros::combination_condition;

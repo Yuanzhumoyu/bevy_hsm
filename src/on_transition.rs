@@ -1,11 +1,10 @@
 use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude::*};
 
 use crate::{
-    prelude::{HsmStateContext, ServiceTarget},
+    prelude::{HsmStateConditionContext, ServiceTarget},
     state::{HsmOnState, HsmState, NextState, StateMachine, StationaryStateMachine},
     state_condition::{HsmOnEnterCondition, HsmOnExitCondition, StateConditions},
-    sub_states::SubStates,
-    super_state::SuperState,
+    state_tree::{StateTree, TreeStateId},
 };
 
 /// 状态转换策略，用于控制状态转换行为
@@ -95,7 +94,7 @@ impl From<HsmOnState> for ExitTransitionBehavior {
 
 fn get_on_exit_next_states(
     world: &World,
-    mut state_id: Entity,
+    mut state_id: TreeStateId,
     strategy: StateTransitionStrategy,
     mut behavior: ExitTransitionBehavior,
 ) -> Vec<NextState> {
@@ -109,8 +108,8 @@ fn get_on_exit_next_states(
             ExitTransitionBehavior::Rebirth,
         ) => vec![NextState::Next((state_id, HsmOnState::Enter))],
         (StateTransitionStrategy::Nested, ExitTransitionBehavior::Death) => {
-            let mut curr_state_ref = world.entity(state_id);
-            if !curr_state_ref.contains::<SuperState>() {
+            let state_tree = world.get::<StateTree>(state_id.tree()).unwrap();
+            if state_tree.get_root() == state_id.state() {
                 let nex_state = match behavior == ExitTransitionBehavior::Death {
                     true => NextState::Next((state_id, behavior.into())),
                     false => NextState::None,
@@ -119,15 +118,15 @@ fn get_on_exit_next_states(
             }
             let mut next_states = vec![NextState::Next((state_id, HsmOnState::Exit))];
 
-            while let Some(state) = curr_state_ref.get::<SuperState>().copied()
-                && let state_ref = world.entity(state.0)
+            while let Some(state) = state_tree.get_super_state(state_id.state())
                 && let Some(HsmState {
                     strategy, behavior, ..
-                }) = state_ref.get::<HsmState>().copied()
+                }) = world.get::<HsmState>(state).copied()
             {
-                if !state_ref.contains::<SuperState>() {
+                let state_id = TreeStateId::new(state_id.tree(), state);
+                if state_tree.get_root() == state_id.state() {
                     let nex_state = match behavior == ExitTransitionBehavior::Death {
-                        true => NextState::Next((state.0, behavior.into())),
+                        true => NextState::Next((state_id, behavior.into())),
                         false => NextState::None,
                     };
                     next_states.push(nex_state);
@@ -138,31 +137,33 @@ fn get_on_exit_next_states(
                 {
                     true => {
                         next_states
-                            .extend(get_on_exit_next_states(world, state.0, strategy, behavior));
+                            .extend(get_on_exit_next_states(world, state_id, strategy, behavior));
                         return next_states;
                     }
                     false => {
-                        next_states.push(NextState::Next((state.0, HsmOnState::Exit)));
+                        next_states.push(NextState::Next((state_id, HsmOnState::Exit)));
                     }
                 }
-                curr_state_ref = state_ref;
             }
             next_states
         }
         (StateTransitionStrategy::Parallel, ExitTransitionBehavior::Death) => {
-            while let Some(state) = world.get::<SuperState>(state_id).copied()
+            let state_tree = world.get::<StateTree>(state_id.tree()).unwrap();
+
+            while let Some(state) = state_tree.get_super_state(state_id.state())
                 && let Some(HsmState {
                     strategy,
                     behavior: new_behavior,
                     ..
-                }) = world.get::<HsmState>(state.0).copied()
+                }) = world.get::<HsmState>(state).copied()
             {
+                let new_state_id = TreeStateId::new(state_id.tree(), state);
                 if !(strategy == StateTransitionStrategy::Parallel
                     && new_behavior == ExitTransitionBehavior::Death)
                 {
-                    return get_on_exit_next_states(world, state.0, strategy, new_behavior);
+                    return get_on_exit_next_states(world, new_state_id, strategy, new_behavior);
                 }
-                state_id = state.0;
+                state_id = new_state_id;
                 behavior = new_behavior;
             }
             match behavior {
@@ -199,61 +200,146 @@ pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
 
 fn handle_on_enter_states(
     mut commands: Commands,
-    query_states: Query<(&HsmState, &SubStates), With<HsmState>>,
+    query_states: Query<&HsmState, With<HsmState>>,
     query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
-    query_sub_states: Query<(Entity, &HsmOnEnterCondition), (With<HsmState>, With<SuperState>)>,
-    mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
-    state_conditions: Res<StateConditions>,
+    check_on_transition_states: Res<CheckOnTransitionStates>,
 ) {
-    // 条件为空的状态
-    let mut condition_with_empty = Vec::new();
-
     for (state_machine_id, state_machine) in
         query_state_machines.iter_many(check_on_transition_states.iter())
     {
-        let Some(curr_state_id) = state_machine.curr_state_id() else {
-            warn!("Current state not found in states map",);
-            return;
-        };
-        let Ok((hsm_state, sub_states)) = query_states.get(curr_state_id) else {
-            continue;
-        };
-        let collected = query_sub_states
-            .iter_many_inner(sub_states.iter())
-            .filter_map(|(super_state_id, condition)| {
-                match state_conditions.to_combinator_condition_id(&condition.0) {
-                    Some(id) => Some((super_state_id, id)),
-                    None => {
-                        warn!("不存在这个条件: {:?}", condition.0);
-                        None
-                    }
-                }
+        let curr_state_ids = state_machine
+            .curr_state_ids()
+            .iter()
+            .filter_map(|id| match query_states.get(id.state()) {
+                Ok(hsm_state) => Some((*id, hsm_state.strategy)),
+                Err(_) => None,
             })
             .collect::<Vec<_>>();
-        let strategy = hsm_state.strategy;
-
-        if collected.is_empty() {
-            condition_with_empty.push(state_machine_id);
-            continue;
-        }
 
         commands.queue(move |world: &mut World| {
-            for (sub_state_id, condition_id) in collected {
+            for (index, (curr_state_id, strategy)) in curr_state_ids.into_iter().enumerate() {
+                let Some(state_tree) = world.get::<StateTree>(curr_state_id.tree()) else {
+                    return;
+                };
+                let sub_state_iter = state_tree.traversal_iter(world, curr_state_id.state());
+                let collected = world.resource_scope(
+                    |world: &mut World, state_conditions: Mut<StateConditions>| {
+                        world
+                            .query_filtered::<(Entity, &HsmOnEnterCondition), With<HsmState>>()
+                            .iter_many(world, sub_state_iter)
+                            .filter_map(|(super_state_id, condition)| {
+                                match state_conditions.to_combinator_condition_id(&condition.0) {
+                                    Some(id) => Some((super_state_id, id)),
+                                    None => {
+                                        warn!("不存在这个条件: {:?}", condition.0);
+                                        None
+                                    }
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                );
+
+                for (sub_state_id, condition_id) in collected {
+                    match condition_id.run(
+                        world,
+                        HsmStateConditionContext::new(
+                            match world.get::<ServiceTarget>(state_machine_id) {
+                                Some(service_target) => service_target.0,
+                                None => state_machine_id,
+                            },
+                            state_machine_id,
+                            curr_state_id.state(),
+                            sub_state_id,
+                        ),
+                    ) {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(e) => {
+                            warn!("Error running enter condition: {:?}", e);
+                            continue;
+                        }
+                    }
+
+                    world
+                        .resource_mut::<CheckOnTransitionStates>()
+                        .remove(&state_machine_id);
+
+                    let mut service_target = world.entity_mut(state_machine_id);
+                    let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
+                        warn!("{} 该实体不拥有[StateMachine]", state_machine_id);
+                        return;
+                    };
+
+                    state_machine.truncate_curr_state(index);
+                    let state_id = TreeStateId::new(curr_state_id.tree(), sub_state_id);
+                    let next_on_state: HsmOnState = match strategy {
+                        StateTransitionStrategy::Nested => {
+                            state_machine.push_curr_state(state_id);
+                            HsmOnState::Enter
+                        }
+                        StateTransitionStrategy::Parallel => {
+                            state_machine.push_curr_state(curr_state_id);
+                            state_machine
+                                .push_next_state(NextState::Next((state_id, HsmOnState::Enter)));
+                            HsmOnState::Exit
+                        }
+                    };
+
+                    service_target.insert(next_on_state);
+                    return;
+                }
+            }
+        });
+    }
+}
+
+fn handle_on_exit_states(
+    mut commands: Commands,
+    check_on_transition_states: Res<CheckOnTransitionStates>,
+    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
+) {
+    // 条件为空的状态
+    for (state_machine_id, state_machine) in
+        query_state_machines.iter_many(check_on_transition_states.iter())
+    {
+        let curr_state_ids = state_machine.curr_state_ids().to_vec();
+        commands.queue(move |world: &mut World| {
+            for (index, curr_state_id) in curr_state_ids.into_iter().enumerate() {
+                let Some(condition) = world.get::<HsmOnExitCondition>(curr_state_id.state()) else {
+                    continue;
+                };
+                let Some(condition_id) = world
+                    .resource::<StateConditions>()
+                    .to_combinator_condition_id(condition)
+                else {
+                    warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
+                    continue;
+                };
+
+                let Some(state_tree) = world.get::<StateTree>(curr_state_id.tree()) else {
+                    warn!("state tree not found: {:?}", curr_state_id.tree());
+                    continue;
+                };
+                let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) else {
+                    continue;
+                };
                 match condition_id.run(
                     world,
-                    HsmStateContext::new(
+                    HsmStateConditionContext::new(
                         match world.get::<ServiceTarget>(state_machine_id) {
                             Some(service_target) => service_target.0,
                             None => state_machine_id,
                         },
                         state_machine_id,
-                        sub_state_id,
+                        curr_state_id.state(),
+                        super_state_id,
                     ),
                 ) {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(e) => {
-                        warn!("Error running enter condition: {:?}", e);
+                        warn!("Error running exit condition: {:?}", e);
                         continue;
                     }
                 }
@@ -262,115 +348,32 @@ fn handle_on_enter_states(
                     .resource_mut::<CheckOnTransitionStates>()
                     .remove(&state_machine_id);
 
+                let Some((strategy, behavior)) = world
+                    .get::<HsmState>(super_state_id)
+                    .map(|state| (state.strategy, state.behavior))
+                else {
+                    warn!("{} 该实体不拥有[HsmState]", super_state_id);
+                    return;
+                };
+
+                let state_id = TreeStateId::new(curr_state_id.tree(), super_state_id);
+                let next_states = get_on_exit_next_states(world, state_id, strategy, behavior);
+
                 let mut service_target = world.entity_mut(state_machine_id);
                 let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
                     warn!("{} 该实体不拥有[StateMachine]", state_machine_id);
                     return;
                 };
 
-                let next_on_state: HsmOnState = match strategy {
-                    StateTransitionStrategy::Nested => {
-                        state_machine.push_history(sub_state_id);
-                        HsmOnState::Enter
-                    }
-                    StateTransitionStrategy::Parallel => {
-                        state_machine.push_history(curr_state_id);
-                        state_machine
-                            .push_next_state(NextState::Next((sub_state_id, HsmOnState::Enter)));
-                        HsmOnState::Exit
-                    }
-                };
+                state_machine.push_next_states(next_states);
+                state_machine.truncate_curr_state(index);
+                state_machine.push_curr_state(curr_state_id);
 
-                service_target.insert(next_on_state);
-
+                service_target.insert(HsmOnState::Exit);
                 return;
             }
         });
     }
-    condition_with_empty.iter().for_each(move |e| {
-        check_on_transition_states.remove(e);
-    });
-}
-
-fn handle_on_exit_states(
-    mut commands: Commands,
-    query_states: Query<&SuperState, With<HsmState>>,
-    query_condtitions: Query<&HsmOnExitCondition, With<HsmState>>,
-    mut check_on_transition_states: ResMut<CheckOnTransitionStates>,
-    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
-    state_conditions: Res<StateConditions>,
-) {
-    // 条件为空的状态
-    let mut condition_with_empty = Vec::new();
-    for (state_machine_id, state_machine) in
-        query_state_machines.iter_many(check_on_transition_states.iter())
-    {
-        let Some(curr_state_id) = state_machine.curr_state_id() else {
-            warn!("Current state not found in states map",);
-            return;
-        };
-        let Ok(super_state) = query_states.get(curr_state_id) else {
-            continue;
-        };
-        let super_state_id = super_state.0;
-
-        let Ok(condition) = query_condtitions.get(curr_state_id) else {
-            condition_with_empty.push(state_machine_id);
-            continue;
-        };
-        let Some(condition_id) = state_conditions.to_combinator_condition_id(condition) else {
-            warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
-            continue;
-        };
-
-        commands.queue(move |world: &mut World| {
-            match condition_id.run(
-                world,
-                HsmStateContext::new(
-                    match world.get::<ServiceTarget>(state_machine_id) {
-                        Some(service_target) => service_target.0,
-                        None => state_machine_id,
-                    },
-                    state_machine_id,
-                    super_state_id,
-                ),
-            ) {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(e) => {
-                    warn!("Error running exit condition: {:?}", e);
-                    return;
-                }
-            }
-
-            world
-                .resource_mut::<CheckOnTransitionStates>()
-                .remove(&state_machine_id);
-
-            let Some((strategy, behavior)) = world
-                .get::<HsmState>(super_state_id)
-                .map(|state| (state.strategy, state.behavior))
-            else {
-                warn!("{} 该实体不拥有[HsmState]", super_state_id);
-                return;
-            };
-
-            let next_states = get_on_exit_next_states(world, super_state_id, strategy, behavior);
-
-            let mut service_target = world.entity_mut(state_machine_id);
-            let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
-                warn!("{} 该实体不拥有[StateMachine]", state_machine_id);
-                return;
-            };
-
-            state_machine.push_next_states(next_states);
-            state_machine.push_history(curr_state_id);
-            service_target.insert(HsmOnState::Exit);
-        });
-    }
-    condition_with_empty.iter().for_each(|e| {
-        check_on_transition_states.remove(e);
-    });
 }
 
 #[cfg(test)]
@@ -379,8 +382,9 @@ mod tests {
 
     use crate::{
         HsmPlugin,
-        prelude::{HsmOnEnterDisposableSystems, HsmOnExitDisposableSystems, SystemState},
+        prelude::{HsmOnStateDisposableSystems, HsmStateContext, SystemState},
         state::{HsmOnEnterSystem, HsmOnExitSystem, HsmOnUpdateSystem},
+        state_traversal::TraversalStrategy,
     };
 
     use super::*;
@@ -396,7 +400,7 @@ mod tests {
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
-        let state_name = query.get(entity.state).unwrap();
+        let state_name = query.get(entity.state()).unwrap();
         collector.0.push(format!("{}: Enter", state_name));
     }
 
@@ -405,16 +409,16 @@ mod tests {
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
-        let state_name = query.get(entity.state).unwrap();
+        let state_name = query.get(entity.state()).unwrap();
         collector.0.push(format!("{}: Exit", state_name));
     }
 
-    fn is_condition_true(entity: In<HsmStateContext>, query: Query<&Condition>) -> bool {
+    fn is_condition_true(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
         let condition = query.get(entity.state_machine).unwrap();
         condition.0
     }
 
-    fn is_condition_false(entity: In<HsmStateContext>, query: Query<&Condition>) -> bool {
+    fn is_condition_false(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
         let condition = query.get(entity.state_machine).unwrap();
         !condition.0
     }
@@ -440,15 +444,16 @@ mod tests {
         app.add_action_system(Update, "set_condition_false", set_condition_false);
 
         let world = app.world_mut();
-        let systems = HsmOnEnterDisposableSystems(HashMap::from([(
-            "log_on_enter".to_string(),
-            world.register_system(log_on_enter),
-        )]));
-        world.insert_resource(systems);
-        let systems = HsmOnExitDisposableSystems(HashMap::from([(
-            "log_on_exit".to_string(),
-            world.register_system(log_on_exit),
-        )]));
+        let systems = HsmOnStateDisposableSystems(HashMap::from([
+            (
+                "log_on_enter".to_string(),
+                world.register_system(log_on_enter),
+            ),
+            (
+                "log_on_exit".to_string(),
+                world.register_system(log_on_exit),
+            ),
+        ]));
         world.insert_resource(systems);
 
         let state_conditions = StateConditions(HashMap::from([
@@ -473,18 +478,19 @@ mod tests {
             .entity_mut(start_id)
             .insert((
                 Name::new("OFF"),
-                HsmState::with(state_machine_id, states[0].0, states[0].1),
+                HsmState::with(states[0].0, states[0].1),
                 HsmOnEnterSystem::new("log_on_enter"),
                 HsmOnExitSystem::new("log_on_exit"),
             ))
             .id();
+        let traversal = TraversalStrategy::default();
+        let mut state_tree = StateTree::new(curr_state_id, traversal.clone());
 
         for (i, (strategy, behavior)) in states[1..].iter().enumerate() {
-            curr_state_id = world
+            let new_state_id = world
                 .spawn((
                     Name::new(format!("ON{}", i)),
-                    SuperState(curr_state_id),
-                    HsmState::with(state_machine_id, *strategy, *behavior),
+                    HsmState::with(*strategy, *behavior),
                     HsmOnEnterSystem::new("log_on_enter"),
                     HsmOnExitSystem::new("log_on_exit"),
                     HsmOnUpdateSystem::new("Update:set_condition_false"),
@@ -492,6 +498,8 @@ mod tests {
                     HsmOnExitCondition::new("is_condition_false"),
                 ))
                 .id();
+            state_tree.add(curr_state_id, new_state_id, traversal.clone());
+            curr_state_id = new_state_id;
         }
 
         world
@@ -499,7 +507,8 @@ mod tests {
             .insert(HsmOnUpdateSystem::new("set_condition_false"));
 
         world.entity_mut(state_machine_id).insert((
-            StateMachine::new(10, start_id),
+            state_tree,
+            StateMachine::new(10, TreeStateId::new(state_machine_id, start_id)),
             Name::new("StateMachines"),
             HsmOnState::default(),
             Condition(true),
