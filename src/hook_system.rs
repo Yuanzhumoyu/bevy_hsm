@@ -102,7 +102,7 @@ impl HsmStateContext<ConditionContext> {
 /// # fn on_enter(entity:In<HsmStateContext>) {
 /// #     println!("进入系统");
 /// # }
-/// # fn foo(mut commands:Commands, mut on_enter_disposable_systems: ResMut<HsmOnEnterDisposableSystems>) {
+/// # fn foo(mut commands:Commands, mut on_enter_disposable_systems: ResMut<HsmOnStateDisposableSystems>) {
 /// let system_id = commands.register_system(on_enter);
 /// on_enter_disposable_systems.insert("on_enter", system_id);
 /// # }

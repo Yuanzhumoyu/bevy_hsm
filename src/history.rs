@@ -119,17 +119,17 @@ impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoricalNode {
-    data: Vec<TreeStateId>,
+    id: TreeStateId,
     on_state: HsmOnState,
 }
 
 impl HistoricalNode {
-    pub fn new(data: Vec<TreeStateId>, on_state: HsmOnState) -> Self {
-        Self { data, on_state }
+    pub fn new(id: TreeStateId, on_state: HsmOnState) -> Self {
+        Self { id, on_state }
     }
 
-    pub fn states(&self) -> &[TreeStateId] {
-        &self.data
+    pub fn id(&self) -> TreeStateId {
+        self.id
     }
 
     pub fn on_state(&self) -> HsmOnState {

@@ -12,7 +12,6 @@ A hierarchical state machine system for the Bevy engine that implements hierarch
 - Supports state transition conditions
 - Supports state machine system and condition system registration
 - Provides state transition history functionality
-- Supports state priority management
 - Supports combination condition systems
 
 ## Usage

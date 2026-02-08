@@ -1,9 +1,47 @@
+//!
+//! 该模块提供了一个层次化的状态树结构，用于管理状态之间的父子关系和转换路径。
+//!
+//! # 核心概念
+//!
+//! - **StateTree**: 状态树的根结构，维护所有状态节点的关系
+//! - **TreeStateId**: 树状态标识符，包含树实体和状态实体的组合
+//! - **TraversalStrategy**: 状态遍历策略，定义子状态的访问顺序
+//!
+//! # 使用示例
+//!
+//! ```
+//! use bevy::prelude::*;
+//! use bevy_hsm::prelude::*;
+//!
+//! fn setup_state_tree(mut commands: Commands) {
+//!     // 创建根状态
+//!     let root_state = commands.spawn(HsmState::default()).id();
+//!     
+//!     // 创建状态树
+//!     let mut state_tree = StateTree::new(root_state, TraversalStrategy::default());
+//!     
+//!     // 添加子状态
+//!     let child_state = commands.spawn(HsmState::default()).id();
+//!     state_tree.add(root_state, child_state, TraversalStrategy::default());
+//!     
+//!     // 查询子状态
+//!     if let Some(children) = state_tree.get(root_state) {
+//!         println!("Root state has {} children", children.len());
+//!     }
+//! }
+//! ```
+
 use std::fmt::Display;
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
 use crate::state_traversal::TraversalStrategy;
 
+///# 状态树结构/StateTree
+///
+/// 管理状态之间的层次关系，支持父子状态的添加、删除和查询操作。
+///
+/// Manage the hierarchical relationships between states, supporting add, delete, and query operations for parent-child states.
 #[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub struct StateTree {
     root: Entity,
@@ -11,6 +49,24 @@ pub struct StateTree {
 }
 
 impl StateTree {
+    /// 创建新的状态树
+    ///
+    /// # 参数
+    /// * `root` - 根状态实体
+    /// * `traversal` - 默认的遍历策略
+    ///
+    /// # 返回值
+    /// 返回初始化的状态树实例
+    ///
+    /// # 示例
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn example(mut commands: Commands) {
+    /// let root_entity = commands.spawn(HsmState::default()).id();
+    /// let state_tree = StateTree::new(root_entity, TraversalStrategy::default());
+    /// # }
+    /// ```
     pub fn new(root: Entity, traversal: TraversalStrategy) -> Self {
         Self {
             root,
@@ -18,7 +74,36 @@ impl StateTree {
         }
     }
 
-    /// 添加失败，说明from实体不是这个树的节点
+    /// 向状态树中添加父子关系
+    ///
+    /// # 参数
+    /// * `from` - 父状态实体
+    /// * `to` - 子状态实体
+    /// * `traversal` - 子状态的遍历策略
+    ///
+    /// # 返回值
+    /// 成功添加返回 `true`，失败返回 `false`
+    ///
+    /// # 失败条件
+    /// - 父状态不存在于树中
+    /// - 形成循环引用（子状态已经是父状态的祖先）
+    ///
+    /// # 示例
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn example(mut commands: Commands, mut state_tree: StateTree) {
+    /// let parent = commands.spawn(HsmState::default()).id();
+    /// let child = commands.spawn(HsmState::default()).id();
+    ///
+    /// // 添加成功
+    /// assert!(state_tree.add(parent, child, TraversalStrategy::default()));
+    ///
+    /// // 添加失败（parent不在树中）
+    /// let orphan = commands.spawn(HsmState::default()).id();
+    /// assert!(!state_tree.add(orphan, child, TraversalStrategy::default()));
+    /// # }
+    /// ```
     pub fn add(&mut self, from: Entity, to: Entity, traversal: TraversalStrategy) -> bool {
         if self.has_link(to, from) {
             return false;
@@ -88,7 +173,7 @@ impl StateTree {
 
     pub fn has_link(&self, from: Entity, to: Entity) -> bool {
         if let Some(v) = self.get(from) {
-            return v.iter().any(|e| *e == to);
+            return v.contains(&to);
         };
         false
     }

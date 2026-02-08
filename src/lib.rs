@@ -25,13 +25,10 @@ pub extern crate bevy_hsm_macros;
 pub mod history;
 pub mod hook_system;
 mod on_transition;
-// pub mod priority;
 pub mod state;
 pub mod state_condition;
 pub mod state_traversal;
 pub mod state_tree;
-// pub mod sub_states;
-// pub mod super_state;
 pub mod system_state;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
