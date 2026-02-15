@@ -36,6 +36,7 @@ use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 use crate::{
     hook_system::HsmOnStateDisposableSystems,
     on_transition::{CheckOnTransitionStates, add_handle_on_state},
+    prelude::{StateEnterConditionBuffer, StateExitConditionBuffer},
     state_condition::StateConditions,
 };
 
@@ -50,6 +51,8 @@ impl Plugin for HsmPlugin {
         app.init_resource::<StateConditions>();
         app.init_resource::<HsmOnStateDisposableSystems>();
         app.init_resource::<CheckOnTransitionStates>();
+        app.init_resource::<StateEnterConditionBuffer>();
+        app.init_resource::<StateExitConditionBuffer>();
 
         add_handle_on_state(app, self.transition_schedule.clone());
     }

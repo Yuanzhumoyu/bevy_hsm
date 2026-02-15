@@ -4,13 +4,17 @@ use std::{
 };
 
 use bevy::{
-    ecs::system::{RegisteredSystemError, SystemId},
+    ecs::{
+        lifecycle::HookContext,
+        system::{RegisteredSystemError, SystemId},
+        world::DeferredWorld,
+    },
     platform::collections::{Equivalent, HashMap},
     prelude::*,
 };
 use smallvec::SmallVec;
 
-use crate::prelude::HsmStateConditionContext;
+use crate::{prelude::HsmStateConditionContext, state::HsmState};
 
 /// 状态条件的系统ID
 ///
@@ -113,11 +117,55 @@ impl StateConditions {
 ///
 /// Condition for entering this state
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
+#[component(immutable, on_insert = Self::on_insert, on_remove = Self::on_remove)]
 pub struct HsmOnEnterCondition(pub CombinationCondition);
 
 impl HsmOnEnterCondition {
     pub fn new(name: impl Into<String>) -> Self {
         Self(CombinationCondition::Id(name.into()))
+    }
+
+    fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
+        let conditions = world.resource::<StateConditions>();
+        let enter = world.get::<Self>(hook_context.entity).unwrap();
+        let Some(id) = conditions.to_combinator_condition_id(enter) else {
+            warn!("[StateConditions]不存在这个条件: {:?}", enter.0);
+            return;
+        };
+        let mut buffer = world.resource_mut::<StateEnterConditionBuffer>();
+        buffer.insert(hook_context.entity, id);
+    }
+
+    fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
+        let mut buffer = world.resource_mut::<StateEnterConditionBuffer>();
+        buffer.remove(&hook_context.entity);
+    }
+}
+
+#[derive(Debug, Resource, Deref, DerefMut)]
+pub(crate) struct StateEnterConditionBuffer(HashMap<Entity, CombinationConditionId>);
+
+impl FromWorld for StateEnterConditionBuffer {
+    fn from_world(world: &mut World) -> Self {
+        let collect =
+            world.resource_scope(|world: &mut World, conditions: Mut<StateConditions>| {
+                let mut query =
+                    world.query_filtered::<(Entity, &HsmOnEnterCondition), With<HsmState>>();
+                query
+                    .iter(world)
+                    .filter_map(|(id, condition)| {
+                        match conditions.to_combinator_condition_id(condition) {
+                            Some(condition_id) => Some((id, condition_id)),
+                            None => {
+                                warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
+                                None
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+        Self(HashMap::from_iter(collect))
     }
 }
 
@@ -125,6 +173,7 @@ impl HsmOnEnterCondition {
 ///
 /// Condition for exiting this state
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
+#[component(immutable, on_insert = Self::on_insert, on_remove = Self::on_remove)]
 pub struct HsmOnExitCondition(pub CombinationCondition);
 
 impl HsmOnExitCondition {
@@ -135,12 +184,55 @@ impl HsmOnExitCondition {
     pub fn parse(s: impl AsRef<str>) -> Result<Self> {
         Ok(Self(CombinationCondition::parse(s)?))
     }
+
+    fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
+        let conditions = world.resource::<StateConditions>();
+        let exit = world.get::<Self>(hook_context.entity).unwrap();
+        let Some(id) = conditions.to_combinator_condition_id(exit) else {
+            warn!("[StateConditions]不存在这个条件: {:?}", exit.0);
+            return;
+        };
+        let mut buffer = world.resource_mut::<StateExitConditionBuffer>();
+        buffer.insert(hook_context.entity, id);
+    }
+
+    fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
+        let mut buffer = world.resource_mut::<StateExitConditionBuffer>();
+        buffer.remove(&hook_context.entity);
+    }
+}
+
+#[derive(Debug, Resource, Deref, DerefMut)]
+pub(crate) struct StateExitConditionBuffer(HashMap<Entity, CombinationConditionId>);
+
+impl FromWorld for StateExitConditionBuffer {
+    fn from_world(world: &mut World) -> Self {
+        let collect =
+            world.resource_scope(|world: &mut World, conditions: Mut<StateConditions>| {
+                let mut query =
+                    world.query_filtered::<(Entity, &HsmOnExitCondition), With<HsmState>>();
+                query
+                    .iter(world)
+                    .filter_map(|(id, condition)| {
+                        match conditions.to_combinator_condition_id(condition) {
+                            Some(condition_id) => Some((id, condition_id)),
+                            None => {
+                                warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
+                                None
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+        Self(HashMap::from_iter(collect))
+    }
 }
 
 /// 组合条件ID
 ///
 /// Combination condition ID
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CombinationConditionId {
     And(SmallVec<[Box<CombinationConditionId>; 2]>),
     Or(SmallVec<[Box<CombinationConditionId>; 2]>),
@@ -182,7 +274,7 @@ impl CombinationConditionId {
         &self,
         world: &mut World,
         input: HsmStateConditionContext,
-    ) -> Result<bool, RegisteredSystemError<In<HsmStateConditionContext>, bool>>{
+    ) -> Result<bool, RegisteredSystemError<In<HsmStateConditionContext>, bool>> {
         match self {
             CombinationConditionId::And(ids) => {
                 for id in ids {

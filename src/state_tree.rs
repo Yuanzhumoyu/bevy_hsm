@@ -204,49 +204,39 @@ impl StateTree {
         self.tree.get(&state).and_then(|node| node.super_state)
     }
 
-    pub fn traversal_iter(&self, world: &World, state: Entity) -> TraversalIter {
+    pub fn traversal_iter(&self, world: &World, state: Entity) -> Vec<Entity> {
         match self.tree.get(&state) {
             Some(StateTreeNode {
                 super_state: _,
                 traversal,
                 sub_states,
-            }) => TraversalIter {
-                data: traversal.0.traverse(world, sub_states.as_slice()),
-                down: 0,
-                up: sub_states.len(),
-            },
-            None => TraversalIter::default(),
+            }) => traversal.0.traverse(world, sub_states.as_slice()),
+            None => Vec::new(),
         }
     }
-}
 
-#[derive(Default)]
-pub struct TraversalIter {
-    data: Vec<Entity>,
-    down: usize,
-    up: usize,
-}
-
-impl Iterator for TraversalIter {
-    type Item = Entity;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.down >= self.up {
-            return None;
+    pub fn traversal_iter_with(
+        &self,
+        world: &World,
+        state: Entity,
+        f: impl Fn(&EntityRef) -> bool,
+    ) -> Vec<Entity> {
+        match self.tree.get(&state) {
+            Some(StateTreeNode {
+                super_state: _,
+                traversal,
+                sub_states,
+            }) => {
+                let sub_states = world
+                    .entity(sub_states.as_slice())
+                    .into_iter()
+                    .filter(|e| f(e))
+                    .map(|e| e.id())
+                    .collect::<Vec<_>>();
+                traversal.0.traverse(world, sub_states.as_slice())
+            }
+            None => Vec::new(),
         }
-        let e = self.data[self.down];
-        self.down += 1;
-        Some(e)
-    }
-}
-
-impl DoubleEndedIterator for TraversalIter {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.down >= self.up {
-            return None;
-        }
-        self.up -= 1;
-        Some(self.data[self.up])
     }
 }
 
@@ -339,37 +329,6 @@ mod tests {
         assert_eq!(
             new_tree,
             Some(StateTree::new(v[4], traversal.clone()).with_add(v[4], v[7], traversal.clone()))
-        );
-    }
-
-    #[test]
-    fn test_state_tree_iter() {
-        let v = (0..8)
-            .map(|i| Entity::from_raw_u32(i).unwrap())
-            .collect::<Vec<_>>();
-        let traversal = TraversalStrategy::default();
-        let mut tree = StateTree::new(v[0], traversal.clone());
-
-        for i in 1..8 {
-            tree.add(v[0], v[i], traversal.clone());
-        }
-
-        let world = World::new();
-        let mut iter = tree.traversal_iter(&world, v[0]);
-        assert_eq!(iter.next(), Some(v[1]));
-        assert_eq!(iter.next_back(), Some(v[7]));
-        assert_eq!(iter.next(), Some(v[2]));
-        assert_eq!(iter.next_back(), Some(v[6]));
-        assert_eq!(iter.next(), Some(v[3]));
-        assert_eq!(iter.next_back(), Some(v[5]));
-        assert_eq!(iter.next(), Some(v[4]));
-        assert_eq!(iter.next_back(), None);
-
-        tree.add(v[0], v[3], traversal.clone());
-
-        assert_eq!(
-            tree.get_sub_states(v[0]),
-            Some([v[1], v[2], v[4], v[5], v[6], v[7], v[3]].as_slice())
         );
     }
 
