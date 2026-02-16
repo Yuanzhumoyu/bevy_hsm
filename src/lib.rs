@@ -22,6 +22,7 @@
 
 pub extern crate bevy_hsm_macros;
 
+mod error;
 pub mod history;
 pub mod hook_system;
 mod on_transition;

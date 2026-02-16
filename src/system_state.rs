@@ -4,13 +4,15 @@ use bevy::{
     app::App,
     ecs::{
         component::ComponentId,
-        schedule::{IntoScheduleConfigs, ScheduleLabel}, world::unsafe_world_cell::UnsafeWorldCell,
+        schedule::{IntoScheduleConfigs, ScheduleLabel},
+        world::unsafe_world_cell::UnsafeWorldCell,
     },
     platform::collections::{Equivalent, HashMap, HashSet},
     prelude::*,
 };
 
 use crate::{
+    error::HsmError,
     hook_system::HsmStateContext,
     state::{HsmOnState, HsmOnUpdateSystem},
     system_state::system_state_trait::ExpandScheduleLabelFuction,
@@ -72,7 +74,10 @@ impl SystemState for App {
         let action_name = Arc::new(action_name.into());
 
         // 注册状态系统
-        schedule.add_system_info(world, action_name.clone());
+        if let Err(e) = schedule.add_system_info(world, action_name.clone()) {
+            warn!("{}", e);
+            return self;
+        }
 
         // 添加系统
         let mut schedules = world.resource_mut::<Schedules>();
@@ -87,7 +92,10 @@ impl SystemState for App {
         let world = self.world_mut();
         let action_name = Arc::new("".to_string());
         // 注册状态系统
-        schedule.add_system_info(world, action_name.clone());
+        if let Err(e) = schedule.add_system_info(world, action_name.clone()) {
+            warn!("{}", e);
+            return self;
+        }
 
         let mut schedules = world.resource_mut::<Schedules>();
         schedule.add_system_anchor_point(&mut schedules, action_name);
@@ -166,6 +174,13 @@ impl<T: ScheduleLabel> HsmActionSystemBuffers<T> {
         Q: Hash + Equivalent<String> + ?Sized,
     {
         self.buffers.get_mut(action_name)
+    }
+
+    pub fn contains<Q>(&self, action_name: &Q) -> bool
+    where
+        Q: Hash + Equivalent<String> + ?Sized,
+    {
+        self.buffers.contains_key(action_name)
     }
 }
 
@@ -311,13 +326,19 @@ impl HsmActionSystemBuffer {
         state_id: Entity,
         f: impl FnOnce(&mut World, &mut HsmActionSystemBuffer) + 'static,
     ) {
-        let world=unsafe { world.world_mut() };
+        let world = unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<HsmOnUpdateSystem>(state_id) else {
             return;
         };
         let action_systems = world.resource::<HsmActionSystems>();
         let Some(get_buffer_scope) = action_systems.get(on_update_system.as_str()) else {
-            warn!("未找到系统: {}", on_update_system.as_str());
+            warn!(
+                "{}",
+                HsmError::SystemNotFound {
+                    system_name: on_update_system.as_str().to_string(),
+                    state: state_id
+                }
+            );
             return;
         };
 
@@ -418,7 +439,11 @@ pub(super) mod system_state_trait {
 
     /// 系统状态
     pub trait ExpandScheduleLabelFuction: Send + Sync + 'static {
-        fn add_system_info(&self, world: &mut World, action_name: Arc<String>);
+        fn add_system_info(
+            &self,
+            world: &mut World,
+            action_name: Arc<String>,
+        ) -> Result<(), String>;
 
         fn add_system<M>(
             self,
@@ -433,8 +458,15 @@ pub(super) mod system_state_trait {
 
 impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction for T {
     #[inline]
-    fn add_system_info(&self, world: &mut World, action_name: Arc<String>) {
+    fn add_system_info(&self, world: &mut World, action_name: Arc<String>) -> Result<(), String> {
         let mut buffers = world.get_resource_or_init::<HsmActionSystemBuffers<T>>();
+        if buffers.contains(action_name.as_str()) {
+            return Err(format!(
+                "The system<{}> for this ScheduleLabel<{:?}> already exists",
+                action_name, self
+            ));
+        }
+
         buffers.insert_buffer(action_name.to_string(), HsmActionSystemBuffer::default());
 
         let buffers_id = world.register_resource::<HsmActionSystemBuffers<T>>();
@@ -465,6 +497,7 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction 
         hsm_action_system_buffer_manager
             .entry(label.to_string())
             .or_insert(buffers_id);
+        Ok(())
     }
 
     #[inline]

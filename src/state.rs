@@ -6,6 +6,7 @@ use bevy::{
 };
 
 use crate::{
+    error::HsmError,
     history::{HistoricalNode, StateHistory, StateHistoryIterator},
     hook_system::{HsmOnStateDisposableSystems, HsmStateContext},
     on_transition::CheckOnTransitionStates,
@@ -228,6 +229,7 @@ pub struct Terminated;
 impl Terminated {
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(mut state_machine) = world.get_mut::<StateMachine>(entity) else {
+            error!("{}", HsmError::StateMachineMissing { entity });
             return;
         };
         state_machine.clear_next_states();
@@ -251,10 +253,7 @@ impl StationaryStateMachine {
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(state_machine) = world.get::<StateMachine>(entity) else {
             world.commands().entity(entity).remove::<Self>();
-            warn!(
-                "StationaryStateMachine component added to non-StateMachine entity<{}>",
-                entity
-            );
+            warn!("{}", HsmError::StateMachineMissing { entity });
             return;
         };
         // 查看当前状态是否有HsmOnUpdateSystem,则将其添加进延期表中
@@ -280,6 +279,7 @@ impl StationaryStateMachine {
 
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(state_machine) = world.get::<StateMachine>(entity) else {
+            warn!("{}", HsmError::StateMachineMissing { entity });
             return;
         };
         let curr_state_id = state_machine.curr_state_id();
@@ -322,9 +322,21 @@ impl HsmOnState {
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
         let state_machine_id = hook_context.entity;
         let Some(hsm_state) = world.get::<HsmOnState>(state_machine_id).copied() else {
+            warn!(
+                "{}",
+                HsmError::StateMachineMissing {
+                    entity: state_machine_id
+                }
+            );
             return;
         };
         let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machine_id) else {
+            warn!(
+                "{}",
+                HsmError::StateMachineMissing {
+                    entity: state_machine_id
+                }
+            );
             return;
         };
         let curr_state_id = state_machine.curr_state_id();
@@ -353,16 +365,30 @@ impl HsmOnState {
                         disposable_systems.get(on_enter_system.as_str()).copied()
                     else {
                         warn!(
-                            "状态<{}>在OnEnter系统中的{}不存在.",
-                            curr_state_id,
-                            on_enter_system.as_str()
+                            "{}",
+                            HsmError::SystemNotFound {
+                                system_name: on_enter_system.to_string(),
+                                state: curr_state_id.state()
+                            }
                         );
                         break 'on_enter;
                     };
                     if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
                         .run_system_with(action_system_id, state_context)
                     {
-                        warn!("Error running enter system: {:?}", e);
+                        let Some(on_enter_system) =
+                            world.get::<HsmOnEnterSystem>(curr_state_id.state())
+                        else {
+                            break 'on_enter;
+                        };
+                        error!(
+                            "{}",
+                            HsmError::SystemRunFailed {
+                                system_name: on_enter_system.to_string(),
+                                state: curr_state_id.state(),
+                                source: e.into()
+                            }
+                        );
                     }
                 }
                 unsafe { world.as_unsafe_world_cell().world_mut() }
@@ -418,23 +444,42 @@ impl HsmOnState {
                         disposable_systems.get(on_exit_system.as_str()).copied()
                     else {
                         warn!(
-                            "状态<{}>在OnEnter系统中的{}不存在.",
-                            curr_state_id,
-                            on_exit_system.as_str()
+                            "{}",
+                            HsmError::SystemNotFound {
+                                system_name: on_exit_system.to_string(),
+                                state: curr_state_id.state()
+                            }
                         );
                         break 'on_exit;
                     };
                     if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
                         .run_system_with(action_system_id, state_context)
                     {
-                        error!("Error running exit system: {:?}", e);
+                        let Some(on_exit_system) =
+                            world.get::<HsmOnExitSystem>(curr_state_id.state())
+                        else {
+                            break 'on_exit;
+                        };
+                        error!(
+                            "{}",
+                            HsmError::SystemRunFailed {
+                                system_name: on_exit_system.to_string(),
+                                state: curr_state_id.state(),
+                                source: e.into()
+                            }
+                        );
                     };
                 }
 
                 world.commands().queue(move |world: &mut World| {
                     let Some(mut state_machine) = world.get_mut::<StateMachine>(state_machine_id)
                     else {
-                        warn!("StateMachine not found: {}", state_machine_id);
+                        warn!(
+                            "{}",
+                            HsmError::StateMachineMissing {
+                                entity: state_machine_id
+                            }
+                        );
                         return;
                     };
                     let NextState::Next((curr_state, on_state)) = state_machine.pop_next_state()
@@ -563,39 +608,5 @@ pub struct HsmOnExitSystem(String);
 impl HsmOnExitSystem {
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use bevy::ecs::world::CommandQueue;
-
-    use super::*;
-
-    fn hello_world(mut local: Local<usize>) -> bool {
-        *local += 1;
-        println!("hello world {}", *local);
-        *local % 2 == 0
-    }
-
-    #[test]
-    fn test_hsm_state() {
-        let mut world = World::new();
-        let mut commands = world.commands();
-        let id = commands.register_system(hello_world);
-        let mut command_queue = CommandQueue::default();
-        let mut command = Commands::new(&mut command_queue, &mut world);
-        for _ in 0..10 {
-            command.queue(move |world: &mut World| {
-                let Ok(res) = world.run_system(id) else {
-                    return;
-                };
-                if res {
-                    println!("这是偶数");
-                }
-            });
-        }
-
-        command_queue.apply(&mut world);
     }
 }

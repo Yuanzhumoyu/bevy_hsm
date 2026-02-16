@@ -131,8 +131,12 @@ impl HsmOnStateDisposableSystems {
     ///     disposable_systems.insert("on_enter", system_id);
     /// }
     /// ```
-    pub fn insert(&mut self, name: impl Into<String>, system_id: DisposableSystemId) {
-        self.0.insert(name.into(), system_id);
+    pub fn insert(
+        &mut self,
+        name: impl Into<String>,
+        system_id: DisposableSystemId,
+    ) -> Option<DisposableSystemId> {
+        self.0.insert(name.into(), system_id)
     }
 
     /// 移除系统

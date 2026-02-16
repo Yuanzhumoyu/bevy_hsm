@@ -1,6 +1,7 @@
 use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude::*};
 
 use crate::{
+    error::HsmError,
     prelude::{
         HsmStateConditionContext, ServiceTarget, StateEnterConditionBuffer,
         StateExitConditionBuffer,
@@ -100,32 +101,42 @@ fn get_on_exit_next_states(
     mut state_id: TreeStateId,
     strategy: StateTransitionStrategy,
     mut behavior: ExitTransitionBehavior,
-) -> Vec<NextState> {
+) -> Result<Vec<NextState>, String> {
     match (strategy, behavior) {
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
             ExitTransitionBehavior::Resurrection,
-        ) => vec![NextState::Next((state_id, HsmOnState::Update))],
+        ) => Ok(vec![NextState::Next((state_id, HsmOnState::Update))]),
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
             ExitTransitionBehavior::Rebirth,
-        ) => vec![NextState::Next((state_id, HsmOnState::Enter))],
+        ) => Ok(vec![NextState::Next((state_id, HsmOnState::Enter))]),
         (StateTransitionStrategy::Nested, ExitTransitionBehavior::Death) => {
-            let state_tree = world.get::<StateTree>(state_id.tree()).unwrap();
+            let Some(state_tree) = world.get::<StateTree>(state_id.tree()) else {
+                return Err(format!(
+                    "The entity<{}> does not contain [StateTree]",
+                    state_id
+                ));
+            };
             if state_tree.get_root() == state_id.state() {
                 let nex_state = match behavior == ExitTransitionBehavior::Death {
                     true => NextState::Next((state_id, behavior.into())),
                     false => NextState::None,
                 };
-                return vec![nex_state];
+                return Ok(vec![nex_state]);
             }
             let mut next_states = vec![NextState::Next((state_id, HsmOnState::Exit))];
 
-            while let Some(state) = state_tree.get_super_state(state_id.state())
-                && let Some(HsmState {
+            while let Some(state) = state_tree.get_super_state(state_id.state()) {
+                let Some(HsmState {
                     strategy, behavior, ..
                 }) = world.get::<HsmState>(state).copied()
-            {
+                else {
+                    return Err(format!(
+                        "The entity<{}> does not contain [HsmState]",
+                        state_id
+                    ));
+                };
                 let state_id = TreeStateId::new(state_id.tree(), state);
                 if state_tree.get_root() == state_id.state() {
                     let nex_state = match behavior == ExitTransitionBehavior::Death {
@@ -133,25 +144,31 @@ fn get_on_exit_next_states(
                         false => NextState::None,
                     };
                     next_states.push(nex_state);
-                    return next_states;
+                    return Ok(next_states);
                 }
                 match !(strategy == StateTransitionStrategy::Nested
                     && behavior == ExitTransitionBehavior::Death)
                 {
                     true => {
-                        next_states
-                            .extend(get_on_exit_next_states(world, state_id, strategy, behavior));
-                        return next_states;
+                        next_states.extend(get_on_exit_next_states(
+                            world, state_id, strategy, behavior,
+                        )?);
+                        return Ok(next_states);
                     }
                     false => {
                         next_states.push(NextState::Next((state_id, HsmOnState::Exit)));
                     }
                 }
             }
-            next_states
+            Ok(next_states)
         }
         (StateTransitionStrategy::Parallel, ExitTransitionBehavior::Death) => {
-            let state_tree = world.get::<StateTree>(state_id.tree()).unwrap();
+            let Some(state_tree) = world.get::<StateTree>(state_id.tree()) else {
+                return Err(format!(
+                    "The entity<{}> does not contain [StateTree]",
+                    state_id
+                ));
+            };
 
             while let Some(state) = state_tree.get_super_state(state_id.state())
                 && let Some(HsmState {
@@ -171,14 +188,12 @@ fn get_on_exit_next_states(
             }
             match behavior {
                 ExitTransitionBehavior::Rebirth => {
-                    vec![NextState::Next((state_id, HsmOnState::Enter))]
+                    Ok(vec![NextState::Next((state_id, HsmOnState::Enter))])
                 }
                 ExitTransitionBehavior::Resurrection => {
-                    vec![NextState::Next((state_id, HsmOnState::Update))]
+                    Ok(vec![NextState::Next((state_id, HsmOnState::Update))])
                 }
-                ExitTransitionBehavior::Death => {
-                    vec![NextState::None]
-                }
+                ExitTransitionBehavior::Death => Ok(vec![NextState::None]),
             }
         }
     }
@@ -219,11 +234,21 @@ fn handle_on_enter_states(
         };
         commands.queue(move |world: &mut World| {
             let Some(state_tree) = world.get::<StateTree>(curr_state_id.tree()) else {
+                warn!(
+                    "{}",
+                    HsmError::StateTreeNotFound {
+                        tree_entity: curr_state_id.tree()
+                    }
+                );
                 return;
             };
             let sub_state_iter =
                 state_tree.traversal_iter_with(world, curr_state_id.state(), |e| {
-                    e.contains::<HsmState>() && e.contains::<HsmOnEnterCondition>()
+                    if !e.contains::<HsmState>() {
+                        warn!("{}", HsmError::HsmStateMissing { entity: e.id() });
+                        return false;
+                    }
+                    e.contains::<HsmOnEnterCondition>()
                 });
             let Some(enter_state_id) = world.resource_scope(
                 |world: &mut World, condition_buffer: Mut<StateEnterConditionBuffer>| {
@@ -247,7 +272,15 @@ fn handle_on_enter_states(
                             Ok(true) => return Some(sub_state_id),
                             Ok(false) => continue,
                             Err(e) => {
-                                warn!("Error running enter condition: {:?}", e);
+                                error!(
+                                    "{}",
+                                    HsmError::ConditionRunFailed {
+                                        state_machine: state_machine_id,
+                                        from_state: curr_state_id.state(),
+                                        to_state: Some(sub_state_id),
+                                        source: e.into(),
+                                    }
+                                );
                                 continue;
                             }
                         }
@@ -264,7 +297,12 @@ fn handle_on_enter_states(
 
             let mut service_target = world.entity_mut(state_machine_id);
             let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
-                warn!("{} 该实体不拥有[StateMachine]", state_machine_id);
+                warn!(
+                    "{}",
+                    HsmError::StateMachineMissing {
+                        entity: state_machine_id
+                    }
+                );
                 return;
             };
 
@@ -302,18 +340,25 @@ fn handle_on_exit_states(
             continue;
         };
         let Ok(state_tree) = query_state_trees.get(curr_state_id.tree()) else {
-            warn!("state tree not found: {:?}", curr_state_id.tree());
+            warn!(
+                "{}",
+                HsmError::StateTreeNotFound {
+                    tree_entity: curr_state_id.tree()
+                }
+            );
             continue;
         };
         let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) else {
             warn!(
-                "StateTree: {} not found super state: {:?}",
-                curr_state_id.tree(),
-                curr_state_id.state()
+                "{}",
+                HsmError::SuperStateNotFound {
+                    state_tree: curr_state_id.tree(),
+                    state: curr_state_id.state()
+                }
             );
             continue;
         };
-        commands.queue(move |world: &mut World| {
+        commands.queue(move |world: &mut World| -> Result<()> {
             match world.resource_scope(
                 |world: &mut World, condition_buffer: Mut<StateExitConditionBuffer>| {
                     match condition_buffer.get(&curr_state_id.state()) {
@@ -334,10 +379,18 @@ fn handle_on_exit_states(
                 },
             ) {
                 Ok(true) => {}
-                Ok(false) => return,
+                Ok(false) => return Ok(()),
                 Err(e) => {
-                    warn!("Error running exit condition: {:?}", e);
-                    return;
+                    error!(
+                        "{}",
+                        HsmError::ConditionRunFailed {
+                            state_machine: state_machine_id,
+                            from_state: curr_state_id.state(),
+                            to_state: None,
+                            source: e.into(),
+                        }
+                    );
+                    return Ok(());
                 }
             }
 
@@ -349,21 +402,32 @@ fn handle_on_exit_states(
                 .get::<HsmState>(super_state_id)
                 .map(|state| (state.strategy, state.behavior))
             else {
-                warn!("{} 该实体不拥有[HsmState]", super_state_id);
-                return;
+                warn!(
+                    "{}",
+                    HsmError::HsmStateMissing {
+                        entity: super_state_id
+                    }
+                );
+                return Ok(());
             };
 
             let state_id = TreeStateId::new(curr_state_id.tree(), super_state_id);
-            let next_states = get_on_exit_next_states(world, state_id, strategy, behavior);
+            let next_states = get_on_exit_next_states(world, state_id, strategy, behavior)?;
 
             let mut service_target = world.entity_mut(state_machine_id);
             let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
-                warn!("{} 该实体不拥有[StateMachine]", state_machine_id);
-                return;
+                warn!(
+                    "{}",
+                    HsmError::StateMachineMissing {
+                        entity: state_machine_id
+                    }
+                );
+                return Ok(());
             };
 
             state_machine.push_next_states(next_states);
             service_target.insert(HsmOnState::Exit);
+            Ok(())
         });
     }
 }
@@ -392,7 +456,9 @@ mod tests {
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
-        let state_name = query.get(entity.state()).unwrap();
+        let state_name = query
+            .get(entity.state())
+            .expect("State should have a Name component");
         collector.0.push(format!("{}: Enter", state_name));
     }
 
@@ -401,17 +467,23 @@ mod tests {
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
-        let state_name = query.get(entity.state()).unwrap();
+        let state_name = query
+            .get(entity.state())
+            .expect("State should have a Name component");
         collector.0.push(format!("{}: Exit", state_name));
     }
 
     fn is_condition_true(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
-        let condition = query.get(entity.state_machine).unwrap();
+        let condition = query
+            .get(entity.state_machine)
+            .expect("State machine should have a Condition component");
         condition.0
     }
 
     fn is_condition_false(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
-        let condition = query.get(entity.state_machine).unwrap();
+        let condition = query
+            .get(entity.state_machine)
+            .expect("State machine should have a Condition component");
         !condition.0
     }
 

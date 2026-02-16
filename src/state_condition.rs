@@ -127,9 +127,14 @@ impl HsmOnEnterCondition {
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
         let conditions = world.resource::<StateConditions>();
-        let enter = world.get::<Self>(hook_context.entity).unwrap();
+        let enter = world
+            .get::<Self>(hook_context.entity)
+            .expect("Component should be present in on_insert hook");
         let Some(id) = conditions.to_combinator_condition_id(enter) else {
-            warn!("[StateConditions]不存在这个条件: {:?}", enter.0);
+            warn!(
+                "[StateConditions] This condition<{:?}> does not exist for state {:?}",
+                enter.0, hook_context.entity
+            );
             return;
         };
         let mut buffer = world.resource_mut::<StateEnterConditionBuffer>();
@@ -157,7 +162,10 @@ impl FromWorld for StateEnterConditionBuffer {
                         match conditions.to_combinator_condition_id(condition) {
                             Some(condition_id) => Some((id, condition_id)),
                             None => {
-                                warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
+                                warn!(
+                                    "[StateConditions] This condition<{:?}> does not exist",
+                                    condition.0
+                                );
                                 None
                             }
                         }
@@ -187,9 +195,14 @@ impl HsmOnExitCondition {
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
         let conditions = world.resource::<StateConditions>();
-        let exit = world.get::<Self>(hook_context.entity).unwrap();
+        let exit = world
+            .get::<Self>(hook_context.entity)
+            .expect("Component should be present in on_insert hook");
         let Some(id) = conditions.to_combinator_condition_id(exit) else {
-            warn!("[StateConditions]不存在这个条件: {:?}", exit.0);
+            warn!(
+                "[StateConditions] This condition<{:?}> does not exist for state {:?}",
+                exit.0, hook_context.entity
+            );
             return;
         };
         let mut buffer = world.resource_mut::<StateExitConditionBuffer>();
@@ -217,7 +230,10 @@ impl FromWorld for StateExitConditionBuffer {
                         match conditions.to_combinator_condition_id(condition) {
                             Some(condition_id) => Some((id, condition_id)),
                             None => {
-                                warn!("[StateConditions]不存在这个条件: {:?}", condition.0);
+                                warn!(
+                                    "[StateConditions] This condition<{:?}> does not exist",
+                                    condition.0
+                                );
                                 None
                             }
                         }
