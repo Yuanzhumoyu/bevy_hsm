@@ -1,17 +1,17 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
 fn debug_light(
-    states: In<Vec<HsmStateContext>>,
+    states: In<Vec<OnStateContext>>,
     query: Query<&Name>,
-) -> Option<Vec<HsmStateContext>> {
+) -> Option<Vec<OnStateContext>> {
     for light in query.iter_many(states.0.iter().map(|c| c.state())) {
         println!("Current light: {}", light);
     }
@@ -23,7 +23,7 @@ struct LightTimer(Timer);
 
 impl LightTimer {
     fn light_timer(
-        entity: In<HsmStateConditionContext>,
+        entity: In<OnStateConditionContext>,
         time: Res<Time<Fixed>>,
         mut query: Query<&mut LightTimer>,
     ) -> bool {
@@ -36,15 +36,15 @@ impl LightTimer {
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
+    mut named_state_systems: ResMut<NamedStateSystems>,
 ) {
     let id = commands.register_system(LightTimer::light_timer);
     action_systems.insert("light_timer", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    disposable_systems.insert("debug_on_enter", id);
+    named_state_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    disposable_systems.insert("debug_on_exit", id);
+    named_state_systems.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
@@ -55,9 +55,9 @@ fn setup(mut commands: Commands) {
                 StateTransitionStrategy::Parallel,
                 ExitTransitionBehavior::Rebirth,
             ),
-            HsmOnUpdateSystem::new("Update:debug_light"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnUpdateSystem::new("Update:debug_light"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -65,9 +65,9 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("yellow"),
             HsmState::default(),
-            HsmOnUpdateSystem::new("Update:debug_light"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnUpdateSystem::new("Update:debug_light"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnExitSystem::new("debug_on_exit"),
             HsmOnEnterCondition::new("light_timer"),
             HsmOnExitCondition::new("light_timer"),
         ))
@@ -77,11 +77,14 @@ fn setup(mut commands: Commands) {
     println!("State Machines: {:?}", state_machine);
 
     let traversal = TraversalStrategy::default();
-    let state_tree = StateTree::new(red, traversal.clone()).with_add(red, yellow, traversal);
+    let mut state_tree = StateTree::new(red);
+    state_tree
+        .establish_relationships(red, traversal)
+        .with_add(red, yellow);
 
     commands.entity(state_machine).insert((
         state_tree,
-        StateMachine::new(10, TreeStateId::new(state_machine, red)),
+        HsmStateMachine::new(10, TreeStateId::new(state_machine, red)),
         Name::new("Blinking Light Paused"),
         HsmOnState::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),
@@ -91,7 +94,7 @@ fn setup(mut commands: Commands) {
 fn blinking_pause(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    state_machine: Single<Entity, With<StateMachine>>,
+    state_machine: Single<Entity, With<HsmStateMachine>>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         let mut entity = commands.entity(state_machine.entity());
@@ -120,8 +123,8 @@ fn blinking_pause(
 /// ## 实体说明
 /// * [LightTimer] - 计时器组件，用于控制灯的闪烁
 /// - [LightTimer] - Timer component used to control the blinking
-/// * [StateMachine] - 状态机组件，管理当前状态和状态转换
-/// - [StateMachine] - State machine component, managing the current state and state transitions
+/// * [HsmStateMachine] - 状态机组件，管理当前状态和状态转换
+/// - [HsmStateMachine] - State machine component, managing the current state and state transitions
 /// * [StationaryStateMachine] - 状态机组件，用于暂停状态机
 /// - [StationaryStateMachine] - State machine component used to pause the state machine
 ///

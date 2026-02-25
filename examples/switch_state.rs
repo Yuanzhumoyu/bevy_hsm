@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -13,9 +13,9 @@ pub struct Count(usize);
 
 impl Count {
     fn action(
-        states: In<Vec<HsmStateContext>>,
+        states: In<Vec<OnStateContext>>,
         mut query: Query<(&Name, &mut Count)>,
-    ) -> Option<Vec<HsmStateContext>> {
+    ) -> Option<Vec<OnStateContext>> {
         let mut iter = query.iter_many_mut(states.0.iter().map(|a| a.service_target));
         while let Some((name, mut count)) = iter.fetch_next() {
             count.0 += 1;
@@ -38,12 +38,12 @@ pub enum Switch {
 }
 
 impl Switch {
-    fn condition_with_open(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_open(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Open)
     }
 
-    fn condition_with_close(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_close(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Close)
     }
@@ -52,7 +52,7 @@ impl Switch {
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
+    mut named_state_systems: ResMut<NamedStateSystems>,
 ) {
     let id = commands.register_system(Switch::condition_with_open);
     action_systems.insert("is_open", id);
@@ -60,9 +60,9 @@ fn register_condition(
     action_systems.insert("is_close", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    disposable_systems.insert("debug_on_enter", id);
+    named_state_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    disposable_systems.insert("debug_on_exit", id);
+    named_state_systems.insert("debug_on_exit", id);
 }
 
 fn startup(mut commands: Commands) {
@@ -70,8 +70,8 @@ fn startup(mut commands: Commands) {
         .spawn((
             Name::new("Start"),
             HsmState::default(),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -81,9 +81,9 @@ fn startup(mut commands: Commands) {
             HsmState::default(),
             HsmOnEnterCondition::new("is_open"),
             HsmOnExitCondition::new("is_close"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnUpdateSystem::new("Update:计数"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnUpdateSystem::new("Update:计数"),
+            OnExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -91,10 +91,13 @@ fn startup(mut commands: Commands) {
     println!("State Machines: {:?}", state_machine);
 
     let traversal = TraversalStrategy::default();
-    let state_tree = StateTree::new(start_id, traversal.clone()).with_add(start_id, id, traversal);
+    let mut state_tree = StateTree::new(start_id);
+    state_tree
+        .establish_relationships(start_id, traversal)
+        .with_add(start_id, id);
 
     commands.entity(state_machine).insert((
-        StateMachine::new(10, TreeStateId::new(state_machine, start_id)),
+        HsmStateMachine::new(10, TreeStateId::new(state_machine, start_id)),
         Name::new("Switch Counter"),
         HsmOnState::default(),
         Switch::Close,
@@ -123,8 +126,8 @@ fn key_event(input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Switch>) {
 /// ## 实体说明\Entity Description
 /// * [Count] - 计数器组件，用于在"计数"状态下增加计数
 /// - [Count] - Counter component, used to increase the counter in the "counting" state
-/// * [StateMachine] - 状态机组件，管理当前状态和状态转换
-/// - [StateMachine] - State machine component, managing the current state and state transitions
+/// * [HsmStateMachine] - 状态机组件，管理当前状态和状态转换
+/// - [HsmStateMachine] - State machine component, managing the current state and state transitions
 ///
 ///
 /// ## 状态转换\State Transition

@@ -1,22 +1,30 @@
-# Bevy HSM (Hierarchical State Machine)
+# Bevy HSM - A Hybrid State Machine System
 
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
 [中文](../../README.md)
 
-A hierarchical state machine system for the Bevy engine that implements hierarchical state machine functionality.
+A powerful, hybrid state machine system designed for the [Bevy Game Engine](https://bevyengine.org/). It seamlessly integrates a **Hierarchical State Machine (HSM)** and a **Finite State Machine (FSM)**, allowing you to choose the best tool for different scenarios.
+
+- Use the **HSM** to manage complex, high-level behavioral states in your application, where states have their own lifecycles (enter, update, exit).
+- Use the **FSM** to manage simpler, event-driven sub-states within a specific hierarchical state.
 
 ## Features
 
-- Supports state lifecycle phases: enter, update, and exit
-- Supports hierarchical states (parent and child states)
-- Supports state transition conditions
-- Supports state machine system and condition system registration
-- Provides state transition history functionality
-- Supports combination condition systems
+- **Hybrid Model**: Supports both HSM and FSM within a unified framework.
+- **State Lifecycles**: Supports `OnEnter`, `OnUpdate`, and `OnExit` lifecycle stages for states, which can be associated with independent Bevy systems.
+- **Hierarchical Structure**: Supports state nesting (parent and child states) for logic reuse and composition.
+- **Flexible Transition Triggers**:
+  - **HSM**: Automatically triggers transitions through composable **condition systems** (`HsmOnEnterCondition`, `HsmOnExitCondition`).
+  - **FSM**: Precisely controls transitions by sending **events** (`FsmOnTransition`).
+- **Advanced Transition Control (HSM)**:
+  - **Transition Strategy**: Configurable behavior for parent-child state transitions (`StateTransitionStrategy`: `Nested` / `Parallel`).
+  - **Return Behavior**: Configurable behavior for the parent state after a child state returns (`ExitTransitionBehavior`: `Rebirth` / `Resurrection` / `Death`).
+- **Bevy-Idiomatic**: The entire architecture follows Bevy's ECS paradigm, driven by components, events, and systems for seamless integration with the engine.
+- **State History**: Built-in state transition history for easier debugging.
 
-## Usage
+## Basic Usage
 
-Add the HSM plugin to your Bevy app:
+Add the `HsmPlugin` to your Bevy app:
 
 ```rust
 use bevy::prelude::*;
@@ -26,32 +34,45 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(HsmPlugin::default())
+        // ... register your states and systems here
         .run();
 }
 ```
 
 ## Core Concepts
 
-- StateMachine: Manages entity state transitions, including current state, next state, and state mapping table
-- HsmOnState: State lifecycle management, used to manage state entering, updating, and exiting
-- StationaryStateMachine: Used to pause state machines
-- Terminated: Component used to indicate that a state machine has terminated
-- StateConditions: State transition condition system for determining if states meet conditions for entering or exiting
-- HsmState: Represents a state, associated with the main entity (the entity that owns the StateMachine component)
-- StateTree: State tree, used to describe the transition relationships between states
-- HsmOnEnterCondition: Condition for entering a state
-- HsmOnExitCondition: Condition for exiting a state
-- HsmOnEnterSystem: System for entering a state, used to execute logic when a state is entered
-- HsmOnUpdateSystem: System for updating a state, used to execute logic when a state is updated
-- HsmOnExitSystem: System for exiting a state, used to execute logic when a state is exited
+### Common Concepts
 
-## Conclusion
+- `OnEnterSystem` / `OnUpdateSystem` / `OnExitSystem`: Systems that execute when a state is entered, updated, and exited, respectively.
+- `StateConditions`: A resource for registering and managing all condition systems.
+- `StationaryStateMachine`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
+- `Terminated`: A marker component indicating that the state machine has finished its execution.
 
-Currently, bevy_hsm is in the development stage and will continue to be improved and have new features added. Of course, you can submit issues or pull requests to help improve this library.
+### Hierarchical State Machine (HSM) - State-Driven
+
+The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles.
+
+- `HsmStateMachine`: The core component of the HSM, managing the current state, transition queue, and history.
+- `HsmOnState`: **The engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
+- `StateTree`: Defines the parent-child hierarchical relationships between states.
+- `HsmOnEnterCondition` / `HsmOnExitCondition`: Components attached to state entities to specify the conditions for entering or exiting that state.
+
+### Finite State Machine (FSM) - Event-Driven
+
+The FSM is driven by external events, making it ideal for responsive, direct state switching.
+
+- `FsmStateMachine`: The core component of the FSM, managing the current state and graph.
+- `FsmOnTransition`: **The engine of the FSM**. This is a Bevy event; sending it triggers an FSM state transition.
+- `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
+- `FsmOnEvent`: A trait that allows you to use any custom type (struct, enum, integer, etc.) as a specific event to trigger FSM transitions.
+
+## Epilogue
+
+`bevy_hsm` is still under active development, and new features will continue to be added and improved. You are welcome to help improve this library by submitting Issues or Pull Requests.
 
 ## License
 
-This project is licensed under either MIT or Apache 2.0, you may choose whichever you prefer to use this project.
+This project is licensed under either of
 
-- MIT License ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT License ([LICENSE-MIT](LICENSE-MIT.txt) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE.txt) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))

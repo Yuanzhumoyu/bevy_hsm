@@ -7,17 +7,17 @@ enum Switch {
     Close,
 }
 
-fn debug_on_state(info: &str) -> impl Fn(In<HsmStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<HsmStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
 fn debug_hello_world(
-    contexts: In<Vec<HsmStateContext>>,
+    contexts: In<Vec<OnStateContext>>,
     mut query_switch: Query<&mut Switch>,
-) -> Option<Vec<HsmStateContext>> {
+) -> Option<Vec<OnStateContext>> {
     let mut switch = query_switch.get_mut(contexts.0[0].service_target).unwrap();
     println!("Hello World {:?}", switch.as_ref());
     *switch = match *switch {
@@ -27,12 +27,12 @@ fn debug_hello_world(
     Some(contexts.0)
 }
 
-fn is_open(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
+fn is_open(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
     let switch = query.get(entity.service_target).unwrap();
     matches!(switch, Switch::Open)
 }
 
-fn is_close(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool {
+fn is_close(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
     let switch = query.get(entity.service_target).unwrap();
     matches!(switch, Switch::Close)
 }
@@ -40,7 +40,7 @@ fn is_close(entity: In<HsmStateConditionContext>, query: Query<&Switch>) -> bool
 fn register_condition(
     mut commands: Commands,
     mut action_systems: ResMut<StateConditions>,
-    mut disposable_systems: ResMut<HsmOnStateDisposableSystems>,
+    mut named_state_systems: ResMut<NamedStateSystems>,
 ) {
     let id = commands.register_system(is_open);
     action_systems.insert("is_open", id);
@@ -48,9 +48,9 @@ fn register_condition(
     action_systems.insert("is_close", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    disposable_systems.insert("debug_on_enter", id);
+    named_state_systems.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    disposable_systems.insert("debug_on_exit", id);
+    named_state_systems.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
@@ -58,9 +58,9 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("Start"),
             HsmState::default(),
-            HsmOnUpdateSystem::new("Update:debug_hello_world"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnUpdateSystem::new("Update:debug_hello_world"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -68,21 +68,20 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("Counter"),
             HsmState::default(),
-            HsmOnUpdateSystem::new("Update:debug_hello_world"),
-            HsmOnEnterSystem::new("debug_on_enter"),
-            HsmOnExitSystem::new("debug_on_exit"),
+            OnUpdateSystem::new("Update:debug_hello_world"),
+            OnEnterSystem::new("debug_on_enter"),
+            OnExitSystem::new("debug_on_exit"),
             HsmOnEnterCondition::new("is_open"),
             HsmOnExitCondition::new("is_close"),
         ))
         .id();
 
-    let traversal = TraversalStrategy::default();
-    let state_tree =
-        StateTree::new(start_id, traversal.clone()).with_add(start_id, id, traversal.clone());
+    let mut state_tree = StateTree::new(start_id);
+    state_tree.with_add(start_id, id);
 
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
-        StateMachine::new(10, TreeStateId::new(state_machine, start_id)),
+        HsmStateMachine::new(10, TreeStateId::new(state_machine, start_id)),
         Name::new("More States"),
         HsmOnState::default(),
         state_tree,

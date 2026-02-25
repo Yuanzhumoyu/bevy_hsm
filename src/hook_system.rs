@@ -1,117 +1,32 @@
 use std::hash::Hash;
 
 use bevy::{
-    ecs::system::SystemId,
     platform::collections::{Equivalent, HashMap},
     prelude::*,
 };
 
-use crate::hook_system::context::{ConditionContext, ContextRelationship};
+use crate::context::DisposableSystemId;
 
-pub type DisposableSystemId = SystemId<In<HsmStateContext>, ()>;
-/// 状态条件上下文
-pub type HsmStateConditionContext = HsmStateContext<ConditionContext>;
-
-mod context {
-    use bevy::ecs::entity::Entity;
-
-    pub trait ContextRelationship {}
-
-    impl ContextRelationship for Entity {}
-
-    #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-    pub struct ConditionContext {
-        pub(super) from: Entity,
-        pub(super) to: Entity,
-    }
-
-    impl ContextRelationship for ConditionContext {}
-
-    impl ConditionContext {
-        pub const fn new(from: Entity, to: Entity) -> Self {
-            Self { from, to }
-        }
-    }
-}
-
-/// 状态上下文
+/// 注册一次性用于运行[`OnEnterSystem`] [`OnExitSystem`]的系统
 ///
-/// StateContext
-/// # 作用\Purpose
-/// * 用于在系统中传递状态上下文
-/// - Used to pass state context in systems
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct HsmStateContext<C: ContextRelationship = Entity> {
-    /// 主体实体
-    ///
-    /// Main body entity
-    /// + 当状态机拥有[ServiceTarget]时,该成员为[ServiceTarget]的值,否则默认为该状态的状态机[Entity]
-    /// - When the state machine possesses [ServiceTarget], this member is the value of [ServiceTarget]; otherwise, it defaults to the state machine's [Entity] state
-    pub service_target: Entity,
-    /// 状态机实体
-    ///
-    /// State machine entity
-    pub state_machine: Entity,
-    relationship: C,
-}
-
-impl HsmStateContext {
-    pub(crate) const fn new(service_target: Entity, state_machine: Entity, state: Entity) -> Self {
-        Self {
-            service_target,
-            state_machine,
-            relationship: state,
-        }
-    }
-
-    pub const fn state(&self) -> Entity {
-        self.relationship
-    }
-}
-
-impl HsmStateContext<ConditionContext> {
-    pub(crate) const fn new(
-        service_target: Entity,
-        state_machine: Entity,
-        from_state: Entity,
-        to_state: Entity,
-    ) -> Self {
-        Self {
-            service_target,
-            state_machine,
-            relationship: ConditionContext::new(from_state, to_state),
-        }
-    }
-
-    pub fn from_state(&self) -> Entity {
-        self.relationship.from
-    }
-
-    pub fn to_state(&self) -> Entity {
-        self.relationship.to
-    }
-}
-
-/// 注册一次性用于运行[`HsmOnEnterSystem`] [`HsmOnExitSystem`]的系统
-///
-/// Register a one-time system for running [HsmOnEnterSystem] [HsmOnExitSystem]
+/// Register a one-time system for running [OnEnterSystem] [OnExitSystem]
 /// # 示例\Example
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn on_enter(entity:In<HsmStateContext>) {
+/// # fn on_enter(entity:In<OnStateContext>) {
 /// #     println!("进入系统");
 /// # }
-/// # fn foo(mut commands:Commands, mut on_enter_disposable_systems: ResMut<HsmOnStateDisposableSystems>) {
+/// # fn foo(mut commands:Commands, mut on_enter_named_state_systems: ResMut<NamedStateSystems>) {
 /// let system_id = commands.register_system(on_enter);
-/// on_enter_disposable_systems.insert("on_enter", system_id);
+/// on_enter_named_state_systems.insert("on_enter", system_id);
 /// # }
 /// ```
 ///
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct HsmOnStateDisposableSystems(pub(super) HashMap<String, DisposableSystemId>);
+pub struct NamedStateSystems(pub(super) HashMap<String, DisposableSystemId>);
 
-impl HsmOnStateDisposableSystems {
+impl NamedStateSystems {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
@@ -126,9 +41,9 @@ impl HsmOnStateDisposableSystems {
     /// # fn on_enter(entity:In<HsmStateContext>) {
     /// #     println!("进入系统");
     /// # }
-    /// fn foo(mut commands:Commands, mut disposable_systems: ResMut<HsmOnStateDisposableSystems>) {
+    /// fn foo(mut commands:Commands, mut named_state_systems: ResMut<NamedStateSystems>) {
     ///     let system_id = commands.register_system(on_enter);
-    ///     disposable_systems.insert("on_enter", system_id);
+    ///     named_state_systems.insert("on_enter", system_id);
     /// }
     /// ```
     pub fn insert(
@@ -146,8 +61,8 @@ impl HsmOnStateDisposableSystems {
     /// ```rust
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// fn foo(mut commands:Commands, mut on_enter_disposable_systems: ResMut<HsmOnStateDisposableSystems>) {
-    ///     on_enter_disposable_systems.remove("on_enter");
+    /// fn foo(mut commands:Commands, mut on_enter_named_state_systems: ResMut<NamedStateSystems>) {
+    ///     on_enter_named_state_systems.remove("on_enter");
     /// }
     /// ```
     pub fn remove<Q>(&mut self, name: &Q) -> Option<DisposableSystemId>
@@ -163,6 +78,95 @@ impl HsmOnStateDisposableSystems {
         Q: Hash + Equivalent<String> + ?Sized,
     {
         self.0.get(name)
+    }
+}
+
+/// 进入状态前调用
+///
+/// Enter state before calling
+/// # 示例\Example
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn foo(mut commands: Commands) {
+/// commands.spawn(OnEnterSystem::new("enter"));
+/// # }
+/// ```
+#[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
+pub struct OnEnterSystem(String);
+
+impl OnEnterSystem {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+}
+
+/// 更新状态时调用
+///
+/// Update state when calling
+/// # 使用方法\Usage
+///  由于注册动作系统时，通过[ScheduleLabel]来确定系统调用时间，
+///  所以在使用对应[ScheduleLabel]的系统时，需要特定格式。
+///
+///  When registering an action system, the system call time is determined through [ScheduleLabel],
+///  Therefore, when using the system corresponding to [ScheduleLabel], a specific format is required.
+/// * 正常格式: `ScheduleLabel` + `:` + `方法名称`
+/// - Normal format: `ScheduleLabel` + `:` + `method name`
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn add(contexts:In<Vec<HsmStateContext>>)->Option<Vec<HsmStateContext>>{None}
+/// # fn my_fn(){
+/// # let mut app = App::new();
+///
+/// app.add_action_system(Update, "add", add);
+///
+/// # }
+/// # fn foo(mut commands: Commands) {
+/// commands.spawn(OnUpdateSystem::new("Update:add"));
+/// # }
+/// ```
+/// * 特殊格式: `ScheduleLabel`
+/// - Special format: `ScheduleLabel`
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn my_fn(){
+/// # let mut app = App::new();
+///
+/// app.add_action_system_anchor_point(Update);
+///
+/// # }
+/// # fn foo(mut commands: Commands) {
+/// commands.spawn(OnUpdateSystem::new("Update"));
+/// # }
+/// ```
+#[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
+pub struct OnUpdateSystem(String);
+
+impl OnUpdateSystem {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+}
+
+/// 退出状态后调用
+///
+/// Exit state after calling
+/// # 示例\Example
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn foo(mut commands: Commands) {
+/// commands.spawn(OnExitSystem::new("exit"));
+/// # }
+/// ```
+#[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
+pub struct OnExitSystem(String);
+
+impl OnExitSystem {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
     }
 }
 

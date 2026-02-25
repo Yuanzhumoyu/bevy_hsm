@@ -5,11 +5,13 @@ use std::fmt;
 #[derive(Debug)]
 pub enum HsmError {
     /// A required `StateTree` component was not found on an entity.
-    StateTreeNotFound { tree_entity: Entity },
-    /// A required `StateMachine` component was not found on an entity.
-    StateMachineMissing { entity: Entity },
+    StateTreeNotFound(Entity),
+    /// A required `HsmStateMachine` component was not found on an entity.
+    StateMachineMissing(Entity),
     /// A required `HsmState` component was not found on a state entity.
-    HsmStateMissing { entity: Entity },
+    HsmStateMissing(Entity),
+    /// A required `HsmOnState` component was not found on a state entity.
+    HsmOnStateMissing(Entity),
     /// A registered system could not be found by its name.
     SystemNotFound { system_name: String, state: Entity },
     /// An error occurred while running a state's action system (OnEnter, OnUpdate, OnExit).
@@ -27,23 +29,42 @@ pub enum HsmError {
     },
     /// A super state was not found for a given state within its `StateTree`.
     SuperStateNotFound { state_tree: Entity, state: Entity },
+    /// A required `FsmStateMachine` component was not found on an entity.
+    FsmStateMachineNotFound(Entity),
+    /// A required `FsmGraph` component was not found on an entity.
+    GraphNotFound(Entity),
+    /// A state was not found within the `FsmGraph`.
+    StateNotInGraph { graph: Entity, state: Entity },
+    /// An attempt was made to transition to a target that is not a valid state in the graph.
+    InvalidTransitionTarget {
+        graph: Entity,
+        from_state: Entity,
+        to_state: Entity,
+    },
 }
 
 impl fmt::Display for HsmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HsmError::StateTreeNotFound { tree_entity } => {
+            HsmError::StateTreeNotFound(tree_entity) => {
                 write!(
                     f,
                     "StateTree component not found on entity {:?}",
                     tree_entity
                 )
             }
-            HsmError::StateMachineMissing { entity } => {
-                write!(f, "StateMachine component not found on entity {:?}", entity)
+            HsmError::StateMachineMissing(entity) => {
+                write!(
+                    f,
+                    "HsmStateMachine component not found on entity {:?}",
+                    entity
+                )
             }
-            HsmError::HsmStateMissing { entity } => {
+            HsmError::HsmStateMissing(entity) => {
                 write!(f, "HsmState component not found on entity {:?}", entity)
+            }
+            HsmError::HsmOnStateMissing(entity) => {
+                write!(f, "HsmOnState component not found on entity {:?}", entity)
             }
             HsmError::SystemNotFound { system_name, state } => write!(
                 f,
@@ -86,9 +107,34 @@ impl fmt::Display for HsmError {
                     state, state_tree
                 )
             }
+            HsmError::FsmStateMachineNotFound(entity) => {
+                write!(
+                    f,
+                    "FsmStateMachine component not found on entity {:?}",
+                    entity
+                )
+            }
+            HsmError::GraphNotFound(graph_entity) => {
+                write!(
+                    f,
+                    "FsmGraph component not found on entity {:?}",
+                    graph_entity
+                )
+            }
+            HsmError::StateNotInGraph { graph, state } => {
+                write!(f, "State {:?} not found in FsmGraph {:?}", state, graph)
+            }
+            HsmError::InvalidTransitionTarget {
+                graph,
+                from_state,
+                to_state,
+            } => {
+                write!(
+                    f,
+                    "Invalid transition from {:?} to {:?} in FsmGraph {:?}: target state does not exist in graph.",
+                    from_state, to_state, graph
+                )
+            }
         }
     }
 }
-
-// We cannot implement `std::error::Error` because `bevy::ecs::system::RunSystemError` does not implement it.
-// We will use this type for structured logging.

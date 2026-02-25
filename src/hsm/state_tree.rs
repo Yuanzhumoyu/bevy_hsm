@@ -35,7 +35,7 @@ use std::fmt::Display;
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
-use crate::state_traversal::TraversalStrategy;
+use crate::hsm::state_traversal::TraversalStrategy;
 
 ///# 状态树结构/StateTree
 ///
@@ -67,11 +67,40 @@ impl StateTree {
     /// let state_tree = StateTree::new(root_entity, TraversalStrategy::default());
     /// # }
     /// ```
-    pub fn new(root: Entity, traversal: TraversalStrategy) -> Self {
+    pub fn new(root: Entity) -> Self {
         Self {
             root,
-            tree: HashMap::from([(root, StateTreeNode::new(None, traversal))]),
+            tree: HashMap::from([(root, StateTreeNode::new(None))]),
         }
+    }
+
+    /// 为状态搜索下一个状态添加一个遍历行为
+    ///
+    /// Add a traversal behavior to search for the next state
+    ///
+    ///# Example
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn example(mut commands: Commands, mut state_tree: StateTree) {
+    /// let parent = commands.spawn(HsmState::default()).id();
+    /// let child = commands.spawn(HsmState::default()).id();
+    ///
+    /// let traversal = TraversalStrategy::default();
+    /// let mut tree = StateTree::new(parent);
+    /// tree
+    ///     .establish_relationships(parent, traversal)
+    ///     .with_add(parent, child);
+    /// # }
+    pub fn establish_relationships(
+        &mut self,
+        target: Entity,
+        traversal: TraversalStrategy,
+    ) -> &mut Self {
+        if let Some(node) = self.tree.get_mut(&target) {
+            node.set_traversal(traversal);
+        }
+        self
     }
 
     /// 向状态树中添加父子关系
@@ -104,22 +133,33 @@ impl StateTree {
     /// assert!(!state_tree.add(orphan, child, TraversalStrategy::default()));
     /// # }
     /// ```
-    pub fn add(&mut self, from: Entity, to: Entity, traversal: TraversalStrategy) -> bool {
+    pub fn add(&mut self, from: Entity, to: Entity) -> bool {
         if self.has_link(to, from) {
             return false;
         }
 
         if let Some(node) = self.tree.get_mut(&from) {
             node.push(to);
-            self.tree
-                .insert(to, StateTreeNode::new(Some(from), traversal));
+            self.tree.insert(to, StateTreeNode::new(Some(from)));
             return true;
         }
         false
     }
 
-    pub fn with_add(mut self, from: Entity, to: Entity, traversal: TraversalStrategy) -> Self {
-        self.add(from, to, traversal);
+    pub fn with_add(&mut self, from: Entity, to: Entity) -> &mut Self {
+        self.add(from, to);
+        self
+    }
+
+    pub fn with_adds(&mut self, from: Entity, mut to: Vec<Entity>) -> &mut Self {
+        to.retain(|to| !self.has_link(from, *to));
+
+        if let Some(node) = self.tree.get_mut(&from) {
+            node.sub_states.extend(to.iter());
+            to.iter().for_each(|to| {
+                self.tree.insert(*to, StateTreeNode::new(Some(from)));
+            });
+        }
         self
     }
 
@@ -206,7 +246,10 @@ impl StateTree {
                 super_state: _,
                 traversal,
                 sub_states,
-            }) => traversal.0.traverse(world, sub_states.as_slice()),
+            }) => match traversal {
+                Some(traversal) => traversal.0.traverse(world, sub_states.as_slice()),
+                None => sub_states.to_vec(),
+            },
             None => Vec::new(),
         }
     }
@@ -229,7 +272,11 @@ impl StateTree {
                     .filter(|e| f(e))
                     .map(|e| e.id())
                     .collect::<Vec<_>>();
-                traversal.0.traverse(world, sub_states.as_slice())
+
+                match traversal {
+                    Some(traversal) => traversal.0.traverse(world, sub_states.as_slice()),
+                    None => sub_states,
+                }
             }
             None => Vec::new(),
         }
@@ -239,17 +286,21 @@ impl StateTree {
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct StateTreeNode {
     pub super_state: Option<Entity>,
-    pub traversal: TraversalStrategy,
+    pub traversal: Option<TraversalStrategy>,
     pub sub_states: Vec<Entity>,
 }
 
 impl StateTreeNode {
-    pub fn new(super_state: Option<Entity>, traversal: TraversalStrategy) -> Self {
+    pub fn new(super_state: Option<Entity>) -> Self {
         Self {
             super_state,
-            traversal,
+            traversal: None,
             sub_states: Vec::new(),
         }
+    }
+
+    pub fn set_traversal(&mut self, traversal: TraversalStrategy) {
+        self.traversal = Some(traversal);
     }
 
     pub const fn get_sub_states(&self) -> &[Entity] {
@@ -304,27 +355,29 @@ mod tests {
             .filter_map(Entity::from_raw_u32)
             .collect::<Vec<_>>();
         let traversal = TraversalStrategy::default();
-        let mut tree = StateTree::new(v[0], traversal.clone());
+        let mut tree = StateTree::new(v[0]);
 
-        assert!(tree.add(v[0], v[1], traversal.clone()));
-        assert!(tree.add(v[0], v[1], traversal.clone()));
-        assert!(tree.add(v[0], v[1], traversal.clone()));
+        tree.establish_relationships(v[0], traversal);
+
+        assert!(tree.add(v[0], v[1]));
+        assert!(tree.add(v[0], v[1]));
+        assert!(tree.add(v[0], v[1]));
         assert_eq!(tree.get(v[0]), Some([v[1]].as_slice()));
 
-        assert!(!tree.add(v[2], v[1], traversal.clone()));
+        assert!(!tree.add(v[2], v[1]));
 
-        assert!(!tree.add(v[1], v[0], traversal.clone()));
+        assert!(!tree.add(v[1], v[0]));
 
-        assert!(tree.add(v[0], v[2], traversal.clone()));
-        assert!(tree.add(v[1], v[3], traversal.clone()));
-        assert!(tree.add(v[2], v[4], traversal.clone()));
-        assert!(tree.add(v[3], v[6], traversal.clone()));
-        assert!(tree.add(v[4], v[7], traversal.clone()));
+        assert!(tree.add(v[0], v[2]));
+        assert!(tree.add(v[1], v[3]));
+        assert!(tree.add(v[2], v[4]));
+        assert!(tree.add(v[3], v[6]));
+        assert!(tree.add(v[4], v[7]));
 
         let new_tree = tree.remove(v[2], v[4]);
         assert_eq!(
             new_tree,
-            Some(StateTree::new(v[4], traversal.clone()).with_add(v[4], v[7], traversal.clone()))
+            Some(StateTree::new(v[4]).with_add(v[4], v[7]).clone())
         );
     }
 
@@ -333,11 +386,10 @@ mod tests {
         let v = (0..3u32)
             .filter_map(Entity::from_raw_u32)
             .collect::<Vec<_>>();
-        let traversal = TraversalStrategy::default();
-        let mut tree = StateTree::new(v[0], traversal.clone());
+        let mut tree = StateTree::new(v[0]);
 
-        assert!(tree.add(v[0], v[1], traversal.clone()));
-        assert!(tree.add(v[1], v[2], traversal.clone()));
+        assert!(tree.add(v[0], v[1]));
+        assert!(tree.add(v[1], v[2]));
 
         assert!(!tree.has_link(v[1], v[0]));
         assert!(!tree.has_link(v[2], v[1]));
@@ -349,11 +401,10 @@ mod tests {
         let v = (0..3u32)
             .filter_map(Entity::from_raw_u32)
             .collect::<Vec<_>>();
-        let traversal = TraversalStrategy::default();
-        let mut tree = StateTree::new(v[0], traversal.clone());
+        let mut tree = StateTree::new(v[0]);
 
-        assert!(tree.add(v[0], v[1], traversal.clone()));
-        assert!(tree.add(v[1], v[2], traversal.clone()));
+        assert!(tree.add(v[0], v[1]));
+        assert!(tree.add(v[1], v[2]));
 
         assert_eq!(tree.path_iter(v[2]).collect::<Vec<_>>(), vec![v[1], v[0]]);
     }
@@ -376,9 +427,10 @@ mod tests {
             if v.is_empty() {
                 continue;
             }
-            let mut tree = StateTree::new(v[0], traversal.clone());
+            let mut tree = StateTree::new(v[0]);
+            tree.establish_relationships(v[0], traversal);
             for window in v.windows(2) {
-                assert!(tree.add(window[0], window[1], traversal.clone()));
+                assert!(tree.add(window[0], window[1]));
             }
             if v.len() > 1 {
                 let last = v.last().expect("Path should not be empty");

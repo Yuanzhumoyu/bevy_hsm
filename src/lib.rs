@@ -22,23 +22,21 @@
 
 pub extern crate bevy_hsm_macros;
 
+pub mod condition;
+pub mod context;
 mod error;
-pub mod history;
+pub mod fsm;
 pub mod hook_system;
-mod on_transition;
-pub mod state;
-pub mod state_condition;
-pub mod state_traversal;
-pub mod state_tree;
+pub mod hsm;
+pub mod state_machine_component;
 pub mod system_state;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
 use crate::{
-    hook_system::HsmOnStateDisposableSystems,
-    on_transition::{CheckOnTransitionStates, add_handle_on_state},
-    prelude::{StateEnterConditionBuffer, StateExitConditionBuffer},
-    state_condition::StateConditions,
+    hook_system::NamedStateSystems,
+    hsm::on_transition::{CheckOnTransitionStates, add_handle_on_state},
+    prelude::{StateConditions, StateEnterConditionBuffer, StateExitConditionBuffer},
 };
 
 #[derive(Debug, Default)]
@@ -50,10 +48,12 @@ pub struct HsmPlugin<T: ScheduleLabel = Last> {
 impl Plugin for HsmPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StateConditions>();
-        app.init_resource::<HsmOnStateDisposableSystems>();
+        app.init_resource::<NamedStateSystems>();
         app.init_resource::<CheckOnTransitionStates>();
         app.init_resource::<StateEnterConditionBuffer>();
         app.init_resource::<StateExitConditionBuffer>();
+
+        app.add_observer(prelude::FsmStateMachine::observer);
 
         add_handle_on_state(app, self.transition_schedule.clone());
     }
@@ -61,8 +61,17 @@ impl Plugin for HsmPlugin {
 
 pub mod prelude {
     pub use crate::{
-        HsmPlugin, hook_system::*, on_transition::*, state::*, state_condition::*,
-        state_traversal::*, state_tree::*, system_state::*,
+        HsmPlugin,
+        condition::*,
+        context::*,
+        fsm::{FsmState, event::*, graph::*, state_machine::*},
+        hook_system::*,
+        hsm::{
+            HsmState, on_transition::*, state_condition::*, state_machine::*, state_traversal::*,
+            state_tree::*,
+        },
+        state_machine_component::*,
+        system_state::*,
     };
 
     pub use crate::bevy_hsm_macros::combination_condition;

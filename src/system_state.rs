@@ -12,16 +12,15 @@ use bevy::{
 };
 
 use crate::{
-    error::HsmError,
-    hook_system::HsmStateContext,
-    state::{HsmOnState, HsmOnUpdateSystem},
+    context::*, error::HsmError, hook_system::*, prelude::HsmOnState,
     system_state::system_state_trait::ExpandScheduleLabelFuction,
 };
 
 /// # 一个对状态机系统的抽象\An abstraction of a state machine system
 /// * In : 输入上下文
 /// - In : Input context
-/// * Out :
+/// * Out : 输出上下文
+/// - Out : Output context
 ///     * None: 下一帧将不再执行该状态
 ///     - None: The next frame will no longer execute this state
 ///     * Some: 继续执行该状态, 里面的数量为空时将视为None
@@ -35,16 +34,16 @@ use crate::{
 pub trait IntoActionSystem<M> {
     fn into_system(
         self,
-    ) -> impl IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M>;
+    ) -> impl IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M>;
 }
 
 impl<F, M> IntoActionSystem<M> for F
 where
-    F: IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M>,
+    F: IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M>,
 {
     fn into_system(
         self,
-    ) -> impl IntoSystem<In<Vec<HsmStateContext>>, Option<Vec<HsmStateContext>>, M> {
+    ) -> impl IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M> {
         self
     }
 }
@@ -195,19 +194,19 @@ pub struct HsmActionSystemBuffer {
     /// 当前帧状态组
     ///
     /// Current frame status group
-    pub curr: Vec<HsmStateContext>,
+    pub curr: Vec<OnStateContext>,
     /// 下一帧状态组
     ///
     /// Next frame status group
-    pub next: Vec<HsmStateContext>,
+    pub next: Vec<OnStateContext>,
     /// 过滤器: 用于筛选掉下一帧的状态
     ///
     /// Filter: used to filter out the next frame's status
-    filter: HashSet<HsmStateContext>,
+    filter: HashSet<OnStateContext>,
     /// 拦截器: 用于筛选掉当前帧的状态
     ///
     /// Interceptor: Use to filter out the current frame's status
-    interceptor: HashSet<HsmStateContext>,
+    interceptor: HashSet<OnStateContext>,
 }
 
 impl HsmActionSystemBuffer {
@@ -215,7 +214,7 @@ impl HsmActionSystemBuffer {
     ///
     /// Get the current state group
     #[inline(always)]
-    pub fn get_curr(&self) -> Vec<HsmStateContext> {
+    pub fn get_curr(&self) -> Vec<OnStateContext> {
         self.curr.clone()
     }
 
@@ -260,7 +259,7 @@ impl HsmActionSystemBuffer {
     ///
     /// Add a context
     #[inline(always)]
-    pub fn add(&mut self, context: HsmStateContext) {
+    pub fn add(&mut self, context: OnStateContext) {
         if self.interceptor.contains(&context) {
             return;
         }
@@ -273,7 +272,7 @@ impl HsmActionSystemBuffer {
     #[inline(always)]
     pub fn adds<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = HsmStateContext>,
+        I: IntoIterator<Item = OnStateContext>,
     {
         self.next
             .extend(iter.into_iter().filter(|c| !self.interceptor.contains(c)));
@@ -282,21 +281,21 @@ impl HsmActionSystemBuffer {
     /// 添加一个过滤器
     ///
     /// Add a filter
-    pub fn add_filter(&mut self, context: HsmStateContext) {
+    pub fn add_filter(&mut self, context: OnStateContext) {
         self.filter.insert(context);
     }
 
     /// 添加一个拦截器
     ///
     /// Add an interceptor
-    pub fn add_interceptor(&mut self, context: HsmStateContext) {
+    pub fn add_interceptor(&mut self, context: OnStateContext) {
         self.interceptor.insert(context);
     }
 
     /// 移除一个拦截器
     ///
     /// Remove an interceptor
-    pub fn remove_interceptor(&mut self, context: HsmStateContext) {
+    pub fn remove_interceptor(&mut self, context: OnStateContext) {
         self.interceptor.remove(&context);
     }
 
@@ -327,7 +326,7 @@ impl HsmActionSystemBuffer {
         f: impl FnOnce(&mut World, &mut HsmActionSystemBuffer) + 'static,
     ) {
         let world = unsafe { world.world_mut() };
-        let Some(on_update_system) = world.get::<HsmOnUpdateSystem>(state_id) else {
+        let Some(on_update_system) = world.get::<OnUpdateSystem>(state_id) else {
             return;
         };
         let action_systems = world.resource::<HsmActionSystems>();
@@ -364,8 +363,8 @@ impl Debug for HsmActionSystemBuffer {
 /// State machine system run mode
 fn action_system_run_mode<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(In<Option<Vec<HsmStateContext>>>, ResMut<HsmActionSystemBuffers<T>>) {
-    move |state_contexts: In<Option<Vec<HsmStateContext>>>,
+) -> impl Fn(In<Option<Vec<OnStateContext>>>, ResMut<HsmActionSystemBuffers<T>>) {
+    move |state_contexts: In<Option<Vec<OnStateContext>>>,
           mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
         let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) else {
             return;
@@ -422,8 +421,8 @@ fn update_buffer<T: ScheduleLabel>(
 /// Get state machine system cache
 fn buffer_input<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(Res<HsmActionSystemBuffers<T>>) -> Vec<HsmStateContext> {
-    move |action_system_buffer: Res<HsmActionSystemBuffers<T>>| -> Vec<HsmStateContext> {
+) -> impl Fn(Res<HsmActionSystemBuffers<T>>) -> Vec<OnStateContext> {
+    move |action_system_buffer: Res<HsmActionSystemBuffers<T>>| -> Vec<OnStateContext> {
         action_system_buffer
             .get_buffer(action_name.as_str())
             .map_or(vec![], |buffer| buffer.get_curr())

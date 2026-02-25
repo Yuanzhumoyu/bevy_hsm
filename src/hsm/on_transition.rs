@@ -1,14 +1,18 @@
 use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude::*};
 
 use crate::{
+    context::OnStateConditionContext,
     error::HsmError,
-    prelude::{
-        HsmStateConditionContext, ServiceTarget, StateEnterConditionBuffer,
-        StateExitConditionBuffer,
+    hsm::{
+        HsmState,
+        state_machine::{NextState, *},
+        state_tree::StateTree,
     },
-    state::{HsmOnState, HsmState, NextState, StateMachine, StationaryStateMachine},
-    state_condition::{HsmOnEnterCondition, HsmOnExitCondition},
-    state_tree::{StateTree, TreeStateId},
+    prelude::{
+        HsmOnEnterCondition, HsmOnExitCondition, ServiceTarget, StateEnterConditionBuffer,
+        StateExitConditionBuffer, TreeStateId,
+    },
+    state_machine_component::*,
 };
 
 /// 状态转换策略，用于控制状态转换行为
@@ -203,9 +207,9 @@ fn get_on_exit_next_states(
 ///
 /// Check whether the entity can transition
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq, Deref, DerefMut)]
-pub(super) struct CheckOnTransitionStates(HashSet<Entity>);
+pub(crate) struct CheckOnTransitionStates(HashSet<Entity>);
 
-pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) {
+pub(crate) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) {
     app.add_systems(
         schedule,
         (handle_on_enter_states, handle_on_exit_states)
@@ -219,7 +223,7 @@ pub(super) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
 fn handle_on_enter_states(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
-    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
+    query_state_machines: Query<(Entity, &HsmStateMachine), Without<StationaryStateMachine>>,
     query_states: Query<&HsmState, With<HsmState>>,
 ) {
     for (state_machine_id, state_machine) in
@@ -234,18 +238,13 @@ fn handle_on_enter_states(
         };
         commands.queue(move |world: &mut World| {
             let Some(state_tree) = world.get::<StateTree>(curr_state_id.tree()) else {
-                warn!(
-                    "{}",
-                    HsmError::StateTreeNotFound {
-                        tree_entity: curr_state_id.tree()
-                    }
-                );
+                warn!("{}", HsmError::StateTreeNotFound(curr_state_id.tree()));
                 return;
             };
             let sub_state_iter =
                 state_tree.traversal_iter_with(world, curr_state_id.state(), |e| {
                     if !e.contains::<HsmState>() {
-                        warn!("{}", HsmError::HsmStateMissing { entity: e.id() });
+                        warn!("{}", HsmError::HsmStateMissing(e.id()));
                         return false;
                     }
                     e.contains::<HsmOnEnterCondition>()
@@ -259,7 +258,7 @@ fn handle_on_enter_states(
 
                         match condition_id.run(
                             world,
-                            HsmStateConditionContext::new(
+                            OnStateConditionContext::new(
                                 match world.get::<ServiceTarget>(state_machine_id) {
                                     Some(service_target) => service_target.0,
                                     None => state_machine_id,
@@ -296,13 +295,8 @@ fn handle_on_enter_states(
                 .remove(&state_machine_id);
 
             let mut service_target = world.entity_mut(state_machine_id);
-            let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
-                warn!(
-                    "{}",
-                    HsmError::StateMachineMissing {
-                        entity: state_machine_id
-                    }
-                );
+            let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
+                warn!("{}", HsmError::StateMachineMissing(state_machine_id));
                 return;
             };
 
@@ -327,7 +321,7 @@ fn handle_on_enter_states(
 fn handle_on_exit_states(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
-    query_state_machines: Query<(Entity, &StateMachine), Without<StationaryStateMachine>>,
+    query_state_machines: Query<(Entity, &HsmStateMachine), Without<StationaryStateMachine>>,
     query_on_exit_conditions: Query<Has<HsmOnExitCondition>, With<HsmState>>,
     query_state_trees: Query<&StateTree>,
 ) {
@@ -340,12 +334,7 @@ fn handle_on_exit_states(
             continue;
         };
         let Ok(state_tree) = query_state_trees.get(curr_state_id.tree()) else {
-            warn!(
-                "{}",
-                HsmError::StateTreeNotFound {
-                    tree_entity: curr_state_id.tree()
-                }
-            );
+            warn!("{}", HsmError::StateTreeNotFound(curr_state_id.tree()));
             continue;
         };
         let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) else {
@@ -364,7 +353,7 @@ fn handle_on_exit_states(
                     match condition_buffer.get(&curr_state_id.state()) {
                         Some(condition_id) => condition_id.run(
                             world,
-                            HsmStateConditionContext::new(
+                            OnStateConditionContext::new(
                                 match world.get::<ServiceTarget>(state_machine_id) {
                                     Some(service_target) => service_target.0,
                                     None => state_machine_id,
@@ -402,12 +391,7 @@ fn handle_on_exit_states(
                 .get::<HsmState>(super_state_id)
                 .map(|state| (state.strategy, state.behavior))
             else {
-                warn!(
-                    "{}",
-                    HsmError::HsmStateMissing {
-                        entity: super_state_id
-                    }
-                );
+                warn!("{}", HsmError::HsmStateMissing(state_machine_id));
                 return Ok(());
             };
 
@@ -415,13 +399,8 @@ fn handle_on_exit_states(
             let next_states = get_on_exit_next_states(world, state_id, strategy, behavior)?;
 
             let mut service_target = world.entity_mut(state_machine_id);
-            let Some(mut state_machine) = service_target.get_mut::<StateMachine>() else {
-                warn!(
-                    "{}",
-                    HsmError::StateMachineMissing {
-                        entity: state_machine_id
-                    }
-                );
+            let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
+                warn!("{}", HsmError::StateMachineMissing(state_machine_id));
                 return Ok(());
             };
 
@@ -437,10 +416,8 @@ mod tests {
     use bevy::platform::collections::HashMap;
 
     use crate::{
-        HsmPlugin,
-        prelude::{HsmOnStateDisposableSystems, HsmStateContext, StateConditions, SystemState},
-        state::{HsmOnEnterSystem, HsmOnExitSystem, HsmOnUpdateSystem},
-        state_traversal::TraversalStrategy,
+        HsmPlugin, context::*, hook_system::*, hsm::state_condition::StateConditions,
+        prelude::SystemState,
     };
 
     use super::*;
@@ -452,7 +429,7 @@ mod tests {
     struct Condition(bool);
 
     fn log_on_enter(
-        entity: In<HsmStateContext>,
+        entity: In<OnStateContext>,
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
@@ -463,7 +440,7 @@ mod tests {
     }
 
     fn log_on_exit(
-        entity: In<HsmStateContext>,
+        entity: In<OnStateContext>,
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
@@ -473,14 +450,14 @@ mod tests {
         collector.0.push(format!("{}: Exit", state_name));
     }
 
-    fn is_condition_true(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
+    fn is_condition_true(entity: In<OnStateConditionContext>, query: Query<&Condition>) -> bool {
         let condition = query
             .get(entity.state_machine)
             .expect("State machine should have a Condition component");
         condition.0
     }
 
-    fn is_condition_false(entity: In<HsmStateConditionContext>, query: Query<&Condition>) -> bool {
+    fn is_condition_false(entity: In<OnStateConditionContext>, query: Query<&Condition>) -> bool {
         let condition = query
             .get(entity.state_machine)
             .expect("State machine should have a Condition component");
@@ -488,9 +465,9 @@ mod tests {
     }
 
     fn set_condition_false(
-        contexts: In<Vec<HsmStateContext>>,
+        contexts: In<Vec<OnStateContext>>,
         mut query: Query<&mut Condition>,
-    ) -> Option<Vec<HsmStateContext>> {
+    ) -> Option<Vec<OnStateContext>> {
         let mut iter = query.iter_many_mut(contexts.0.iter().map(|a| a.state_machine));
         while let Some(mut condition) = iter.fetch_next() {
             condition.0 = false;
@@ -508,7 +485,7 @@ mod tests {
         app.add_action_system(Update, "set_condition_false", set_condition_false);
 
         let world = app.world_mut();
-        let systems = HsmOnStateDisposableSystems(HashMap::from([
+        let systems = NamedStateSystems(HashMap::from([
             (
                 "log_on_enter".to_string(),
                 world.register_system(log_on_enter),
@@ -543,35 +520,34 @@ mod tests {
             .insert((
                 Name::new("OFF"),
                 HsmState::with(states[0].0, states[0].1),
-                HsmOnEnterSystem::new("log_on_enter"),
-                HsmOnExitSystem::new("log_on_exit"),
+                OnEnterSystem::new("log_on_enter"),
+                OnExitSystem::new("log_on_exit"),
             ))
             .id();
-        let traversal = TraversalStrategy::default();
-        let mut state_tree = StateTree::new(curr_state_id, traversal.clone());
+        let mut state_tree = StateTree::new(curr_state_id);
 
         for (i, (strategy, behavior)) in states[1..].iter().enumerate() {
             let new_state_id = world
                 .spawn((
                     Name::new(format!("ON{}", i)),
                     HsmState::with(*strategy, *behavior),
-                    HsmOnEnterSystem::new("log_on_enter"),
-                    HsmOnExitSystem::new("log_on_exit"),
+                    OnEnterSystem::new("log_on_enter"),
+                    OnExitSystem::new("log_on_exit"),
                     HsmOnEnterCondition::new("is_condition_true"),
                     HsmOnExitCondition::new("is_condition_false"),
                 ))
                 .id();
-            state_tree.add(curr_state_id, new_state_id, traversal.clone());
+            state_tree.add(curr_state_id, new_state_id);
             curr_state_id = new_state_id;
         }
 
         world
             .entity_mut(curr_state_id)
-            .insert(HsmOnUpdateSystem::new("Update:set_condition_false"));
+            .insert(OnUpdateSystem::new("Update:set_condition_false"));
 
         world.entity_mut(state_machine_id).insert((
             state_tree,
-            StateMachine::new(10, TreeStateId::new(state_machine_id, start_id)),
+            HsmStateMachine::new(10, TreeStateId::new(state_machine_id, start_id)),
             Name::new("StateMachines"),
             HsmOnState::default(),
             Condition(true),

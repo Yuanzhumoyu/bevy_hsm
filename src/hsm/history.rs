@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{state::HsmOnState, state_tree::TreeStateId};
+use crate::hsm::{state_machine::HsmOnState, state_tree::TreeStateId};
 
 /// 状态历史记录
 ///
@@ -19,6 +19,19 @@ impl StateHistory {
         Self {
             history: VecDeque::with_capacity(max_size),
             max_size,
+        }
+    }
+
+    /// 设置当前状态的FSM历史记录
+    pub fn set_last_state_fsm_history(
+        &mut self,
+        fsm_history: crate::fsm::history::FsmStateHistory,
+    ) {
+        for HistoricalNode { left_cycle, .. } in self.history.iter_mut().rev() {
+            if let HsmStateLifecycleRecord::Update(history) = left_cycle {
+                *history = Some(fsm_history);
+                break;
+            }
         }
     }
 
@@ -54,7 +67,7 @@ impl StateHistory {
     ///
     /// Get the history state at the specified index
     pub fn get_at(&self, index: usize) -> Option<&HistoricalNode> {
-        self.history.get(self.history.len() - index)
+        self.history.get(self.history.len().saturating_sub(index))
     }
 
     /// 清除历史记录
@@ -120,19 +133,46 @@ impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoricalNode {
     id: TreeStateId,
-    on_state: HsmOnState,
+    left_cycle: HsmStateLifecycleRecord,
 }
 
 impl HistoricalNode {
-    pub fn new(id: TreeStateId, on_state: HsmOnState) -> Self {
-        Self { id, on_state }
+    pub fn new(id: TreeStateId, left_cycle: HsmStateLifecycleRecord) -> Self {
+        Self { id, left_cycle }
+    }
+
+    pub fn left_cycle(&self) -> &HsmStateLifecycleRecord {
+        &self.left_cycle
     }
 
     pub fn id(&self) -> TreeStateId {
         self.id
     }
+}
 
-    pub fn on_state(&self) -> HsmOnState {
-        self.on_state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HsmStateLifecycleRecord {
+    Enter,
+    Update(Option<crate::fsm::history::FsmStateHistory>),
+    Exit,
+}
+
+impl From<HsmStateLifecycleRecord> for HsmOnState {
+    fn from(value: HsmStateLifecycleRecord) -> Self {
+        match value {
+            HsmStateLifecycleRecord::Enter => HsmOnState::Enter,
+            HsmStateLifecycleRecord::Update(_) => HsmOnState::Update,
+            HsmStateLifecycleRecord::Exit => HsmOnState::Exit,
+        }
+    }
+}
+
+impl From<HsmOnState> for HsmStateLifecycleRecord {
+    fn from(value: HsmOnState) -> Self {
+        match value {
+            HsmOnState::Enter => HsmStateLifecycleRecord::Enter,
+            HsmOnState::Update => HsmStateLifecycleRecord::Update(None),
+            HsmOnState::Exit => HsmStateLifecycleRecord::Exit,
+        }
     }
 }
