@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -13,9 +13,9 @@ pub struct Count(usize);
 
 impl Count {
     fn action(
-        states: In<Vec<OnStateContext>>,
+        states: In<Vec<StateActionContext>>,
         mut query: Query<(&Name, &mut Count)>,
-    ) -> Option<Vec<OnStateContext>> {
+    ) -> Option<Vec<StateActionContext>> {
         let mut iter = query.iter_many_mut(states.0.iter().map(|a| a.service_target));
         while let Some((name, mut count)) = iter.fetch_next() {
             count.0 += 1;
@@ -38,12 +38,12 @@ pub enum Switch {
 }
 
 impl Switch {
-    fn condition_with_open(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_open(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Open)
     }
 
-    fn condition_with_close(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
+    fn condition_with_close(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
         let switch = query.get(entity.service_target).unwrap();
         matches!(switch, Switch::Close)
     }
@@ -51,18 +51,18 @@ impl Switch {
 
 fn register_condition(
     mut commands: Commands,
-    mut action_systems: ResMut<StateConditions>,
-    mut named_state_systems: ResMut<NamedStateSystems>,
+    mut guard_registry: ResMut<GuardRegistry>,
+    mut action_registry: ResMut<StateActionRegistry>,
 ) {
     let id = commands.register_system(Switch::condition_with_open);
-    action_systems.insert("is_open", id);
+    guard_registry.insert("is_open", id);
     let id = commands.register_system(Switch::condition_with_close);
-    action_systems.insert("is_close", id);
+    guard_registry.insert("is_close", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    named_state_systems.insert("debug_on_enter", id);
+    action_registry.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    named_state_systems.insert("debug_on_exit", id);
+    action_registry.insert("debug_on_exit", id);
 }
 
 fn startup(mut commands: Commands) {
@@ -79,8 +79,8 @@ fn startup(mut commands: Commands) {
         .spawn((
             Name::new("Counter"),
             HsmState::default(),
-            HsmOnEnterCondition::new("is_open"),
-            HsmOnExitCondition::new("is_close"),
+            EnterGuard::new("is_open"),
+            ExitGuard::new("is_close"),
             OnEnterSystem::new("debug_on_enter"),
             OnUpdateSystem::new("Update:计数"),
             OnExitSystem::new("debug_on_exit"),
@@ -93,13 +93,13 @@ fn startup(mut commands: Commands) {
     let traversal = TraversalStrategy::default();
     let mut state_tree = StateTree::new(start_id);
     state_tree
-        .establish_relationships(start_id, traversal)
+        .with_traversal(start_id, traversal)
         .with_add(start_id, id);
 
     commands.entity(state_machine).insert((
-        HsmStateMachine::new(10, TreeStateId::new(state_machine, start_id)),
+        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
         Name::new("Switch Counter"),
-        HsmOnState::default(),
+        StateLifecycle::default(),
         Switch::Close,
         state_tree,
         Count(0),
@@ -137,7 +137,7 @@ fn key_event(input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Switch>) {
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
-        .add_plugins(HsmPlugin::default());
+        .add_plugins(StateMachinePlugin::<Last>::default());
 
     app.add_action_system(Update, "计数", Count::action);
 

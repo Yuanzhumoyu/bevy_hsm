@@ -3,9 +3,17 @@ name = "bevy_hsm"
 version = "0.18.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "A hierarchical and finite state machine library for the Bevy game engine."
 repository = "https://github.com/Yuanzhumoyu/bevy_hsm"
-keywords = ["bevy", "hsm", "state-machine"]
+keywords = ["bevy", "hsm", "fsm", "state-machine"]
 resolver = "2"
+
+[features]
+default = ["hybrid", "history"]
+hybrid = ["hsm", "fsm"]
+history = []
+fsm = []
+hsm = []
 
 [dependencies]
 bevy_hsm_macros = { path = "crates/bevy_hsm_macros" }
@@ -31,19 +39,24 @@ type_complexity = "allow"
 [[example]]
 name = "switch_state"
 path = "examples/switch_state.rs"
+required-features = ["hsm"]
 
 [[example]]
 name = "flashing_light"
 path = "examples/flashing_light.rs"
+required-features = ["hsm"]
 
 [[example]]
 name = "more_states"
 path = "examples/more_states.rs"
+required-features = ["hsm"]
 
 [[example]]
 name = "simple_fsm"
 path = "examples/simple_fsm.rs"
+required-features = ["fsm"]
 
 [[test]]
 name = "action_system"
 path = "tests/action_system.rs"
+required-features = ["hybrid"]

@@ -22,57 +22,77 @@
 
 pub extern crate bevy_hsm_macros;
 
-pub mod condition;
+pub mod action_dispatcher;
 pub mod context;
 mod error;
+#[cfg(feature = "fsm")]
 pub mod fsm;
-pub mod hook_system;
+pub mod guards;
+#[cfg(feature = "hsm")]
 pub mod hsm;
-pub mod state_machine_component;
-pub mod system_state;
+pub mod markers;
+pub mod state_actions;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
-use crate::{
-    hook_system::NamedStateSystems,
-    hsm::on_transition::{CheckOnTransitionStates, add_handle_on_state},
-    prelude::{StateConditions, StateEnterConditionBuffer, StateExitConditionBuffer},
-};
+use crate::state_actions::StateActionRegistry;
 
 #[derive(Debug, Default)]
-pub struct HsmPlugin<T: ScheduleLabel = Last> {
+#[cfg(feature = "hsm")]
+pub struct StateMachinePlugin<T: ScheduleLabel = Last> {
     /// 状态转换的调度器
     transition_schedule: T,
 }
 
-impl Plugin for HsmPlugin {
+#[cfg(feature = "hsm")]
+impl<T: ScheduleLabel + Clone> Plugin for StateMachinePlugin<T> {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StateConditions>();
-        app.init_resource::<NamedStateSystems>();
+        app.init_resource::<StateActionRegistry>();
+
+        use crate::hsm::{
+            guards::{EnterGuardCache, ExitGuardCache, GuardRegistry},
+            transition_strategy::{CheckOnTransitionStates, add_handle_on_state},
+        };
+
+        app.init_resource::<GuardRegistry>();
         app.init_resource::<CheckOnTransitionStates>();
-        app.init_resource::<StateEnterConditionBuffer>();
-        app.init_resource::<StateExitConditionBuffer>();
+        app.init_resource::<EnterGuardCache>();
+        app.init_resource::<ExitGuardCache>();
 
-        app.add_observer(prelude::FsmStateMachine::observer);
+        add_handle_on_state::<T>(app, self.transition_schedule.clone());
 
-        add_handle_on_state(app, self.transition_schedule.clone());
+        #[cfg(feature = "fsm")]
+        app.add_observer(fsm::state_machine::FsmStateMachine::handle_fsm_trigger);
+    }
+}
+
+#[derive(Debug, Default)]
+#[cfg(not(feature = "hsm"))]
+pub struct StateMachinePlugin;
+
+#[cfg(not(feature = "hsm"))]
+impl Plugin for StateMachinePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<StateActionRegistry>();
+
+        #[cfg(feature = "fsm")]
+        app.add_observer(fsm::state_machine::FsmStateMachine::handle_fsm_trigger);
     }
 }
 
 pub mod prelude {
     pub use crate::{
-        HsmPlugin,
-        condition::*,
-        context::*,
-        fsm::{FsmState, event::*, graph::*, state_machine::*},
-        hook_system::*,
-        hsm::{
-            HsmState, on_transition::*, state_condition::*, state_machine::*, state_traversal::*,
-            state_tree::*,
-        },
-        state_machine_component::*,
-        system_state::*,
+        StateMachinePlugin, action_dispatcher::*, context::*, guards::*, markers::*,
+        state_actions::*,
     };
+
+    #[cfg(feature = "hsm")]
+    pub use crate::hsm::{
+        HsmState, guards::*, state_machine::*, state_tree::*, transition_strategy::*,
+    };
+
+    #[cfg(feature = "fsm")]
+    pub use crate::fsm::{FsmState, event::*, graph::*, state_machine::*};
 
     pub use crate::bevy_hsm_macros::combination_condition;
 }

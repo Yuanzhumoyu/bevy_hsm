@@ -1,26 +1,26 @@
 use bevy::prelude::*;
-use bevy_hsm::{HsmPlugin, prelude::*};
+use bevy_hsm::{StateMachinePlugin, prelude::*};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct ToggleEvent;
 
-fn log_on_enter(In(context): In<OnStateContext>, query: Query<&Name>) {
+fn log_on_enter(In(context): In<StateActionContext>, query: Query<&Name>) {
     if let Ok(name) = query.get(context.state()) {
         info!("Entering state: {}", name);
     }
 }
 
-fn log_on_exit(In(context): In<OnStateContext>, query: Query<&Name>) {
+fn log_on_exit(In(context): In<StateActionContext>, query: Query<&Name>) {
     if let Ok(name) = query.get(context.state()) {
         info!("Exiting state: {}", name);
     }
 }
 
-fn setup_fsm(mut commands: Commands, mut named_systems: ResMut<NamedStateSystems>) {
+fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry>) {
     let system_id = commands.register_system(log_on_enter);
-    named_systems.insert("log_on_enter", system_id);
+    action_registry.insert("log_on_enter", system_id);
     let system_id = commands.register_system(log_on_exit);
-    named_systems.insert("log_on_exit", system_id);
+    action_registry.insert("log_on_exit", system_id);
 
     let state_a = commands
         .spawn((
@@ -61,14 +61,14 @@ fn handle_input(
     if keyboard_input.just_pressed(KeyCode::Space) {
         info!("Spacebar pressed, sending ToggleEvent.");
         let state_machine = state_machine.entity();
-        commands.trigger(FsmOnTransition::with_event(state_machine, ToggleEvent));
+        commands.trigger(FsmTrigger::with_event(state_machine, ToggleEvent));
     }
 }
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(HsmPlugin::default())
+        .add_plugins(StateMachinePlugin::<Last>::default())
         .add_systems(Startup, setup_fsm)
         .add_systems(Update, handle_input)
         .run();

@@ -11,14 +11,14 @@ use dyn_hash::{DynHash, hash_trait_object};
 /// * 用于在状态机系统中发送状态转换事件
 /// - Used to send state transition events in the state machine system
 #[derive(EntityEvent, Clone)]
-pub struct FsmOnTransition {
+pub struct FsmTrigger {
     #[event_target]
     pub(crate) state_machine: Entity,
-    pub(crate) typed: FsmOnTransitionType,
+    pub(crate) typed: FsmTriggerType,
 }
 
-impl FsmOnTransition {
-    pub fn new(state_machine: Entity, typed: FsmOnTransitionType) -> Self {
+impl FsmTrigger {
+    pub fn new(state_machine: Entity, typed: FsmTriggerType) -> Self {
         Self {
             state_machine,
             typed,
@@ -28,21 +28,21 @@ impl FsmOnTransition {
     pub fn with_next(state_machine: Entity, target: Entity) -> Self {
         Self {
             state_machine,
-            typed: FsmOnTransitionType::next(target),
+            typed: FsmTriggerType::next(target),
         }
     }
 
     pub fn with_condition(state_machine: Entity, target: Entity) -> Self {
         Self {
             state_machine,
-            typed: FsmOnTransitionType::condition(target),
+            typed: FsmTriggerType::transition(target),
         }
     }
 
-    pub fn with_event(state_machine: Entity, event: impl FsmOnEvent + 'static) -> Self {
+    pub fn with_event(state_machine: Entity, event: impl StateEvent + 'static) -> Self {
         Self {
             state_machine,
-            typed: FsmOnTransitionType::event(event),
+            typed: FsmTriggerType::event(event),
         }
     }
 
@@ -50,39 +50,39 @@ impl FsmOnTransition {
         self.state_machine
     }
 
-    pub const fn typed(&self) -> &FsmOnTransitionType {
+    pub const fn typed(&self) -> &FsmTriggerType {
         &self.typed
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FsmOnTransitionType {
+pub enum FsmTriggerType {
     /// 直接跳转下一个状态
     Next(Entity),
     /// 根据条件跳转状态
-    Condition(Entity),
+    Transition(Entity),
     /// 根据事件跳转状态
-    Event(Box<dyn FsmOnEvent>),
+    Event(Box<dyn StateEvent>),
 }
 
-impl FsmOnTransitionType {
+impl FsmTriggerType {
     pub const fn next(target: Entity) -> Self {
         Self::Next(target)
     }
 
-    pub const fn condition(target: Entity) -> Self {
-        Self::Condition(target)
+    pub const fn transition(target: Entity) -> Self {
+        Self::Transition(target)
     }
 
-    pub fn event(event: impl FsmOnEvent + 'static) -> Self {
+    pub fn event(event: impl StateEvent + 'static) -> Self {
         Self::Event(Box::new(event))
     }
 }
 
-pub trait FsmOnEvent: DynClone + DynEq + DynHash + Send + Sync + Debug + 'static {}
+pub trait StateEvent: DynClone + DynEq + DynHash + Send + Sync + Debug + 'static {}
 
-impl<T> FsmOnEvent for T where T: Clone + Eq + PartialEq + Hash + Send + Sync + Debug + 'static {}
+impl<T> StateEvent for T where T: Clone + Eq + PartialEq + Hash + Send + Sync + Debug + 'static {}
 
-clone_trait_object!(FsmOnEvent);
-eq_trait_object!(FsmOnEvent);
-hash_trait_object!(FsmOnEvent);
+clone_trait_object!(StateEvent);
+eq_trait_object!(StateEvent);
+hash_trait_object!(StateEvent);

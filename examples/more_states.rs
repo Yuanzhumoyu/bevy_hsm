@@ -1,35 +1,35 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
-fn is_up(_entity: In<OnStateConditionContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+fn is_up(_entity: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
     input.just_pressed(KeyCode::ArrowUp)
 }
 
-fn is_down(_entity: In<OnStateConditionContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+fn is_down(_entity: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
     input.just_pressed(KeyCode::ArrowDown)
 }
 
 fn register_condition(
     mut commands: Commands,
-    mut action_systems: ResMut<StateConditions>,
-    mut named_state_systems: ResMut<NamedStateSystems>,
+    mut guard_registry: ResMut<GuardRegistry>,
+    mut action_registry: ResMut<StateActionRegistry>,
 ) {
     let id = commands.register_system(is_up);
-    action_systems.insert("is_up", id);
+    guard_registry.insert("is_up", id);
     let id = commands.register_system(is_down);
-    action_systems.insert("is_down", id);
+    guard_registry.insert("is_down", id);
 
     let id = commands.register_system(debug_on_state("进入状态"));
-    named_state_systems.insert("debug_on_enter", id);
+    action_registry.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("退出状态"));
-    named_state_systems.insert("debug_on_exit", id);
+    action_registry.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
@@ -46,8 +46,8 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON1"),
             HsmState::default(),
-            HsmOnEnterCondition::new("is_up"),
-            HsmOnExitCondition::new("is_down"),
+            EnterGuard::new("is_up"),
+            ExitGuard::new("is_down"),
             OnEnterSystem::new("debug_on_enter"),
             OnExitSystem::new("debug_on_exit"),
         ))
@@ -57,8 +57,8 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON2"),
             HsmState::default(),
-            HsmOnEnterCondition::new("is_up"),
-            HsmOnExitCondition::new("is_down"),
+            EnterGuard::new("is_up"),
+            ExitGuard::new("is_down"),
             OnEnterSystem::new("debug_on_enter"),
             OnExitSystem::new("debug_on_exit"),
         ))
@@ -68,8 +68,8 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON3"),
             HsmState::default(),
-            HsmOnEnterCondition::new("is_up"),
-            HsmOnExitCondition::new("is_down"),
+            EnterGuard::new("is_up"),
+            ExitGuard::new("is_down"),
             OnEnterSystem::new("debug_on_enter"),
             OnExitSystem::new("debug_on_exit"),
         ))
@@ -78,19 +78,19 @@ fn setup(mut commands: Commands) {
     let traversal = TraversalStrategy::default();
     let mut state_tree = StateTree::new(start_id);
     state_tree
-        .establish_relationships(start_id, traversal.clone())
+        .with_traversal(start_id, traversal.clone())
         .with_add(start_id, id1)
-        .establish_relationships(id1, traversal.clone())
+        .with_traversal(id1, traversal.clone())
         .with_add(id1, id2)
-        .establish_relationships(id2, traversal)
+        .with_traversal(id2, traversal)
         .with_add(id2, id3);
 
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
         state_tree,
-        HsmStateMachine::new(10, TreeStateId::new(state_machine, start_id)),
+        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
         Name::new("More States"),
-        HsmOnState::default(),
+        StateLifecycle::default(),
     ));
 }
 
@@ -112,7 +112,7 @@ fn setup(mut commands: Commands) {
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
-        .add_plugins(HsmPlugin::default());
+        .add_plugins(StateMachinePlugin::<Last>::default());
 
     app.add_systems(Startup, (register_condition, setup).chain());
 

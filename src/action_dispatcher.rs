@@ -12,8 +12,8 @@ use bevy::{
 };
 
 use crate::{
-    context::*, error::HsmError, hook_system::*, prelude::HsmOnState,
-    system_state::system_state_trait::ExpandScheduleLabelFuction,
+    action_dispatcher::system_state_trait::ExpandScheduleLabelFuction, context::*,
+    error::StateMachineError, state_actions::*,
 };
 
 /// # 一个对状态机系统的抽象\An abstraction of a state machine system
@@ -34,16 +34,16 @@ use crate::{
 pub trait IntoActionSystem<M> {
     fn into_system(
         self,
-    ) -> impl IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M>;
+    ) -> impl IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M>;
 }
 
 impl<F, M> IntoActionSystem<M> for F
 where
-    F: IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M>,
+    F: IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M>,
 {
     fn into_system(
         self,
-    ) -> impl IntoSystem<In<Vec<OnStateContext>>, Option<Vec<OnStateContext>>, M> {
+    ) -> impl IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M> {
         self
     }
 }
@@ -103,10 +103,7 @@ impl SystemState for App {
 }
 
 pub type GetBufferId = Arc<
-    dyn Fn(&mut World, Box<dyn FnOnce(&mut World, &mut HsmActionSystemBuffer)>)
-        + Send
-        + Sync
-        + 'static,
+    dyn Fn(&mut World, Box<dyn FnOnce(&mut World, &mut StateActionBuffer)>) + Send + Sync + 'static,
 >;
 
 /// 状态机系统
@@ -116,12 +113,12 @@ pub type GetBufferId = Arc<
 /// * 用于获取对应时间点的缓存资源入口
 /// - Used to get the entry point of the cache resource at a certain time
 /// * Key: "`ScheduleLabel`:`action_name`"
-/// * Value: 是如何通过[World]获取缓存[HsmActionSystemBuffer]的方法
+/// * Value: 是如何通过[World]获取缓存[StateActionBuffer]的方法
 /// - Value: How to get the cache resource through [World]
 #[derive(Resource, Default, Clone)]
-pub struct HsmActionSystems(HashMap<String, GetBufferId>);
+pub struct ActionDispatch(HashMap<String, GetBufferId>);
 
-impl HsmActionSystems {
+impl ActionDispatch {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
@@ -143,32 +140,35 @@ impl HsmActionSystems {
 ///
 /// Status machine system cache manager
 /// * Key: `ScheduleLabel`
-/// * Value: `HsmActionSystemBuffers<T: ScheduleLabel>` 的 `ComponentId`
+/// * Value: `ScheduleActionBuffers<T: ScheduleLabel>` 的 `ComponentId`
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
-pub(super) struct HsmActionSystemBuffersManager(HashMap<String, ComponentId>);
+pub(super) struct ScheduleBufferIndex(HashMap<String, ComponentId>);
+
+#[derive(ScheduleLabel, Hash, Debug, PartialEq, Eq, Clone)]
+pub(super) struct DefaultActionSchedule;
 
 /// 状态机组系统缓存
 ///
 /// Status machine system cache manager
 #[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
-pub(super) struct HsmActionSystemBuffers<T: ScheduleLabel = HsmOnState> {
-    buffers: HashMap<String, HsmActionSystemBuffer>,
+pub(super) struct ScheduleActionBuffers<T: ScheduleLabel = DefaultActionSchedule> {
+    buffers: HashMap<String, StateActionBuffer>,
     _marker: PhantomData<T>,
 }
 
-impl<T: ScheduleLabel> HsmActionSystemBuffers<T> {
-    pub fn insert_buffer(&mut self, action_name: String, buffer: HsmActionSystemBuffer) {
+impl<T: ScheduleLabel> ScheduleActionBuffers<T> {
+    pub fn insert_buffer(&mut self, action_name: String, buffer: StateActionBuffer) {
         self.buffers.insert(action_name, buffer);
     }
 
-    pub fn get_buffer<Q>(&self, action_name: &Q) -> Option<&HsmActionSystemBuffer>
+    pub fn get_buffer<Q>(&self, action_name: &Q) -> Option<&StateActionBuffer>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
         self.buffers.get(action_name)
     }
 
-    pub fn get_buffer_mut<Q>(&mut self, action_name: &Q) -> Option<&mut HsmActionSystemBuffer>
+    pub fn get_buffer_mut<Q>(&mut self, action_name: &Q) -> Option<&mut StateActionBuffer>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
@@ -190,31 +190,31 @@ impl<T: ScheduleLabel> HsmActionSystemBuffers<T> {
 /// * 收集当前帧触发的实体, 并且在下一帧进行系统处理
 /// - Collect entities triggered by the current frame and perform system processing in the next frame
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct HsmActionSystemBuffer {
+pub struct StateActionBuffer {
     /// 当前帧状态组
     ///
     /// Current frame status group
-    pub curr: Vec<OnStateContext>,
+    pub curr: Vec<StateActionContext>,
     /// 下一帧状态组
     ///
     /// Next frame status group
-    pub next: Vec<OnStateContext>,
+    pub next: Vec<StateActionContext>,
     /// 过滤器: 用于筛选掉下一帧的状态
     ///
     /// Filter: used to filter out the next frame's status
-    filter: HashSet<OnStateContext>,
+    filter: HashSet<StateActionContext>,
     /// 拦截器: 用于筛选掉当前帧的状态
     ///
     /// Interceptor: Use to filter out the current frame's status
-    interceptor: HashSet<OnStateContext>,
+    interceptor: HashSet<StateActionContext>,
 }
 
-impl HsmActionSystemBuffer {
+impl StateActionBuffer {
     /// 获取当前帧状态组
     ///
     /// Get the current state group
     #[inline(always)]
-    pub fn get_curr(&self) -> Vec<OnStateContext> {
+    pub fn get_curr(&self) -> Vec<StateActionContext> {
         self.curr.clone()
     }
 
@@ -259,7 +259,7 @@ impl HsmActionSystemBuffer {
     ///
     /// Add a context
     #[inline(always)]
-    pub fn add(&mut self, context: OnStateContext) {
+    pub fn add(&mut self, context: StateActionContext) {
         if self.interceptor.contains(&context) {
             return;
         }
@@ -272,7 +272,7 @@ impl HsmActionSystemBuffer {
     #[inline(always)]
     pub fn adds<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = OnStateContext>,
+        I: IntoIterator<Item = StateActionContext>,
     {
         self.next
             .extend(iter.into_iter().filter(|c| !self.interceptor.contains(c)));
@@ -281,21 +281,21 @@ impl HsmActionSystemBuffer {
     /// 添加一个过滤器
     ///
     /// Add a filter
-    pub fn add_filter(&mut self, context: OnStateContext) {
+    pub fn add_filter(&mut self, context: StateActionContext) {
         self.filter.insert(context);
     }
 
     /// 添加一个拦截器
     ///
     /// Add an interceptor
-    pub fn add_interceptor(&mut self, context: OnStateContext) {
+    pub fn add_interceptor(&mut self, context: StateActionContext) {
         self.interceptor.insert(context);
     }
 
     /// 移除一个拦截器
     ///
     /// Remove an interceptor
-    pub fn remove_interceptor(&mut self, context: OnStateContext) {
+    pub fn remove_interceptor(&mut self, context: StateActionContext) {
         self.interceptor.remove(&context);
     }
 
@@ -323,17 +323,17 @@ impl HsmActionSystemBuffer {
     pub fn buffer_scope(
         world: UnsafeWorldCell,
         state_id: Entity,
-        f: impl FnOnce(&mut World, &mut HsmActionSystemBuffer) + 'static,
+        f: impl FnOnce(&mut World, &mut StateActionBuffer) + 'static,
     ) {
         let world = unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<OnUpdateSystem>(state_id) else {
             return;
         };
-        let action_systems = world.resource::<HsmActionSystems>();
-        let Some(get_buffer_scope) = action_systems.get(on_update_system.as_str()) else {
+        let guard_registry = world.resource::<ActionDispatch>();
+        let Some(get_buffer_scope) = guard_registry.get(on_update_system.as_str()) else {
             warn!(
                 "{}",
-                HsmError::SystemNotFound {
+                StateMachineError::SystemNotFound {
                     system_name: on_update_system.as_str().to_string(),
                     state: state_id
                 }
@@ -348,11 +348,11 @@ impl HsmActionSystemBuffer {
     }
 }
 
-impl Debug for HsmActionSystemBuffer {
+impl Debug for StateActionBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "HsmActionSystemBuffer[curr: {:?}, next: {:?}, filter: {:?}]",
+            "StateActionBuffer[curr: {:?}, next: {:?}, filter: {:?}]",
             self.curr, self.next, self.filter
         )
     }
@@ -363,9 +363,9 @@ impl Debug for HsmActionSystemBuffer {
 /// State machine system run mode
 fn action_system_run_mode<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(In<Option<Vec<OnStateContext>>>, ResMut<HsmActionSystemBuffers<T>>) {
-    move |state_contexts: In<Option<Vec<OnStateContext>>>,
-          mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+) -> impl Fn(In<Option<Vec<StateActionContext>>>, ResMut<ScheduleActionBuffers<T>>) {
+    move |state_contexts: In<Option<Vec<StateActionContext>>>,
+          mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
         let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) else {
             return;
         };
@@ -380,8 +380,8 @@ fn action_system_run_mode<T: ScheduleLabel>(
 
 fn handle_on_update_anchor<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(ResMut<HsmActionSystemBuffers<T>>) {
-    move |mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) {
+    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
         if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
             buffer.reflow();
         }
@@ -393,8 +393,8 @@ fn handle_on_update_anchor<T: ScheduleLabel>(
 /// Run action system condition
 fn run_action_system_condition<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(Option<Res<HsmActionSystemBuffers<T>>>) -> bool {
-    move |action_system_buffer: Option<Res<HsmActionSystemBuffers<T>>>| {
+) -> impl Fn(Option<Res<ScheduleActionBuffers<T>>>) -> bool {
+    move |action_system_buffer: Option<Res<ScheduleActionBuffers<T>>>| {
         action_system_buffer.is_some_and(|buffers| {
             buffers
                 .get_buffer(action_name.as_str())
@@ -408,8 +408,8 @@ fn run_action_system_condition<T: ScheduleLabel>(
 /// Update state machine system cache
 fn update_buffer<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(ResMut<HsmActionSystemBuffers<T>>) {
-    move |mut action_system_buffers: ResMut<HsmActionSystemBuffers<T>>| {
+) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) {
+    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
         if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
             buffer.update();
         }
@@ -421,8 +421,8 @@ fn update_buffer<T: ScheduleLabel>(
 /// Get state machine system cache
 fn buffer_input<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(Res<HsmActionSystemBuffers<T>>) -> Vec<OnStateContext> {
-    move |action_system_buffer: Res<HsmActionSystemBuffers<T>>| -> Vec<OnStateContext> {
+) -> impl Fn(Res<ScheduleActionBuffers<T>>) -> Vec<StateActionContext> {
+    move |action_system_buffer: Res<ScheduleActionBuffers<T>>| -> Vec<StateActionContext> {
         action_system_buffer
             .get_buffer(action_name.as_str())
             .map_or(vec![], |buffer| buffer.get_curr())
@@ -434,7 +434,7 @@ pub(super) mod system_state_trait {
 
     use bevy::ecs::{schedule::Schedules, world::World};
 
-    use crate::system_state::IntoActionSystem;
+    use crate::action_dispatcher::IntoActionSystem;
 
     /// 系统状态
     pub trait ExpandScheduleLabelFuction: Send + Sync + 'static {
@@ -458,7 +458,7 @@ pub(super) mod system_state_trait {
 impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction for T {
     #[inline]
     fn add_system_info(&self, world: &mut World, action_name: Arc<String>) -> Result<(), String> {
-        let mut buffers = world.get_resource_or_init::<HsmActionSystemBuffers<T>>();
+        let mut buffers = world.get_resource_or_init::<ScheduleActionBuffers<T>>();
         if buffers.contains(action_name.as_str()) {
             return Err(format!(
                 "The system<{}> for this ScheduleLabel<{:?}> already exists",
@@ -466,10 +466,10 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction 
             ));
         }
 
-        buffers.insert_buffer(action_name.to_string(), HsmActionSystemBuffer::default());
+        buffers.insert_buffer(action_name.to_string(), StateActionBuffer::default());
 
-        let buffers_id = world.register_resource::<HsmActionSystemBuffers<T>>();
-        let mut hsm_action_systems = world.get_resource_or_init::<HsmActionSystems>();
+        let buffers_id = world.register_resource::<ScheduleActionBuffers<T>>();
+        let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
         let label = ShortName::of::<T>();
         let name = match action_name.is_empty() {
             false => format!("{}:{}", label, action_name),
@@ -477,8 +477,8 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction 
         };
 
         let get_buffer_id =
-            move |world: &mut World, f: Box<dyn FnOnce(&mut World, &mut HsmActionSystemBuffer)>| {
-                world.resource_scope::<HsmActionSystemBuffers<T>, ()>(|world, mut buffers| {
+            move |world: &mut World, f: Box<dyn FnOnce(&mut World, &mut StateActionBuffer)>| {
+                world.resource_scope::<ScheduleActionBuffers<T>, ()>(|world, mut buffers| {
                     let Some(buffer) = buffers.get_buffer_mut(action_name.as_str()) else {
                         warn!(
                             "Buffer not found in buffers map, action_name: {}",
@@ -492,7 +492,7 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction 
         hsm_action_systems.insert(name, Arc::new(get_buffer_id));
 
         let mut hsm_action_system_buffer_manager =
-            world.get_resource_or_init::<HsmActionSystemBuffersManager>();
+            world.get_resource_or_init::<ScheduleBufferIndex>();
         hsm_action_system_buffer_manager
             .entry(label.to_string())
             .or_insert(buffers_id);

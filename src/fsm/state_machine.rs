@@ -5,17 +5,19 @@ use bevy::{
 
 use crate::{
     context::*,
-    error::HsmError,
+    error::StateMachineError,
     fsm::{
         FsmState,
-        event::{FsmOnTransition, FsmOnTransitionType},
+        event::{FsmTrigger, FsmTriggerType},
         graph::FsmGraph,
-        history::*,
     },
-    hook_system::*,
-    prelude::StateConditions,
-    state_machine_component::StationaryStateMachine,
+    markers::Paused,
+    prelude::GuardRegistry,
+    state_actions::*,
 };
+
+#[cfg(feature = "history")]
+use crate::fsm::history::*;
 
 ///# 有限状态机\Finite state machine
 #[derive(Component)]
@@ -24,10 +26,12 @@ pub struct FsmStateMachine {
     pub graph_id: Entity,
     pub(crate) init_state: Entity,
     pub(crate) curr_state: Entity,
+    #[cfg(feature = "history")]
     pub history: FsmStateHistory,
 }
 
 impl FsmStateMachine {
+    #[cfg(feature = "history")]
     pub fn new(graph_id: Entity, init_state: Entity, history_size: usize) -> Self {
         Self {
             graph_id,
@@ -37,14 +41,25 @@ impl FsmStateMachine {
         }
     }
 
+    #[cfg(not(feature = "history"))]
+    pub fn new(graph_id: Entity, init_state: Entity) -> Self {
+        Self {
+            graph_id,
+            init_state,
+            curr_state: init_state,
+        }
+    }
+
     /// 设置当前状态, 并记录历史
     ///
     /// Set current state and record history
     pub fn set_curr_state(&mut self, state: Entity) {
+        #[cfg(feature = "history")]
         self.history.push(self.curr_state);
         self.curr_state = state;
     }
 
+    #[cfg(feature = "history")]
     pub fn clear_history(&mut self) {
         self.history.clear();
     }
@@ -63,14 +78,14 @@ impl FsmStateMachine {
             return;
         };
         let Some(id) = world
-            .resource::<NamedStateSystems>()
+            .resource::<StateActionRegistry>()
             .get(on_enter.as_str())
             .cloned()
         else {
             return;
         };
 
-        let context = OnStateContext::new(
+        let context = StateActionContext::new(
             match world.get::<ServiceTarget>(entity) {
                 Some(service_target) => service_target.0,
                 None => entity,
@@ -88,34 +103,40 @@ impl FsmStateMachine {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn observer(
-        on: On<FsmOnTransition>,
+    pub(crate) fn handle_fsm_trigger(
+        on: On<FsmTrigger>,
         mut commands: Commands,
-        state_conditions: Res<StateConditions>,
-        named_state_systems: Res<NamedStateSystems>,
-        mut query: Query<&mut FsmStateMachine, Without<StationaryStateMachine>>,
+        guard_registry: Res<GuardRegistry>,
+        action_registry: Res<StateActionRegistry>,
+        mut query: Query<&mut FsmStateMachine, Without<Paused>>,
         query_service_target: Query<&ServiceTarget, With<FsmStateMachine>>,
         query_on_enter_system: Query<&OnEnterSystem, With<FsmState>>,
         query_on_exit_system: Query<&OnExitSystem, With<FsmState>>,
         fsm_graph: Query<&FsmGraph>,
     ) {
-        let FsmOnTransition {
+        let FsmTrigger {
             state_machine: state_machine_id,
             typed,
         } = on.event().clone();
 
         let Ok(mut state_machine) = query.get_mut(state_machine_id) else {
-            error!("{}", HsmError::FsmStateMachineNotFound(state_machine_id));
+            error!(
+                "{}",
+                StateMachineError::FsmStateMachineMissing(state_machine_id)
+            );
             return;
         };
         let Ok(fsm_graph) = fsm_graph.get(state_machine.graph_id) else {
-            error!("{}", HsmError::GraphNotFound(state_machine.graph_id));
+            error!(
+                "{}",
+                StateMachineError::GraphNotFound(state_machine.graph_id)
+            );
             return;
         };
         let Some(state_transitions) = fsm_graph.get(state_machine.curr_state) else {
             error!(
                 "{}",
-                HsmError::StateNotInGraph {
+                StateMachineError::StateNotInGraph {
                     graph: state_machine.graph_id,
                     state: state_machine.curr_state
                 }
@@ -133,10 +154,10 @@ impl FsmStateMachine {
                 let Ok(on_exit) = query_on_exit_system.get(from) else {
                     break 'on_exit;
                 };
-                let Some(id) = named_state_systems.get(on_exit.as_str()).cloned() else {
+                let Some(id) = action_registry.get(on_exit.as_str()).cloned() else {
                     warn!(
                         "{}",
-                        HsmError::SystemNotFound {
+                        StateMachineError::SystemNotFound {
                             system_name: on_exit.to_string(),
                             state: from
                         }
@@ -144,7 +165,7 @@ impl FsmStateMachine {
                     break 'on_exit;
                 };
 
-                let context = OnStateContext::new(service_target, state_machine_id, from);
+                let context = StateActionContext::new(service_target, state_machine_id, from);
                 commands.run_system_with(id, context);
             }
 
@@ -154,10 +175,10 @@ impl FsmStateMachine {
                 let Ok(on_enter) = query_on_enter_system.get(to) else {
                     break 'on_enter;
                 };
-                let Some(id) = named_state_systems.get(on_enter.as_str()).cloned() else {
+                let Some(id) = action_registry.get(on_enter.as_str()).cloned() else {
                     warn!(
                         "{}",
-                        HsmError::SystemNotFound {
+                        StateMachineError::SystemNotFound {
                             system_name: on_enter.to_string(),
                             state: to
                         }
@@ -165,18 +186,18 @@ impl FsmStateMachine {
                     break 'on_enter;
                 };
 
-                let context = OnStateContext::new(service_target, state_machine_id, to);
+                let context = StateActionContext::new(service_target, state_machine_id, to);
                 commands.run_system_with(id, context);
             }
         };
         match typed {
-            FsmOnTransitionType::Next(target) => {
+            FsmTriggerType::Next(target) => {
                 if state_transitions.contains(target) {
                     run_exit_system(target);
                 } else {
                     trace!(
                         "{}",
-                        HsmError::InvalidTransitionTarget {
+                        StateMachineError::InvalidTransitionTarget {
                             graph: state_machine.graph_id,
                             from_state: state_machine.curr_state,
                             to_state: target
@@ -184,13 +205,13 @@ impl FsmStateMachine {
                     );
                 }
             }
-            FsmOnTransitionType::Condition(target) => {
+            FsmTriggerType::Transition(target) => {
                 let Some(condition) = state_transitions.get_by_condition(target) else {
                     return;
                 };
-                let Some(id) = state_conditions.to_combinator_condition_id(condition) else {
+                let Some(id) = guard_registry.to_combinator_condition_id(condition) else {
                     warn!(
-                        "[StateConditions] This condition<{:?}> does not exist for state {:?}",
+                        "[GuardRegistry] This condition<{:?}> does not exist for state {:?}",
                         condition, target
                     );
                     return;
@@ -199,7 +220,7 @@ impl FsmStateMachine {
                     Ok(service_target) => service_target.0,
                     Err(_) => state_machine_id,
                 };
-                let context = OnStateConditionContext::new(
+                let context = GuardContext::new(
                     service_target,
                     state_machine_id,
                     state_machine.curr_state,
@@ -210,10 +231,10 @@ impl FsmStateMachine {
                         break 'on_exit None;
                     };
 
-                    match named_state_systems.get(on_exit.as_str()) {
+                    match action_registry.get(on_exit.as_str()) {
                         Some(id) => Some((
                             *id,
-                            OnStateContext::new(
+                            StateActionContext::new(
                                 service_target,
                                 state_machine_id,
                                 state_machine.curr_state,
@@ -222,7 +243,7 @@ impl FsmStateMachine {
                         None => {
                             warn!(
                                 "{}",
-                                HsmError::SystemNotFound {
+                                StateMachineError::SystemNotFound {
                                     system_name: on_exit.to_string(),
                                     state: state_machine.curr_state
                                 }
@@ -237,15 +258,15 @@ impl FsmStateMachine {
                         break 'on_enter None;
                     };
 
-                    match named_state_systems.get(on_enter.as_str()) {
+                    match action_registry.get(on_enter.as_str()) {
                         Some(id) => Some((
                             *id,
-                            OnStateContext::new(service_target, state_machine_id, target),
+                            StateActionContext::new(service_target, state_machine_id, target),
                         )),
                         None => {
                             warn!(
                                 "{}",
-                                HsmError::SystemNotFound {
+                                StateMachineError::SystemNotFound {
                                     system_name: on_enter.to_string(),
                                     state: target
                                 }
@@ -275,7 +296,7 @@ impl FsmStateMachine {
                     };
                 });
             }
-            FsmOnTransitionType::Event(fsm_on_event) => {
+            FsmTriggerType::Event(fsm_on_event) => {
                 if let Some(target) = state_transitions.get_by_event(fsm_on_event.as_ref()) {
                     run_exit_system(target);
                 }
@@ -286,20 +307,31 @@ impl FsmStateMachine {
 
 ///# 有限状态机初始化配置/Finite state machine initial configuration
 #[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FsmInitialConfiguration {
+pub struct FsmBlueprint {
     pub graph_id: Entity,
     pub init_state: Entity,
     pub curr_state: Option<Entity>,
-    pub max_history_size: usize,
+    #[cfg(feature = "history")]
+    pub history_size: usize,
 }
 
-impl FsmInitialConfiguration {
-    pub fn new(graph_id: Entity, init_state: Entity, max_history_size: usize) -> Self {
+impl FsmBlueprint {
+    #[cfg(feature = "history")]
+    pub fn new(graph_id: Entity, init_state: Entity, history_size: usize) -> Self {
         Self {
             graph_id,
             init_state,
             curr_state: None,
-            max_history_size,
+            history_size,
+        }
+    }
+
+    #[cfg(not(feature = "history"))]
+    pub fn new(graph_id: Entity, init_state: Entity) -> Self {
+        Self {
+            graph_id,
+            init_state,
+            curr_state: None,
         }
     }
 

@@ -4,7 +4,7 @@
 //! # 核心概念
 //!
 //! - **StateTree**: 状态树的根结构，维护所有状态节点的关系
-//! - **TreeStateId**: 树状态标识符，包含树实体和状态实体的组合
+//! - **HsmStateId**: 树状态标识符，包含树实体和状态实体的组合
 //! - **TraversalStrategy**: 状态遍历策略，定义子状态的访问顺序
 //!
 //! # 使用示例
@@ -18,11 +18,12 @@
 //!     let root_state = commands.spawn(HsmState::default()).id();
 //!     
 //!     // 创建状态树
-//!     let mut state_tree = StateTree::new(root_state, TraversalStrategy::default());
+//!     let mut state_tree = StateTree::new(root_state);
 //!     
 //!     // 添加子状态
 //!     let child_state = commands.spawn(HsmState::default()).id();
-//!     state_tree.add(root_state, child_state, TraversalStrategy::default());
+//!     state_tree.add(root_state, child_state)
+//!               .with_traversal(root_state, TraversalStrategy::default());
 //!     
 //!     // 查询子状态
 //!     if let Some(children) = state_tree.get(root_state) {
@@ -35,7 +36,7 @@ use std::fmt::Display;
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
-use crate::hsm::state_traversal::TraversalStrategy;
+use crate::hsm::transition_strategy::TraversalStrategy;
 
 ///# 状态树结构/StateTree
 ///
@@ -44,7 +45,9 @@ use crate::hsm::state_traversal::TraversalStrategy;
 /// Manage the hierarchical relationships between states, supporting add, delete, and query operations for parent-child states.
 #[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub struct StateTree {
+    /// 根状态实体/Root state entity
     root: Entity,
+    /// 状态树节点映射/State tree node map
     tree: HashMap<Entity, StateTreeNode>,
 }
 
@@ -89,14 +92,10 @@ impl StateTree {
     /// let traversal = TraversalStrategy::default();
     /// let mut tree = StateTree::new(parent);
     /// tree
-    ///     .establish_relationships(parent, traversal)
+    ///     .with_traversal(parent, traversal)
     ///     .with_add(parent, child);
     /// # }
-    pub fn establish_relationships(
-        &mut self,
-        target: Entity,
-        traversal: TraversalStrategy,
-    ) -> &mut Self {
+    pub fn with_traversal(&mut self, target: Entity, traversal: TraversalStrategy) -> &mut Self {
         if let Some(node) = self.tree.get_mut(&target) {
             node.set_traversal(traversal);
         }
@@ -319,12 +318,12 @@ impl StateTreeNode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct TreeStateId {
+pub struct HsmStateId {
     tree: Entity,
     state: Entity,
 }
 
-impl TreeStateId {
+impl HsmStateId {
     pub fn new(tree: Entity, state: Entity) -> Self {
         Self { tree, state }
     }
@@ -338,7 +337,7 @@ impl TreeStateId {
     }
 }
 
-impl Display for TreeStateId {
+impl Display for HsmStateId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.tree, self.state)
     }
@@ -357,7 +356,7 @@ mod tests {
         let traversal = TraversalStrategy::default();
         let mut tree = StateTree::new(v[0]);
 
-        tree.establish_relationships(v[0], traversal);
+        tree.with_traversal(v[0], traversal);
 
         assert!(tree.add(v[0], v[1]));
         assert!(tree.add(v[0], v[1]));
@@ -428,7 +427,7 @@ mod tests {
                 continue;
             }
             let mut tree = StateTree::new(v[0]);
-            tree.establish_relationships(v[0], traversal);
+            tree.with_traversal(v[0], traversal);
             for window in v.windows(2) {
                 assert!(tree.add(window[0], window[1]));
             }

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::hsm::{state_machine::HsmOnState, state_tree::TreeStateId};
+use crate::hsm::{state_machine::StateLifecycle, state_tree::HsmStateId};
 
 /// 状态历史记录
 ///
@@ -132,12 +132,12 @@ impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoricalNode {
-    id: TreeStateId,
+    id: HsmStateId,
     left_cycle: HsmStateLifecycleRecord,
 }
 
 impl HistoricalNode {
-    pub fn new(id: TreeStateId, left_cycle: HsmStateLifecycleRecord) -> Self {
+    pub fn new(id: HsmStateId, left_cycle: HsmStateLifecycleRecord) -> Self {
         Self { id, left_cycle }
     }
 
@@ -145,7 +145,7 @@ impl HistoricalNode {
         &self.left_cycle
     }
 
-    pub fn id(&self) -> TreeStateId {
+    pub fn id(&self) -> HsmStateId {
         self.id
     }
 }
@@ -157,22 +157,22 @@ pub enum HsmStateLifecycleRecord {
     Exit,
 }
 
-impl From<HsmStateLifecycleRecord> for HsmOnState {
+impl From<HsmStateLifecycleRecord> for StateLifecycle {
     fn from(value: HsmStateLifecycleRecord) -> Self {
         match value {
-            HsmStateLifecycleRecord::Enter => HsmOnState::Enter,
-            HsmStateLifecycleRecord::Update(_) => HsmOnState::Update,
-            HsmStateLifecycleRecord::Exit => HsmOnState::Exit,
+            HsmStateLifecycleRecord::Enter => StateLifecycle::Enter,
+            HsmStateLifecycleRecord::Update(_) => StateLifecycle::Update,
+            HsmStateLifecycleRecord::Exit => StateLifecycle::Exit,
         }
     }
 }
 
-impl From<HsmOnState> for HsmStateLifecycleRecord {
-    fn from(value: HsmOnState) -> Self {
+impl From<StateLifecycle> for HsmStateLifecycleRecord {
+    fn from(value: StateLifecycle) -> Self {
         match value {
-            HsmOnState::Enter => HsmStateLifecycleRecord::Enter,
-            HsmOnState::Update => HsmStateLifecycleRecord::Update(None),
-            HsmOnState::Exit => HsmStateLifecycleRecord::Exit,
+            StateLifecycle::Enter => HsmStateLifecycleRecord::Enter,
+            StateLifecycle::Update => HsmStateLifecycleRecord::Update(None),
+            StateLifecycle::Exit => HsmStateLifecycleRecord::Exit,
         }
     }
 }

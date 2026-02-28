@@ -14,8 +14,8 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
 - **State Lifecycles**: Supports `OnEnter`, `OnUpdate`, and `OnExit` lifecycle stages for states, which can be associated with independent Bevy systems.
 - **Hierarchical Structure**: Supports state nesting (parent and child states) for logic reuse and composition.
 - **Flexible Transition Triggers**:
-  - **HSM**: Automatically triggers transitions through composable **condition systems** (`HsmOnEnterCondition`, `HsmOnExitCondition`).
-  - **FSM**: Precisely controls transitions by sending **events** (`FsmOnTransition`).
+  - **HSM**: Automatically triggers transitions through composable **condition systems** (`EnterGuard`, `ExitGuard`).
+  - **FSM**: Precisely controls transitions by sending **events** (`FsmTrigger`).
 - **Advanced Transition Control (HSM)**:
   - **Transition Strategy**: Configurable behavior for parent-child state transitions (`StateTransitionStrategy`: `Nested` / `Parallel`).
   - **Return Behavior**: Configurable behavior for the parent state after a child state returns (`ExitTransitionBehavior`: `Rebirth` / `Resurrection` / `Death`).
@@ -24,7 +24,7 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
 
 ## Basic Usage
 
-Add the `HsmPlugin` to your Bevy app:
+Add the `StateMachinePlugin` to your Bevy app:
 
 ```rust
 use bevy::prelude::*;
@@ -33,7 +33,7 @@ use bevy_hsm::prelude::*;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(HsmPlugin::default())
+        .add_plugins(StateMachinePlugin::default())
         // ... register your states and systems here
         .run();
 }
@@ -44,8 +44,8 @@ fn main() {
 ### Common Concepts
 
 - `OnEnterSystem` / `OnUpdateSystem` / `OnExitSystem`: Systems that execute when a state is entered, updated, and exited, respectively.
-- `StateConditions`: A resource for registering and managing all condition systems.
-- `StationaryStateMachine`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
+- `GuardRegistry`: A resource for registering and managing all condition systems.
+- `Paused`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
 - `Terminated`: A marker component indicating that the state machine has finished its execution.
 
 ### Hierarchical State Machine (HSM) - State-Driven
@@ -53,18 +53,34 @@ fn main() {
 The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles.
 
 - `HsmStateMachine`: The core component of the HSM, managing the current state, transition queue, and history.
-- `HsmOnState`: **The engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
+- `StateLifecycle`: **The engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
 - `StateTree`: Defines the parent-child hierarchical relationships between states.
-- `HsmOnEnterCondition` / `HsmOnExitCondition`: Components attached to state entities to specify the conditions for entering or exiting that state.
+- `EnterGuard` / `ExitGuard`: Components attached to state entities to specify the conditions for entering or exiting that state.
 
 ### Finite State Machine (FSM) - Event-Driven
 
 The FSM is driven by external events, making it ideal for responsive, direct state switching.
 
 - `FsmStateMachine`: The core component of the FSM, managing the current state and graph.
-- `FsmOnTransition`: **The engine of the FSM**. This is a Bevy event; sending it triggers an FSM state transition.
+- `FsmTrigger`: **The engine of the FSM**. This is a Bevy event; sending it triggers an FSM state transition.
 - `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
-- `FsmOnEvent`: A trait that allows you to use any custom type (struct, enum, integer, etc.) as a specific event to trigger FSM transitions.
+- `StateEvent`: A trait that allows you to use any custom type (struct, enum, integer, etc.) as a specific event to trigger FSM transitions.
+
+## Cargo Features
+
+This crate provides several conditional compilation features:
+
+- **`history`**: Enables state history tracking for both `FsmStateMachine` and `HsmStateMachine`. This allows you to see the sequence of states that have been active.
+- **`hybrid`**: Enables hybrid state machine functionality, supporting both HSM and FSM.
+- **`hsm`**: Enables HSM functionality.
+- **`fsm`**: Enables FSM functionality.
+
+To enable features, add them to your `Cargo.toml` file:
+
+```toml
+[dependencies]
+bevy_hsm = { version = "0.18", features = ["history", "hsm", "fsm"] }
+```
 
 ## Epilogue
 

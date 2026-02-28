@@ -7,17 +7,17 @@ enum Switch {
     Close,
 }
 
-fn debug_on_state(info: &str) -> impl Fn(In<OnStateContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<OnStateContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
 fn debug_hello_world(
-    contexts: In<Vec<OnStateContext>>,
+    contexts: In<Vec<StateActionContext>>,
     mut query_switch: Query<&mut Switch>,
-) -> Option<Vec<OnStateContext>> {
+) -> Option<Vec<StateActionContext>> {
     let mut switch = query_switch.get_mut(contexts.0[0].service_target).unwrap();
     println!("Hello World {:?}", switch.as_ref());
     *switch = match *switch {
@@ -27,30 +27,30 @@ fn debug_hello_world(
     Some(contexts.0)
 }
 
-fn is_open(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
+fn is_open(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
     let switch = query.get(entity.service_target).unwrap();
     matches!(switch, Switch::Open)
 }
 
-fn is_close(entity: In<OnStateConditionContext>, query: Query<&Switch>) -> bool {
+fn is_close(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
     let switch = query.get(entity.service_target).unwrap();
     matches!(switch, Switch::Close)
 }
 
 fn register_condition(
     mut commands: Commands,
-    mut action_systems: ResMut<StateConditions>,
-    mut named_state_systems: ResMut<NamedStateSystems>,
+    mut guard_registry: ResMut<GuardRegistry>,
+    mut action_registry: ResMut<StateActionRegistry>,
 ) {
     let id = commands.register_system(is_open);
-    action_systems.insert("is_open", id);
+    guard_registry.insert("is_open", id);
     let id = commands.register_system(is_close);
-    action_systems.insert("is_close", id);
+    guard_registry.insert("is_close", id);
 
     let id = commands.register_system(debug_on_state("Entering state."));
-    named_state_systems.insert("debug_on_enter", id);
+    action_registry.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("Exiting state."));
-    named_state_systems.insert("debug_on_exit", id);
+    action_registry.insert("debug_on_exit", id);
 }
 
 fn setup(mut commands: Commands) {
@@ -71,8 +71,8 @@ fn setup(mut commands: Commands) {
             OnUpdateSystem::new("Update:debug_hello_world"),
             OnEnterSystem::new("debug_on_enter"),
             OnExitSystem::new("debug_on_exit"),
-            HsmOnEnterCondition::new("is_open"),
-            HsmOnExitCondition::new("is_close"),
+            EnterGuard::new("is_open"),
+            ExitGuard::new("is_close"),
         ))
         .id();
 
@@ -81,9 +81,9 @@ fn setup(mut commands: Commands) {
 
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
-        HsmStateMachine::new(10, TreeStateId::new(state_machine, start_id)),
+        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
         Name::new("More States"),
-        HsmOnState::default(),
+        StateLifecycle::default(),
         state_tree,
         Switch::Open,
     ));
@@ -93,7 +93,7 @@ fn setup(mut commands: Commands) {
 fn remove_action_system() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins(HsmPlugin::default());
+        .add_plugins(StateMachinePlugin::<Last>::default());
 
     app.add_action_system(Update, "debug_hello_world", debug_hello_world);
 

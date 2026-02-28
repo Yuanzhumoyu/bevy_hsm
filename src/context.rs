@@ -1,10 +1,10 @@
 use bevy::{ecs::system::SystemId, prelude::*};
 
-pub type DisposableSystemId = SystemId<In<OnStateContext>, ()>;
-/// 状态条件上下文
-pub type OnStateConditionContext = StateContext<context_type::ConditionContext>;
-/// 状态上下文
-pub type OnStateContext = StateContext;
+pub type StateActionId = SystemId<In<StateActionContext>, ()>;
+/// 用于条件守卫的上下文
+pub type GuardContext = StateContext<context_type::ConditionContext>;
+/// 用于状态动作的上下文
+pub type StateActionContext = StateContext<Entity>;
 
 mod context_type {
     use bevy::ecs::entity::Entity;

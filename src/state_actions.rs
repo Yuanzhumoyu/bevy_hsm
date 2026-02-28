@@ -5,7 +5,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::context::DisposableSystemId;
+use crate::context::StateActionId;
 
 /// 注册一次性用于运行[`OnEnterSystem`] [`OnExitSystem`]的系统
 ///
@@ -14,19 +14,19 @@ use crate::context::DisposableSystemId;
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn on_enter(entity:In<OnStateContext>) {
+/// # fn on_enter(entity:In<StateActionContext>) {
 /// #     println!("进入系统");
 /// # }
-/// # fn foo(mut commands:Commands, mut on_enter_named_state_systems: ResMut<NamedStateSystems>) {
+/// # fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
 /// let system_id = commands.register_system(on_enter);
-/// on_enter_named_state_systems.insert("on_enter", system_id);
+/// action_registry.insert("on_enter", system_id);
 /// # }
 /// ```
 ///
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct NamedStateSystems(pub(super) HashMap<String, DisposableSystemId>);
+pub struct StateActionRegistry(pub(super) HashMap<String, StateActionId>);
 
-impl NamedStateSystems {
+impl StateActionRegistry {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
@@ -38,19 +38,19 @@ impl NamedStateSystems {
     /// ```rust
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// # fn on_enter(entity:In<HsmStateContext>) {
+    /// # fn on_enter(entity:In<StateActionContext>) {
     /// #     println!("进入系统");
     /// # }
-    /// fn foo(mut commands:Commands, mut named_state_systems: ResMut<NamedStateSystems>) {
+    /// fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
     ///     let system_id = commands.register_system(on_enter);
-    ///     named_state_systems.insert("on_enter", system_id);
+    ///     action_registry.insert("on_enter", system_id);
     /// }
     /// ```
     pub fn insert(
         &mut self,
         name: impl Into<String>,
-        system_id: DisposableSystemId,
-    ) -> Option<DisposableSystemId> {
+        system_id: StateActionId,
+    ) -> Option<StateActionId> {
         self.0.insert(name.into(), system_id)
     }
 
@@ -61,11 +61,11 @@ impl NamedStateSystems {
     /// ```rust
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// fn foo(mut commands:Commands, mut on_enter_named_state_systems: ResMut<NamedStateSystems>) {
-    ///     on_enter_named_state_systems.remove("on_enter");
+    /// fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
+    ///     action_registry.remove("on_enter");
     /// }
     /// ```
-    pub fn remove<Q>(&mut self, name: &Q) -> Option<DisposableSystemId>
+    pub fn remove<Q>(&mut self, name: &Q) -> Option<StateActionId>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
@@ -73,7 +73,7 @@ impl NamedStateSystems {
     }
 
     /// 获取系统
-    pub fn get<Q>(&self, name: &Q) -> Option<&DisposableSystemId>
+    pub fn get<Q>(&self, name: &Q) -> Option<&StateActionId>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
@@ -115,7 +115,7 @@ impl OnEnterSystem {
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn add(contexts:In<Vec<HsmStateContext>>)->Option<Vec<HsmStateContext>>{None}
+/// # fn add(contexts:In<Vec<StateActionContext>>)->Option<Vec<StateActionContext>>{None}
 /// # fn my_fn(){
 /// # let mut app = App::new();
 ///

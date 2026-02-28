@@ -7,92 +7,93 @@ use bevy::{
 
 use bimap::BiMap;
 
-use crate::{fsm::event::FsmOnEvent, prelude::CombinationCondition};
+use crate::{fsm::event::StateEvent, prelude::GuardCondition};
 
 #[derive(Debug, Default, Clone)]
-pub struct StateTransitions {
-    by: HashSet<Entity>,
-    by_event: BiMap<Box<dyn FsmOnEvent>, Entity>,
-    by_condition: BiMap<CombinationCondition, Entity>,
+pub struct OutgoingTransitions {
+    unconditional: HashSet<Entity>,
+    on_event: BiMap<Box<dyn StateEvent>, Entity>,
+    on_guard: BiMap<GuardCondition, Entity>,
 }
-impl StateTransitions {
+
+impl OutgoingTransitions {
     pub fn with(&mut self, target: Entity) -> &mut Self {
         'value: {
-            if self.by_event.remove_by_right(&target).is_some() {
+            if self.on_event.remove_by_right(&target).is_some() {
                 break 'value;
             }
 
-            self.by_condition.remove_by_right(&target);
+            self.on_guard.remove_by_right(&target);
         };
 
-        self.by.insert(target);
+        self.unconditional.insert(target);
 
         self
     }
 
     pub fn with_condition(
         &mut self,
-        condition: impl Into<CombinationCondition>,
+        condition: impl Into<GuardCondition>,
         target: Entity,
     ) -> &mut Self {
         'value: {
-            if self.by.remove(&target) {
+            if self.unconditional.remove(&target) {
                 break 'value;
             }
 
-            self.by_event.remove_by_right(&target);
+            self.on_event.remove_by_right(&target);
         };
 
-        self.by_condition.insert(condition.into(), target);
+        self.on_guard.insert(condition.into(), target);
 
         self
     }
 
-    pub fn with_event(&mut self, event: impl FsmOnEvent, target: Entity) -> &mut Self {
+    pub fn with_event(&mut self, event: impl StateEvent, target: Entity) -> &mut Self {
         'value: {
-            if self.by.remove(&target) {
+            if self.unconditional.remove(&target) {
                 break 'value;
             }
 
-            self.by_condition.remove_by_right(&target);
+            self.on_guard.remove_by_right(&target);
         };
 
-        self.by_event.insert(Box::new(event), target);
+        self.on_event.insert(Box::new(event), target);
         self
     }
 
     pub fn contains(&self, target: Entity) -> bool {
-        self.by.contains(&target)
-            || self.by_event.contains_right(&target)
-            || self.by_condition.contains_right(&target)
+        self.unconditional.contains(&target)
+            || self.on_event.contains_right(&target)
+            || self.on_guard.contains_right(&target)
     }
 
-    pub fn get_by_event(&self, event: &dyn FsmOnEvent) -> Option<Entity> {
-        self.by_event.get_by_left(event).copied()
+    pub fn get_by_event(&self, event: &dyn StateEvent) -> Option<Entity> {
+        self.on_event.get_by_left(event).copied()
     }
 
-    pub fn get_by_condition(&self, target: Entity) -> Option<&CombinationCondition> {
-        self.by_condition.get_by_right(&target)
+    pub fn get_by_condition(&self, target: Entity) -> Option<&GuardCondition> {
+        self.on_guard.get_by_right(&target)
     }
 
     pub fn remove(&mut self, target: Entity) -> bool {
-        self.by.remove(&target)
-            || self.by_event.remove_by_right(&target).is_some()
-            || self.by_condition.remove_by_right(&target).is_some()
+        self.unconditional.remove(&target)
+            || self.on_event.remove_by_right(&target).is_some()
+            || self.on_guard.remove_by_right(&target).is_some()
     }
 }
 
 #[derive(Component, Debug, Clone)]
 pub struct FsmGraph {
     init_state: Entity,
-    transitions: HashMap<Entity, StateTransitions>,
+    transitions: HashMap<Entity, OutgoingTransitions>,
 }
 
 impl FsmGraph {
     pub fn new(init_state: Entity) -> Self {
         FsmGraph {
             init_state,
-            transitions: HashMap::from([(init_state, StateTransitions::default())]),
+            transitions: HashMap::from([(init_state, OutgoingTransitions::default())]),
         }
     }
 
@@ -107,15 +108,15 @@ impl FsmGraph {
         self
     }
 
-    pub fn get(&self, state: Entity) -> Option<&StateTransitions> {
+    pub fn get(&self, state: Entity) -> Option<&OutgoingTransitions> {
         self.transitions.get(&state)
     }
 
-    pub fn get_mut(&mut self, state: Entity) -> Option<&mut StateTransitions> {
+    pub fn get_mut(&mut self, state: Entity) -> Option<&mut OutgoingTransitions> {
         self.transitions.get_mut(&state)
     }
 
-    pub fn get_mut_or_default(&mut self, state: Entity) -> &mut StateTransitions {
+    pub fn get_mut_or_default(&mut self, state: Entity) -> &mut OutgoingTransitions {
         self.transitions.entry(state).or_default()
     }
 
@@ -127,14 +128,14 @@ impl FsmGraph {
     pub fn add_condition(
         &mut self,
         from: Entity,
-        condition: impl Into<CombinationCondition>,
+        condition: impl Into<GuardCondition>,
         to: Entity,
     ) -> &mut Self {
         self.get_mut_or_default(from).with_condition(condition, to);
         self
     }
 
-    pub fn add_event(&mut self, from: Entity, event: impl FsmOnEvent, to: Entity) -> &mut Self {
+    pub fn add_event(&mut self, from: Entity, event: impl StateEvent, to: Entity) -> &mut Self {
         self.get_mut_or_default(from).with_event(event, to);
         self
     }
@@ -146,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_state_transitions() {
-        let mut transitions = StateTransitions::default();
+        let mut transitions = OutgoingTransitions::default();
         let state1 = Entity::from_raw_u32(0).unwrap();
         let state2 = Entity::from_raw_u32(1).unwrap();
         let state3 = Entity::from_raw_u32(2).unwrap();
@@ -159,7 +160,7 @@ mod tests {
             .with_event(1, state3)
             .with_event("event", state4);
 
-        let condition = CombinationCondition::parse("test").unwrap();
+        let condition = GuardCondition::parse("test").unwrap();
         transitions.with_condition(condition.clone(), state2);
 
         assert_eq!(transitions.get_by_event(&MyEvent(1)), Some(state1));
