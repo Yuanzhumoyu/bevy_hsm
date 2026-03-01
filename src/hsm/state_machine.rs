@@ -8,11 +8,21 @@ use bevy::{
 use crate::{
     context::StateActionContext,
     error::StateMachineError,
-    hsm::{HsmState, state_tree::HsmStateId, transition_strategy::CheckOnTransitionStates},
-    markers::Terminated,
-    prelude::{ServiceTarget, StateActionBuffer},
+    hsm::{
+        HsmState,
+        event::HsmTrigger,
+        state_tree::HsmStateId,
+        transition_strategy::{
+            CheckOnTransitionStates, handle_on_enter_state_command, handle_on_exit_state_command,
+        },
+    },
+    markers::{Paused, Terminated},
+    prelude::{ServiceTarget, StateActionBuffer, StateTree},
     state_actions::*,
 };
+
+#[cfg(feature = "state_data")]
+use crate::state_data::StateData;
 
 #[cfg(feature = "history")]
 use crate::hsm::history::*;
@@ -214,6 +224,104 @@ impl HsmStateMachine {
             .front()
             .is_some_and(|n| *n != Transition::None)
     }
+
+    pub(crate) fn handle_hsm_trigger(
+        on: On<HsmTrigger>,
+        mut commands: Commands,
+        query_state: Query<&HsmState>,
+        query_state_tree: Query<&StateTree>,
+        query: Query<&HsmStateMachine, Without<Paused>>,
+    ) {
+        let HsmTrigger {
+            state_machine: state_machine_id,
+            typed,
+        } = on.event().clone();
+
+        let Ok(state_machine) = query.get(state_machine_id) else {
+            error!(
+                "{}",
+                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            );
+            return;
+        };
+
+        let curr_state_id = state_machine.curr_state_id();
+
+        let Ok(state_tree) = query_state_tree.get(curr_state_id.tree()) else {
+            warn!(
+                "{}",
+                StateMachineError::StateTreeNotFound(curr_state_id.tree())
+            );
+            return;
+        };
+
+        match typed {
+            super::event::HsmTriggerType::Super => {
+                if let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) {
+                    commands.queue(handle_on_exit_state_command(
+                        state_machine_id,
+                        curr_state_id,
+                        super_state_id,
+                    ));
+                }
+            }
+            super::event::HsmTriggerType::SuperTransition(super_state_id) => {
+                commands.queue(handle_on_exit_state_command(
+                    state_machine_id,
+                    curr_state_id,
+                    super_state_id,
+                ));
+            }
+            super::event::HsmTriggerType::Sub(enter_state_id) => {
+                let Some(sub_states) = state_tree.get_sub_states(curr_state_id.state()) else {
+                    error!(
+                        "{}",
+                        StateMachineError::SubStateNotFound {
+                            state_tree: curr_state_id.tree(),
+                            state: curr_state_id.state()
+                        }
+                    );
+                    return;
+                };
+                let Ok(strategy) = query_state
+                    .get(curr_state_id.state())
+                    .map(|state| state.strategy)
+                else {
+                    warn!(
+                        "{}",
+                        StateMachineError::HsmStateMissing(curr_state_id.state())
+                    );
+                    return;
+                };
+                if sub_states.contains(&enter_state_id) {
+                    commands.queue(handle_on_enter_state_command(
+                        state_machine_id,
+                        curr_state_id,
+                        enter_state_id,
+                        strategy,
+                    ));
+                }
+            }
+            super::event::HsmTriggerType::SubTransition(enter_state_id) => {
+                let Ok(strategy) = query_state
+                    .get(curr_state_id.state())
+                    .map(|state| state.strategy)
+                else {
+                    warn!(
+                        "{}",
+                        StateMachineError::HsmStateMissing(curr_state_id.state())
+                    );
+                    return;
+                };
+                commands.queue(handle_on_enter_state_command(
+                    state_machine_id,
+                    curr_state_id,
+                    enter_state_id,
+                    strategy,
+                ));
+            }
+        };
+    }
 }
 
 impl Debug for HsmStateMachine {
@@ -223,12 +331,16 @@ impl Debug for HsmStateMachine {
             f.debug_struct("HsmStateMachine")
                 .field("history", &self.history.iter().collect::<Vec<_>>())
                 .field("transition_queue", &self.transition_queue)
+                .field("curr_state", &self.curr_state)
+                .field("init_state", &self.init_state)
                 .finish()
         }
         #[cfg(not(feature = "history"))]
         {
             f.debug_struct("HsmStateMachine")
                 .field("transition_queue", &self.transition_queue)
+                .field("curr_state", &self.curr_state)
+                .field("init_state", &self.init_state)
                 .finish()
         }
     }
@@ -379,6 +491,13 @@ impl StateLifecycle {
         );
         match hsm_state {
             StateLifecycle::Enter => {
+                #[cfg(feature = "state_data")]
+                StateData::clone_components(
+                    &mut world,
+                    curr_state_id.state(),
+                    state_context.service_target,
+                );
+
                 // 运行进入系统
                 'on_enter: {
                     let Some(on_enter_system) = world.get::<OnEnterSystem>(curr_state_id.state())
@@ -457,6 +576,14 @@ impl StateLifecycle {
                         buff.add_filter(state_context);
                     },
                 );
+
+                #[cfg(feature = "state_data")]
+                StateData::remove_components(
+                    &mut world,
+                    curr_state_id.state(),
+                    state_context.service_target,
+                );
+
                 // 运行退出系统
                 'on_exit: {
                     let Some(on_exit_system) = world.get::<OnExitSystem>(curr_state_id.state())

@@ -366,35 +366,51 @@ fn handle_on_enter_states(
                 return;
             };
 
-            world
-                .resource_mut::<CheckOnTransitionStates>()
-                .remove(&state_machine_id);
-
-            let mut service_target = world.entity_mut(state_machine_id);
-            let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
-                warn!(
-                    "{}",
-                    StateMachineError::HsmStateMachineMissing(state_machine_id)
-                );
-                return;
-            };
-
-            let state_id = HsmStateId::new(curr_state_id.tree(), enter_state_id);
-            let next_on_state: StateLifecycle = match strategy {
-                StateTransitionStrategy::Nested => {
-                    state_machine.set_curr_state(state_id);
-                    StateLifecycle::Enter
-                }
-                StateTransitionStrategy::Parallel => {
-                    state_machine.set_curr_state(curr_state_id);
-                    state_machine
-                        .push_next_state(Transition::Next((state_id, StateLifecycle::Enter)));
-                    StateLifecycle::Exit
-                }
-            };
-
-            service_target.insert(next_on_state);
+            handle_on_enter_state_command(
+                state_machine_id,
+                curr_state_id,
+                enter_state_id,
+                strategy,
+            )
+            .apply(world);
         });
+    }
+}
+
+pub(super) fn handle_on_enter_state_command(
+    state_machine_id: Entity,
+    curr_state_id: HsmStateId,
+    enter_state_id: Entity,
+    strategy: StateTransitionStrategy,
+) -> impl Command {
+    move |world: &mut World| {
+        world
+            .resource_mut::<CheckOnTransitionStates>()
+            .remove(&state_machine_id);
+
+        let mut service_target = world.entity_mut(state_machine_id);
+        let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
+            warn!(
+                "{}",
+                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            );
+            return;
+        };
+
+        let state_id = HsmStateId::new(curr_state_id.tree(), enter_state_id);
+        let next_on_state: StateLifecycle = match strategy {
+            StateTransitionStrategy::Nested => {
+                state_machine.set_curr_state(state_id);
+                StateLifecycle::Enter
+            }
+            StateTransitionStrategy::Parallel => {
+                state_machine.set_curr_state(curr_state_id);
+                state_machine.push_next_state(Transition::Next((state_id, StateLifecycle::Enter)));
+                StateLifecycle::Exit
+            }
+        };
+
+        service_target.insert(next_on_state);
     }
 }
 
@@ -432,10 +448,10 @@ fn handle_on_exit_states(
         };
         commands.queue(move |world: &mut World| -> Result<()> {
             match world.resource_scope(
-                |world: &mut World, condition_buffer: Mut<ExitGuardCache>| match condition_buffer
+                |world: &mut World, exit_guard_cache: Mut<ExitGuardCache>| match exit_guard_cache
                     .get(&curr_state_id.state())
                 {
-                    Some(condition_id) => condition_id.run(
+                    Some(guard) => guard.run(
                         world,
                         GuardContext::new(
                             match world.get::<ServiceTarget>(state_machine_id) {
@@ -464,37 +480,48 @@ fn handle_on_exit_states(
                     );
                     return Ok(());
                 }
-            }
-
-            world
-                .resource_mut::<CheckOnTransitionStates>()
-                .remove(&state_machine_id);
-
-            let Some((strategy, behavior)) = world
-                .get::<HsmState>(super_state_id)
-                .map(|state| (state.strategy, state.behavior))
-            else {
-                warn!("{}", StateMachineError::HsmStateMissing(super_state_id));
-                return Ok(());
             };
 
-            let state_id = HsmStateId::new(curr_state_id.tree(), super_state_id);
-            let transition_queue =
-                get_on_exit_transition_queue(world, state_id, strategy, behavior)?;
-
-            let mut service_target = world.entity_mut(state_machine_id);
-            let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
-                warn!(
-                    "{}",
-                    StateMachineError::HsmStateMachineMissing(state_machine_id)
-                );
-                return Ok(());
-            };
-
-            state_machine.push_next_states(transition_queue);
-            service_target.insert(StateLifecycle::Exit);
-            Ok(())
+            handle_on_exit_state_command(state_machine_id, curr_state_id, super_state_id)
+                .apply(world)
         });
+    }
+}
+
+#[inline]
+pub(super) fn handle_on_exit_state_command(
+    state_machine_id: Entity,
+    curr_state_id: HsmStateId,
+    super_state_id: Entity,
+) -> impl Command<Result<()>> {
+    move |world: &mut World| -> Result<()> {
+        world
+            .resource_mut::<CheckOnTransitionStates>()
+            .remove(&state_machine_id);
+
+        let Some((strategy, behavior)) = world
+            .get::<HsmState>(super_state_id)
+            .map(|state| (state.strategy, state.behavior))
+        else {
+            warn!("{}", StateMachineError::HsmStateMissing(super_state_id));
+            return Ok(());
+        };
+
+        let state_id = HsmStateId::new(curr_state_id.tree(), super_state_id);
+        let transition_queue = get_on_exit_transition_queue(world, state_id, strategy, behavior)?;
+
+        let mut service_target = world.entity_mut(state_machine_id);
+        let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
+            warn!(
+                "{}",
+                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            );
+            return Ok(());
+        };
+
+        state_machine.push_next_states(transition_queue);
+        service_target.insert(StateLifecycle::Exit);
+        Ok(())
     }
 }
 

@@ -7,7 +7,7 @@ use bevy::{
 
 use bimap::BiMap;
 
-use crate::{fsm::event::StateEvent, prelude::GuardCondition};
+use crate::prelude::{GuardCondition, StateEvent};
 
 #[derive(Debug, Default, Clone)]
 pub struct OutgoingTransitions {

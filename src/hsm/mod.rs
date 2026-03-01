@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::hsm::transition_strategy::{ExitTransitionBehavior, StateTransitionStrategy};
 
+pub mod event;
 pub mod guards;
 #[cfg(feature = "history")]
 pub mod history;

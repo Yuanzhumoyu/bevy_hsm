@@ -6,22 +6,21 @@ use bevy::{
 use crate::{
     context::*,
     error::StateMachineError,
-    fsm::{
-        FsmState,
-        event::{FsmTrigger, FsmTriggerType},
-        graph::FsmGraph,
-    },
+    fsm::{FsmState, event::FsmTrigger, graph::FsmGraph},
     markers::Paused,
-    prelude::GuardRegistry,
+    prelude::{FsmTriggerType, GuardRegistry},
     state_actions::*,
 };
+
+#[cfg(feature = "state_data")]
+use crate::state_data::StateData;
 
 #[cfg(feature = "history")]
 use crate::fsm::history::*;
 
 ///# 有限状态机\Finite state machine
 #[derive(Component)]
-#[component(on_insert = Self::on_insert)]
+#[component(on_insert = Self::on_insert,on_remove = Self::on_remove)]
 pub struct FsmStateMachine {
     pub graph_id: Entity,
     pub(crate) init_state: Entity,
@@ -66,13 +65,17 @@ impl FsmStateMachine {
 
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
-            error!(
-                "Failed to get FsmStateMachine component for entity: {}",
-                entity
-            );
+            error!("{}", StateMachineError::FsmStateMachineMissing(entity));
             return;
         };
         let curr_state = fsm_state_machine.curr_state;
+        let service_target = match world.get::<ServiceTarget>(entity) {
+            Some(service_target) => service_target.0,
+            None => entity,
+        };
+
+        #[cfg(feature = "state_data")]
+        StateData::clone_components(&mut world, curr_state, service_target);
 
         let Some(on_enter) = world.get::<OnEnterSystem>(curr_state) else {
             return;
@@ -85,14 +88,43 @@ impl FsmStateMachine {
             return;
         };
 
-        let context = StateActionContext::new(
-            match world.get::<ServiceTarget>(entity) {
-                Some(service_target) => service_target.0,
-                None => entity,
-            },
-            entity,
-            curr_state,
-        );
+        let context = StateActionContext::new(service_target, entity, curr_state);
+
+        unsafe {
+            let _ = world
+                .as_unsafe_world_cell()
+                .world_mut()
+                .run_system_with(id, context);
+        };
+    }
+
+    fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
+            error!("{}", StateMachineError::FsmStateMachineMissing(entity));
+            return;
+        };
+
+        let curr_state = fsm_state_machine.curr_state;
+        let service_target = match world.get::<ServiceTarget>(entity) {
+            Some(service_target) => service_target.0,
+            None => entity,
+        };
+
+        #[cfg(feature = "state_data")]
+        StateData::remove_components(&mut world, entity, service_target);
+
+        let Some(on_exit) = world.get::<OnExitSystem>(curr_state) else {
+            return;
+        };
+        let Some(id) = world
+            .resource::<StateActionRegistry>()
+            .get(on_exit.as_str())
+            .cloned()
+        else {
+            return;
+        };
+
+        let context = StateActionContext::new(service_target, entity, curr_state);
 
         unsafe {
             let _ = world
@@ -112,6 +144,7 @@ impl FsmStateMachine {
         query_service_target: Query<&ServiceTarget, With<FsmStateMachine>>,
         query_on_enter_system: Query<&OnEnterSystem, With<FsmState>>,
         query_on_exit_system: Query<&OnExitSystem, With<FsmState>>,
+        #[cfg(feature = "state_data")] query_state_data: Query<&StateData, With<FsmState>>,
         fsm_graph: Query<&FsmGraph>,
     ) {
         let FsmTrigger {
@@ -150,6 +183,12 @@ impl FsmStateMachine {
                 Ok(service_target) => service_target.0,
                 Err(_) => state_machine_id,
             };
+
+            #[cfg(feature = "state_data")]
+            if let Ok(state_data) = query_state_data.get(from).cloned() {
+                commands.queue(state_data.remove_state_data_command(service_target));
+            }
+
             'on_exit: {
                 let Ok(on_exit) = query_on_exit_system.get(from) else {
                     break 'on_exit;
@@ -170,6 +209,11 @@ impl FsmStateMachine {
             }
 
             state_machine.set_curr_state(to);
+
+            #[cfg(feature = "state_data")]
+            if let Ok(state_data) = query_state_data.get(to).cloned() {
+                commands.queue(state_data.clone_state_data_command(to, service_target))
+            }
 
             'on_enter: {
                 let Ok(on_enter) = query_on_enter_system.get(to) else {
@@ -280,6 +324,15 @@ impl FsmStateMachine {
                     match id.run(world, context) {
                         Ok(true) => {
                             if let Some((id, context)) = on_exit_system_id {
+                                #[cfg(feature = "state_data")]
+                                if let Some(state_data) =
+                                    world.get::<StateData>(context.state()).cloned()
+                                {
+                                    state_data
+                                        .remove_state_data_command(context.service_target)
+                                        .apply(world);
+                                }
+
                                 let _ = world.run_system_with(id, context);
                             }
                             if let Some(mut state_machine) =
@@ -288,6 +341,18 @@ impl FsmStateMachine {
                                 state_machine.set_curr_state(target);
                             }
                             if let Some((id, context)) = on_enter_system_id {
+                                #[cfg(feature = "state_data")]
+                                if let Some(state_date) =
+                                    world.get::<StateData>(context.state()).cloned()
+                                {
+                                    state_date
+                                        .clone_state_data_command(
+                                            context.state(),
+                                            context.service_target,
+                                        )
+                                        .apply(world);
+                                }
+
                                 let _ = world.run_system_with(id, context);
                             }
                         }

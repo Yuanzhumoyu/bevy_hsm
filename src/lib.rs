@@ -32,6 +32,8 @@ pub mod guards;
 pub mod hsm;
 pub mod markers;
 pub mod state_actions;
+#[cfg(feature = "state_data")]
+pub mod state_data;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
@@ -61,6 +63,8 @@ impl<T: ScheduleLabel + Clone> Plugin for StateMachinePlugin<T> {
 
         add_handle_on_state::<T>(app, self.transition_schedule.clone());
 
+        app.add_observer(hsm::state_machine::HsmStateMachine::handle_hsm_trigger);
+
         #[cfg(feature = "fsm")]
         app.add_observer(fsm::state_machine::FsmStateMachine::handle_fsm_trigger);
     }
@@ -85,6 +89,9 @@ pub mod prelude {
         StateMachinePlugin, action_dispatcher::*, context::*, guards::*, markers::*,
         state_actions::*,
     };
+
+    #[cfg(feature = "state_data")]
+    pub use crate::state_data::StateData;
 
     #[cfg(feature = "hsm")]
     pub use crate::hsm::{

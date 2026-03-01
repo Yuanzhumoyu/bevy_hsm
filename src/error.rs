@@ -29,6 +29,8 @@ pub enum StateMachineError {
     },
     /// A super state was not found for a given state within its `StateTree`.
     SuperStateNotFound { state_tree: Entity, state: Entity },
+    /// A sub state was not found for a given state within its `StateTree`.
+    SubStateNotFound { state_tree: Entity, state: Entity },
     /// A required `FsmStateMachine` component was not found on an entity.
     FsmStateMachineMissing(Entity),
     /// A required `FsmGraph` component was not found on an entity.
@@ -108,6 +110,13 @@ impl fmt::Display for StateMachineError {
                 write!(
                     f,
                     "Super state not found for state {:?} in StateTree {:?}",
+                    state, state_tree
+                )
+            }
+            StateMachineError::SubStateNotFound { state_tree, state } => {
+                write!(
+                    f,
+                    "Sub state not found for state {:?} in StateTree {:?}",
                     state, state_tree
                 )
             }

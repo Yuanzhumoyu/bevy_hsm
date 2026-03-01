@@ -9,8 +9,9 @@ keywords = ["bevy", "hsm", "fsm", "state-machine"]
 resolver = "2"
 
 [features]
-default = ["hybrid", "history"]
+default = ["hybrid", "history", "state_data"]
 hybrid = ["hsm", "fsm"]
+state_data = []
 history = []
 fsm = []
 hsm = []

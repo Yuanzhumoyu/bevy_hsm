@@ -14,7 +14,7 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
 - **State Lifecycles**: Supports `OnEnter`, `OnUpdate`, and `OnExit` lifecycle stages for states, which can be associated with independent Bevy systems.
 - **Hierarchical Structure**: Supports state nesting (parent and child states) for logic reuse and composition.
 - **Flexible Transition Triggers**:
-  - **HSM**: Automatically triggers transitions through composable **condition systems** (`EnterGuard`, `ExitGuard`).
+  - **HSM**: Automatically triggers transitions through composable **condition systems** (`EnterGuard`, `ExitGuard`), or precisely controls them by sending **events** (`HsmTrigger`).
   - **FSM**: Precisely controls transitions by sending **events** (`FsmTrigger`).
 - **Advanced Transition Control (HSM)**:
   - **Transition Strategy**: Configurable behavior for parent-child state transitions (`StateTransitionStrategy`: `Nested` / `Parallel`).
@@ -53,7 +53,8 @@ fn main() {
 The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles.
 
 - `HsmStateMachine`: The core component of the HSM, managing the current state, transition queue, and history.
-- `StateLifecycle`: **The engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
+- `StateLifecycle`: **The state-driven engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
+- `HsmTrigger`: **The event-driven engine of the HSM**. This is a Bevy event; sending it triggers an HSM state transition, providing an imperative way of control.
 - `StateTree`: Defines the parent-child hierarchical relationships between states.
 - `EnterGuard` / `ExitGuard`: Components attached to state entities to specify the conditions for entering or exiting that state.
 
@@ -71,6 +72,7 @@ The FSM is driven by external events, making it ideal for responsive, direct sta
 This crate provides several conditional compilation features:
 
 - **`history`**: Enables state history tracking for both `FsmStateMachine` and `HsmStateMachine`. This allows you to see the sequence of states that have been active.
+- **`state_data`**: Enables the `StateData` feature. This allows you to attach components as "state-local data" to a state. When the state machine enters that state, these components are automatically cloned to the state machine entity and are removed upon exit.
 - **`hybrid`**: Enables hybrid state machine functionality, supporting both HSM and FSM.
 - **`hsm`**: Enables HSM functionality.
 - **`fsm`**: Enables FSM functionality.
