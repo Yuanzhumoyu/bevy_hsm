@@ -16,6 +16,17 @@ fn log_on_exit(In(context): In<StateActionContext>, query: Query<&Name>) {
     }
 }
 
+fn log_on_update(
+    In(contexts): In<Vec<StateActionContext>>,
+    query: Query<&Name>,
+) -> Option<Vec<StateContext>> {
+    let iter = query.iter_many(contexts.iter().map(|c| c.state()));
+    for name in iter {
+        info!("Updating state: {}", name);
+    }
+    Some(contexts)
+}
+
 fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry>) {
     let system_id = commands.register_system(log_on_enter);
     action_registry.insert("log_on_enter", system_id);
@@ -27,6 +38,7 @@ fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<StateActionRegi
             FsmState,
             Name::new("State A"),
             OnEnterSystem::new("log_on_enter"),
+            OnUpdateSystem::new("Update:log_on_update"),
             OnExitSystem::new("log_on_exit"),
         ))
         .id();
@@ -63,13 +75,38 @@ fn handle_input(
         let state_machine = state_machine.entity();
         commands.trigger(FsmTrigger::with_event(state_machine, ToggleEvent));
     }
+
+    if keyboard_input.just_pressed(KeyCode::KeyP) {
+        let mut entity = commands.entity(state_machine.entity());
+        entity.queue(|mut entity: EntityWorldMut<'_>| {
+            match entity.get::<Paused>().is_some() {
+                true => {
+                    info!("Resuming blinking light");
+                    entity.remove::<Paused>();
+                }
+                false => {
+                    info!("Pausing blinking light");
+                    entity.insert(Paused);
+                }
+            };
+        });
+    }
 }
 
+/// 状态机示例\State Machine Example
+/// 本示例演示了如何使用状态机插件来创建一个简单的状态机，该状态机在两个状态之间切换。
+/// 当按下空格键时，状态机将发送ToggleEvent事件，导致当前状态切换到另一个状态。
+/// 通过切换按键空格来切换状态\
+/// 通过切换按键P来暂停和恢复状态机
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(StateMachinePlugin::<Last>::default())
-        .add_systems(Startup, setup_fsm)
-        .add_systems(Update, handle_input)
-        .run();
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins)
+        .add_plugins(StateMachinePlugin::<Last>::default());
+
+    app.add_action_system(Update, "log_on_update", log_on_update);
+
+    app.add_systems(Startup, setup_fsm)
+        .add_systems(Update, handle_input);
+
+    app.run();
 }
