@@ -55,11 +55,6 @@ pub trait SystemState {
         action_name: impl Into<String>,
         system: impl IntoActionSystem<M>,
     ) -> &mut Self;
-
-    fn add_action_system_anchor_point(
-        &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
-    ) -> &mut Self;
 }
 
 impl SystemState for App {
@@ -81,23 +76,6 @@ impl SystemState for App {
         // 添加系统
         let mut schedules = world.resource_mut::<Schedules>();
         schedule.add_system(&mut schedules, action_name, system);
-        self
-    }
-
-    fn add_action_system_anchor_point(
-        &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
-    ) -> &mut Self {
-        let world = self.world_mut();
-        let action_name = Arc::new("".to_string());
-        // 注册状态系统
-        if let Err(e) = schedule.add_system_info(world, action_name.clone()) {
-            warn!("{}", e);
-            return self;
-        }
-
-        let mut schedules = world.resource_mut::<Schedules>();
-        schedule.add_system_anchor_point(&mut schedules, action_name);
         self
     }
 }
@@ -194,11 +172,11 @@ pub struct StateActionBuffer {
     /// 当前帧状态组
     ///
     /// Current frame status group
-    pub curr: Vec<StateActionContext>,
+    pub curr: HashSet<StateActionContext>,
     /// 下一帧状态组
     ///
     /// Next frame status group
-    pub next: Vec<StateActionContext>,
+    pub next: HashSet<StateActionContext>,
     /// 过滤器: 用于筛选掉下一帧的状态
     ///
     /// Filter: used to filter out the next frame's status
@@ -215,12 +193,12 @@ impl StateActionBuffer {
     /// Get the current state group
     #[inline(always)]
     pub fn get_curr(&self) -> Vec<StateActionContext> {
-        self.curr.clone()
+        self.curr.iter().copied().collect()
     }
 
-    /// 更新为下一个状态组
+    /// 更新为当前状态组
     ///
-    /// Update to the next state group
+    /// Update to the current state group
     #[inline(always)]
     pub fn update(&mut self) {
         let Self {
@@ -229,11 +207,7 @@ impl StateActionBuffer {
         swap(curr, next);
 
         if !filter.is_empty() {
-            let old_curr = std::mem::take(curr);
-            *curr = old_curr
-                .into_iter()
-                .filter(|x| !filter.contains(x))
-                .collect::<Vec<_>>();
+            curr.retain(|x| !filter.contains(x));
             filter.clear();
         }
 
@@ -244,15 +218,7 @@ impl StateActionBuffer {
     ///
     /// Update interceptor
     fn update_interceptor(&mut self) {
-        if self.curr == self.next {
-            return;
-        }
-        if self.next.is_empty() {
-            self.interceptor.extend(self.curr.iter());
-            return;
-        }
-        let iter = self.next.iter().filter(|x| !self.curr.contains(x));
-        self.interceptor.extend(iter);
+        self.interceptor.extend(self.curr.difference(&self.next));
     }
 
     /// 添加一个上下文
@@ -263,7 +229,7 @@ impl StateActionBuffer {
         if self.interceptor.contains(&context) {
             return;
         }
-        self.next.push(context);
+        self.next.insert(context);
     }
 
     /// 添加多个上下文
@@ -297,17 +263,6 @@ impl StateActionBuffer {
     /// Remove an interceptor
     pub fn remove_interceptor(&mut self, context: StateActionContext) {
         self.interceptor.remove(&context);
-    }
-
-    /// 将当前帧添加到下一帧
-    ///
-    /// Add the current frame to the next frame
-    pub fn reflow(&mut self) {
-        self.next.extend(self.curr.iter());
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.curr.is_empty()
     }
 
     /// 获取缓存作用域
@@ -378,16 +333,6 @@ fn action_system_run_mode<T: ScheduleLabel>(
     }
 }
 
-fn handle_on_update_anchor<T: ScheduleLabel>(
-    action_name: Arc<String>,
-) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) {
-    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
-        if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
-            buffer.reflow();
-        }
-    }
-}
-
 /// 运行动作系统的条件
 ///
 /// Run action system condition
@@ -398,7 +343,7 @@ fn run_action_system_condition<T: ScheduleLabel>(
         action_system_buffer.is_some_and(|buffers| {
             buffers
                 .get_buffer(action_name.as_str())
-                .is_some_and(|buffer| !buffer.is_empty())
+                .is_some_and(|buffer| !buffer.next.is_empty())
         })
     }
 }
@@ -408,24 +353,14 @@ fn run_action_system_condition<T: ScheduleLabel>(
 /// Update state machine system cache
 fn update_buffer<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) {
-    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
+) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) -> Vec<StateActionContext> {
+    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| -> Vec<StateActionContext> {
         if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
             buffer.update();
+            buffer.get_curr()
+        } else {
+            Vec::new()
         }
-    }
-}
-
-/// 获取状态机系统缓存
-///
-/// Get state machine system cache
-fn buffer_input<T: ScheduleLabel>(
-    action_name: Arc<String>,
-) -> impl Fn(Res<ScheduleActionBuffers<T>>) -> Vec<StateActionContext> {
-    move |action_system_buffer: Res<ScheduleActionBuffers<T>>| -> Vec<StateActionContext> {
-        action_system_buffer
-            .get_buffer(action_name.as_str())
-            .map_or(vec![], |buffer| buffer.get_curr())
     }
 }
 
@@ -450,8 +385,6 @@ pub(super) mod system_state_trait {
             action_name: Arc<String>,
             system: impl IntoActionSystem<M>,
         );
-
-        fn add_system_anchor_point(self, schedules: &mut Schedules, action_name: Arc<String>);
     }
 }
 
@@ -506,26 +439,11 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction 
         action_name: Arc<String>,
         system: impl IntoActionSystem<M>,
     ) {
-        let action_system = buffer_input::<T>(action_name.clone())
+        let action_system = update_buffer::<T>(action_name.clone())
             .pipe(system.into_system())
             .pipe(action_system_run_mode::<T>(action_name.clone()));
 
-        let system = (
-            action_system.run_if(run_action_system_condition::<T>(action_name.clone())),
-            update_buffer::<T>(action_name),
-        )
-            .chain();
-
-        schedules.add_systems(self, system);
-    }
-
-    fn add_system_anchor_point(self, schedules: &mut Schedules, action_name: Arc<String>) {
-        let system = (
-            handle_on_update_anchor::<T>(action_name.clone())
-                .run_if(run_action_system_condition::<T>(action_name.clone())),
-            update_buffer::<T>(action_name),
-        )
-            .chain();
+        let system = action_system.run_if(run_action_system_condition::<T>(action_name.clone()));
 
         schedules.add_systems(self, system);
     }

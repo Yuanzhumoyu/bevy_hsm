@@ -2,6 +2,7 @@ use bevy::{
     ecs::{
         component::ComponentId,
         entity::{EntityClonerBuilder, OptIn},
+        lifecycle::HookContext,
         world::DeferredWorld,
     },
     prelude::*,
@@ -39,9 +40,17 @@ impl StateData {
     ) {
         let (entitys, mut commands) = world.entities_and_commands();
         let Ok(curr_state_ref) = entitys.get(entity) else {
+            warn!(
+                "Attempted to clone components from a non-existent entity: {:?}",
+                entity
+            );
             return;
         };
         let Some(state_data) = curr_state_ref.get::<StateData>().cloned() else {
+            warn!(
+                "Attempted to clone components from an entity without StateData: {:?}",
+                entity
+            );
             return;
         };
 
@@ -57,9 +66,17 @@ impl StateData {
     ) {
         let (entitys, mut commands) = world.entities_and_commands();
         let Ok(curr_state_ref) = entitys.get(entity) else {
+            warn!(
+                "Attempted to remove components from a non-existent entity: {:?}",
+                entity
+            );
             return;
         };
         let Some(state_data) = curr_state_ref.get::<StateData>().cloned() else {
+            warn!(
+                "Attempted to remove components from an entity without StateData: {:?}",
+                entity
+            );
             return;
         };
         commands.queue(state_data.remove_state_data_command(service_target));
@@ -88,7 +105,34 @@ impl StateData {
     }
 }
 
-#[cfg(all(test, any(feature = "hsm", feature = "fsm")))]
+#[derive(Component)]
+#[component(on_insert=Self::on_insert)]
+pub struct StateDataBundle<T: Bundle>(Option<T>);
+
+impl<T> StateDataBundle<T>
+where
+    T: Bundle,
+{
+    pub const fn new(bundle: T) -> Self {
+        Self(Some(bundle))
+    }
+
+    fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        world.commands().queue(move |world: &mut World| {
+            let component_ids = world
+                .register_bundle::<T>()
+                .contributed_components()
+                .to_vec();
+            let mut e = world.entity_mut(entity);
+            if let Some(bundle) = e.get_mut::<Self>().and_then(|mut e| e.0.take()) {
+                e.insert((StateData(component_ids), bundle));
+            }
+            e.remove::<Self>();
+        });
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::StateMachinePlugin;
 
@@ -102,6 +146,29 @@ mod tests {
 
     #[derive(Component, Debug, PartialEq, Eq, Clone)]
     struct ComponentC;
+
+    #[test]
+    fn test_state_data_logic() {
+        let mut world = World::new();
+        let comp_a_id = world.register_component::<ComponentA>();
+        let comp_b_id = world.register_component::<ComponentB>();
+        let comp_c_id = world.register_component::<ComponentC>();
+        // Test `new()` and sorting
+        let mut state_data = StateData::new(vec![comp_c_id, comp_a_id]);
+        assert_eq!(*state_data, vec![comp_a_id, comp_c_id]);
+        // Test `push()` for a new component
+        state_data.push(comp_b_id);
+        assert_eq!(*state_data, vec![comp_a_id, comp_b_id, comp_c_id]);
+        // Test `push()` for a duplicate component (should not be added again)
+        state_data.push(comp_b_id);
+        assert_eq!(*state_data, vec![comp_a_id, comp_b_id, comp_c_id]);
+        // Test `remove()` for an existing component
+        assert!(state_data.remove(comp_b_id));
+        assert_eq!(*state_data, vec![comp_a_id, comp_c_id]);
+        // Test `remove()` for a non-existent component
+        assert!(!state_data.remove(comp_b_id));
+        assert_eq!(*state_data, vec![comp_a_id, comp_c_id]);
+    }
 
     #[test]
     #[cfg(feature = "hsm")]
@@ -170,10 +237,18 @@ mod tests {
     #[test]
     #[cfg(feature = "fsm")]
     fn test_fsm_state_machine_state_data() {
-        use crate::fsm::{FsmState, event::*, graph::FsmGraph, state_machine::FsmStateMachine};
+        use crate::{
+            fsm::{FsmState, event::*, graph::FsmGraph, state_machine::FsmStateMachine},
+            guards::GuardRegistry,
+            prelude::{ActionDispatch, StateActionRegistry},
+        };
 
         let mut app = App::new();
-        app.add_plugins(StateMachinePlugin::<Last>::default());
+        app.init_resource::<StateActionRegistry>();
+        app.init_resource::<ActionDispatch>();
+        app.init_resource::<GuardRegistry>();
+
+        app.add_observer(FsmStateMachine::handle_fsm_trigger);
 
         let world = app.world_mut();
 

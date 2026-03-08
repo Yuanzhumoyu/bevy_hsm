@@ -93,7 +93,7 @@ impl StateActionRegistry {
 /// # }
 /// ```
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
-pub struct OnEnterSystem(String);
+pub struct OnEnterSystem(pub String);
 
 impl OnEnterSystem {
     pub fn new(name: impl Into<String>) -> Self {
@@ -126,23 +126,8 @@ impl OnEnterSystem {
 /// commands.spawn(OnUpdateSystem::new("Update:add"));
 /// # }
 /// ```
-/// * 特殊格式: `ScheduleLabel`
-/// - Special format: `ScheduleLabel`
-/// ```
-/// # use bevy::prelude::*;
-/// # use bevy_hsm::prelude::*;
-/// # fn my_fn(){
-/// # let mut app = App::new();
-///
-/// app.add_action_system_anchor_point(Update);
-///
-/// # }
-/// # fn foo(mut commands: Commands) {
-/// commands.spawn(OnUpdateSystem::new("Update"));
-/// # }
-/// ```
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
-pub struct OnUpdateSystem(String);
+pub struct OnUpdateSystem(pub String);
 
 impl OnUpdateSystem {
     pub fn new(name: impl Into<String>) -> Self {
@@ -162,7 +147,7 @@ impl OnUpdateSystem {
 /// # }
 /// ```
 #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
-pub struct OnExitSystem(String);
+pub struct OnExitSystem(pub String);
 
 impl OnExitSystem {
     pub fn new(name: impl Into<String>) -> Self {

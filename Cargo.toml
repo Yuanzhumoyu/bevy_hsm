@@ -18,16 +18,19 @@ hsm = []
 
 [dependencies]
 bevy_hsm_macros = { path = "crates/bevy_hsm_macros" }
-bevy = { version = "0.18.*", features = [
-  "dynamic_linking",
-  "bevy_dev_tools",
-  "shader_format_spirv",
-] }
+bevy = { version = "0.18.*", default-features = false, features = ["bevy_log"] }
 smallvec = "1.15.1"
 dyn-clone = "1.0.20"
 dyn-eq = "0.1.3"
 dyn-hash = "1.0.0"
 bimap = "0.6.3"
+
+[dev-dependencies]
+bevy = { version = "0.18.*", features = [
+  "dynamic_linking",
+  "bevy_dev_tools",
+  "shader_format_spirv",
+] }
 
 [profile.dev]
 opt-level = 1
@@ -40,22 +43,26 @@ type_complexity = "allow"
 [[example]]
 name = "switch_state"
 path = "examples/switch_state.rs"
-required-features = ["hsm"]
 
 [[example]]
 name = "flashing_light"
 path = "examples/flashing_light.rs"
-required-features = ["hsm"]
 
 [[example]]
 name = "more_states"
 path = "examples/more_states.rs"
-required-features = ["hsm"]
 
 [[example]]
 name = "simple_fsm"
 path = "examples/simple_fsm.rs"
-required-features = ["fsm"]
+
+[[example]]
+name = "macros_hsm"
+path = "examples/macros/hsm.rs"
+
+[[example]]
+name = "macros_fsm"
+path = "examples/macros/fsm.rs"
 
 [[test]]
 name = "action_system"

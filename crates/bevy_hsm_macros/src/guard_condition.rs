@@ -9,8 +9,8 @@ pub fn guard_condition_impl(item: TokenStream) -> TokenStream {
     .into()
 }
 
-#[derive(Clone)]
-enum GuardCondition {
+#[derive(Clone, Debug)]
+pub(super) enum GuardCondition {
     And(Vec<GuardCondition>),
     Or(Vec<GuardCondition>),
     Not(Box<GuardCondition>),
@@ -63,7 +63,7 @@ impl Parse for GuardCondition {
                 if conditions.len() < 2 {
                     return Err(syn::Error::new(
                         input.span(),
-                        "not condition must have exactly two argument",
+                        "and condition must have at least two arguments",
                     ));
                 }
                 GuardCondition::And(conditions)
@@ -73,7 +73,7 @@ impl Parse for GuardCondition {
                 if conditions.len() < 2 {
                     return Err(syn::Error::new(
                         input.span(),
-                        "not condition must have exactly two argument",
+                        "or condition must have at least two arguments",
                     ));
                 }
 

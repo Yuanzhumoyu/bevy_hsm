@@ -530,7 +530,7 @@ mod tests {
     use bevy::platform::collections::HashMap;
 
     use crate::{
-        StateMachinePlugin, context::*, hsm::guards::GuardRegistry, prelude::SystemState,
+        StateMachinePlugin, context::*, guards::GuardRegistry, prelude::SystemState,
         state_actions::*,
     };
 

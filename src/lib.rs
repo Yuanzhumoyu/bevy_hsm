@@ -37,6 +37,8 @@ pub mod state_data;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
+use crate::action_dispatcher::ActionDispatch;
+use crate::guards::GuardRegistry;
 use crate::state_actions::StateActionRegistry;
 
 #[derive(Debug, Default)]
@@ -50,13 +52,14 @@ pub struct StateMachinePlugin<T: ScheduleLabel = Last> {
 impl<T: ScheduleLabel + Clone> Plugin for StateMachinePlugin<T> {
     fn build(&self, app: &mut App) {
         app.init_resource::<StateActionRegistry>();
+        app.init_resource::<ActionDispatch>();
+        app.init_resource::<GuardRegistry>();
 
         use crate::hsm::{
-            guards::{EnterGuardCache, ExitGuardCache, GuardRegistry},
+            guards::{EnterGuardCache, ExitGuardCache},
             transition_strategy::{CheckOnTransitionStates, add_handle_on_state},
         };
 
-        app.init_resource::<GuardRegistry>();
         app.init_resource::<CheckOnTransitionStates>();
         app.init_resource::<EnterGuardCache>();
         app.init_resource::<ExitGuardCache>();
@@ -78,8 +81,9 @@ pub struct StateMachinePlugin;
 impl Plugin for StateMachinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StateActionRegistry>();
+        app.init_resource::<ActionDispatch>();
+        app.init_resource::<GuardRegistry>();
 
-        #[cfg(feature = "fsm")]
         app.add_observer(fsm::state_machine::FsmStateMachine::handle_fsm_trigger);
     }
 }
@@ -91,7 +95,7 @@ pub mod prelude {
     };
 
     #[cfg(feature = "state_data")]
-    pub use crate::state_data::StateData;
+    pub use crate::state_data::{self, StateData};
 
     #[cfg(feature = "hsm")]
     pub use crate::hsm::{

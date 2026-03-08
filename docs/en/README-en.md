@@ -67,6 +67,104 @@ The FSM is driven by external events, making it ideal for responsive, direct sta
 - `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
 - `StateEvent`: A trait that allows you to use any custom type (struct, enum, integer, etc.) as a specific event to trigger FSM transitions.
 
+## Macro Syntax (EBNF)
+
+### `hsm!`
+
+The `hsm!` macro is used to build a Hierarchical State Machine. It defines a tree structure with a single root state and optional additional Bevy components attached to the state machine entity.
+
+```ebnf
+hsm ::= state_node, { ',', component };
+state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
+state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
+state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
+                  | '#[state_data(', component, { ',', component }, ')]';
+state_attribute_param ::= 'enter_guard' '=' guard_condition
+                        | 'exit_guard' '=' guard_condition
+                        | 'on_update' '=' string_literal
+                        | 'on_enter' '=' string_literal
+                        | 'on_exit' '=' string_literal
+                        | 'strategy' '=' ( 'Deep' | 'Shallow' | 'No' )
+                        | 'behavior' '=' ( 'Exit' | 'Pause' )
+                        | 'fsm_blueprint' '=' rust_expression
+                        | 'minimal';
+guard_condition ::= rust_expression; (* Any Rust expression that returns a bool *)
+component ::= rust_expression; (* Any valid Bevy component *)
+state_name ::= identifier; (* The name of the state *)
+identifier ::= (* A Rust identifier, e.g., MyState, StateA *) ;
+string_literal ::= (* A Rust string literal, e.g., "my_system" *) ;
+rust_expression ::= (* Any valid Rust expression *) ;
+```
+
+**Key Points**:
+  
+- The core of the `hsm!` macro is a single `state_node`, representing the root of the state tree.
+- After the root state, you can append any number of Bevy `component`s, which will be added to the same entity as the state machine.
+- A `state_node` can be configured with `#[state(...)]` attributes to set guards, lifecycle hooks (`on_update`, etc.), and hierarchical behavior (`strategy`, `behavior`).
+- The `#[state_data(...)]` attribute is used to attach components that exist only when that state is active.
+- States can be nested. Child states and components are defined within the `()` of the parent state.
+
+### `fsm!`
+
+The `fsm!` macro is used to build a flat Finite State Machine. It defines a set of states, a set of transition rules, and optional additional components.
+
+```ebnf
+fsm ::= fsm_graph, [ [','], 'components', ':', '{', [ component, { ',', component } ], '}' ];
+fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', [','],
+              'transitions', ':', '{', transition, { ',', transition }, '}';
+state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
+transition ::= state_ref, ( '=>' | '<=' ), [ transition_condition ], ( '=>' | '<=' ), state_ref;
+transition_condition ::= rust_expression (* Event *)
+                       | ':', rust_expression; (* Conditional Guard *)
+state_ref ::= identifier | integer_literal; (* State name or index *)
+(* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression` are the same as in the hsm! macro. *)
+```
+
+**Key Points**:
+
+- The `fsm!` macro consists of two parts: the `fsm_graph` and an optional `components` block.
+- The `fsm_graph` is required and contains both a `states` and a `transitions` block.
+- The `states<...>` syntax allows you to specify the initial state by name or index (`state_ref`). If omitted, the first state in the list is the initial state.
+- The syntax for `state_definition` is similar to `state_node` in `hsm!`, but it cannot contain nested states.
+- A `transition` defines the rules for moving between states. It can be unconditional or conditional (via an event or a guard).
+- The arrows (`=>`, `<=`, `<=>`) define the direction of the transition.
+
+### `hsm_tree!`
+
+`hsm_tree!` is a utility macro for building a standalone state tree (`StateTree`). Its syntax is a subset of the `hsm!` macro, accepting only a single root `state_node`.
+
+```ebnf
+hsm_tree ::= state_node;
+ 
+(* The definition of `state_node` is identical to the one in the `hsm!` macro. *)
+```
+
+### `fsm_graph!`
+
+`fsm_graph!` is a utility macro for building a standalone state graph (`FsmGraph`). Its syntax is a subset of the `fsm!` macro.
+
+```ebnf
+fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', ',',
+              'transitions', ':', '{', transition, { ',', transition }, '}';
+ 
+(* The definitions for `state_ref`, `state_definition`, and `transition` are identical to those in the `fsm!` macro. *)
+```
+
+### `combination_condition!`
+
+`combination_condition!` is used to construct complex, combinable guard conditions within the `#[state]` attribute.
+
+```ebnf
+combination_condition ::= guard_expression;
+ 
+guard_expression ::= 'and', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
+                   | 'or', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
+                   | 'not', '(', guard_expression, ')'
+                   | rust_expression;
+ 
+rust_expression ::= (* Any Rust expression that can be converted into a `GuardCondition` *);
+```
+
 ## Cargo Features
 
 This crate provides several conditional compilation features:

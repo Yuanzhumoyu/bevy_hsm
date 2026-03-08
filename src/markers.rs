@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bevy::{
     ecs::{lifecycle::HookContext, world::DeferredWorld},
     prelude::*,
@@ -218,5 +220,29 @@ impl Paused {
                 },
             );
         }
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(on_insert=Self::on_insert)]
+pub struct SpawnStateMachine(Arc<dyn Fn(EntityCommands) + 'static + Send + Sync>);
+
+impl SpawnStateMachine {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(EntityCommands) + 'static + Send + Sync,
+    {
+        Self(Arc::new(f))
+    }
+
+    fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        let (entitys, mut commands) = world.entities_and_commands();
+        let Ok(entity_ref) = entitys.get(entity) else {
+            return;
+        };
+        if let Some(f) = entity_ref.get::<Self>() {
+            (f.0)(commands.entity(entity))
+        }
+        commands.entity(entity).remove::<Self>();
     }
 }

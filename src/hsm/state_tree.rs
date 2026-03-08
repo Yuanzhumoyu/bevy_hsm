@@ -150,8 +150,12 @@ impl StateTree {
         self
     }
 
-    pub fn with_adds(&mut self, from: Entity, mut to: Vec<Entity>) -> &mut Self {
-        to.retain(|to| !self.has_link(from, *to));
+    pub fn with_adds(&mut self, from: Entity, to: &[Entity]) -> &mut Self {
+        let to = to
+            .iter()
+            .filter(|to| !self.has_link(from, **to))
+            .copied()
+            .collect::<Vec<_>>();
 
         if let Some(node) = self.tree.get_mut(&from) {
             node.sub_states.extend(to.iter());

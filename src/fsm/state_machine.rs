@@ -333,20 +333,6 @@ impl FsmStateMachine {
             };
         };
         match typed {
-            FsmTriggerType::Next(target) => {
-                if state_transitions.contains(target) {
-                    run_life_cycle_system(target);
-                } else {
-                    trace!(
-                        "{}",
-                        StateMachineError::InvalidTransitionTarget {
-                            graph: state_machine.graph_id,
-                            from_state: state_machine.curr_state,
-                            to_state: target
-                        }
-                    );
-                }
-            }
             FsmTriggerType::Transition(target) => {
                 let Some(condition) = state_transitions.get_by_condition(target) else {
                     return;
@@ -497,6 +483,20 @@ impl FsmStateMachine {
                         Err(e) => error!("{}", e),
                     };
                 });
+            }
+            FsmTriggerType::Next(target) => {
+                if state_transitions.contains(target) {
+                    run_life_cycle_system(target);
+                } else {
+                    trace!(
+                        "{}",
+                        StateMachineError::InvalidTransitionTarget {
+                            graph: state_machine.graph_id,
+                            from_state: state_machine.curr_state,
+                            to_state: target
+                        }
+                    );
+                }
             }
             FsmTriggerType::Event(fsm_on_event) => {
                 if let Some(target) = state_transitions.get_by_event(fsm_on_event.as_ref()) {
