@@ -24,21 +24,17 @@ pub struct Terminated;
 
 impl Terminated {
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
-        #[cfg(feature = "hsm")]
-        if let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(entity) {
-            state_machine.clear_next_states();
-            #[cfg(feature = "history")]
-            state_machine.clear_history();
-
-            let init_state = state_machine.init_state();
-            state_machine.set_curr_state(init_state);
-        }
-
         #[cfg(feature = "fsm")]
         {
+            let service_target = match world.get::<ServiceTarget>(entity) {
+                Some(service_target) => service_target.0,
+                None => entity,
+            };
+
             let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
                 return;
             };
+
             'on_exit: {
                 let Some(on_exit) = world.get::<OnExitSystem>(fsm_state_machine.curr_state())
                 else {
@@ -51,14 +47,8 @@ impl Terminated {
                 else {
                     break 'on_exit;
                 };
-                let context = StateActionContext::new(
-                    match world.get::<ServiceTarget>(entity) {
-                        Some(service_target) => service_target.0,
-                        None => entity,
-                    },
-                    entity,
-                    fsm_state_machine.curr_state(),
-                );
+                let context =
+                    StateActionContext::new(service_target, entity, fsm_state_machine.curr_state());
                 unsafe {
                     let _ = world
                         .as_unsafe_world_cell()
@@ -66,6 +56,9 @@ impl Terminated {
                         .run_system_with(id, context);
                 };
             }
+
+            #[cfg(feature = "state_data")]
+            crate::state_data::StateData::remove_components(&mut world, entity, service_target);
 
             let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
                 return;
@@ -90,6 +83,9 @@ impl Terminated {
                     .set_last_state_fsm_history(fsm_history);
             };
 
+            #[cfg(feature = "state_data")]
+            crate::state_data::StateData::clone_components(&mut world, entity, service_target);
+
             'on_enter: {
                 let Some(on_enter) = world.get::<OnEnterSystem>(init_state) else {
                     break 'on_enter;
@@ -101,14 +97,7 @@ impl Terminated {
                 else {
                     break 'on_enter;
                 };
-                let context = StateActionContext::new(
-                    match world.get::<ServiceTarget>(entity) {
-                        Some(service_target) => service_target.0,
-                        None => entity,
-                    },
-                    entity,
-                    init_state,
-                );
+                let context = StateActionContext::new(service_target, entity, init_state);
                 unsafe {
                     let _ = world
                         .as_unsafe_world_cell()
@@ -116,6 +105,22 @@ impl Terminated {
                         .run_system_with(id, context);
                 };
             }
+        }
+
+        #[cfg(feature = "hsm")]
+        if let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(entity) {
+            use crate::prelude::StateLifecycle;
+
+            state_machine.clear_next_states();
+            #[cfg(feature = "history")]
+            state_machine.clear_history();
+
+            let init_state = state_machine.init_state();
+            state_machine.set_curr_state(init_state);
+            world
+                .commands()
+                .entity(entity)
+                .insert(StateLifecycle::Enter);
         }
     }
 }

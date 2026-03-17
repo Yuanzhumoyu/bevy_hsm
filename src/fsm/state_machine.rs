@@ -18,13 +18,41 @@ use crate::state_data::StateData;
 #[cfg(feature = "history")]
 use crate::fsm::history::*;
 
-///# 有限状态机\Finite state machine
+/// # FSM 状态机
+/// * 一个有限状态机（FSM）的运行时实例。
+///
+/// 该组件负责跟踪一个具体状态机的当前状态 (`curr_state`)。每个 `FsmStateMachine` 都必须关联到一个
+/// 定义了其拓扑结构的 `FsmGraph`。
+///
+/// 多个 `FsmStateMachine` 实例可以共享同一个 `FsmGraph`，从而允许创建多个行为相同但状态独立的“智能体”。
+///
+/// 它的 `on_insert` 和 `on_remove` 钩子负责处理进入初始状态和在状态机被销毁时进行清理的逻辑。
+///
+/// # FSM State Machine
+/// * A runtime instance of a Finite State Machine (FSM).
+///
+/// This component is responsible for tracking the current state (`curr_state`) of a specific state machine.
+/// Each `FsmStateMachine` must be associated with an `FsmGraph` that defines its topology.
+///
+/// Multiple `FsmStateMachine` instances can share the same `FsmGraph`, allowing for the creation of
+/// multiple "agents" that have the same behavior but independent states.
+///
+/// Its `on_insert` and `on_remove` hooks handle the logic for entering the initial state and
+/// cleaning up when the state machine is destroyed.
 #[derive(Component)]
 #[component(on_insert = Self::on_insert,on_remove = Self::on_remove)]
 pub struct FsmStateMachine {
+    /// 包含状态机拓扑 (`FsmGraph`) 的实体。
+    /// The entity that holds the state machine's topology (`FsmGraph`).
     pub graph_id: Entity,
+    /// 状态机的初始状态，在创建时从图中复制。
+    /// The initial state of the state machine, copied from the graph upon creation.
     pub(super) init_state: Entity,
+    /// 此状态机实例当前所处的活动状态。
+    /// The currently active state for this state machine instance.
     pub(super) curr_state: Entity,
+    /// (当 `history` 特性启用时) 跟踪此状态机访问过的状态历史。
+    /// (When the `history` feature is enabled) Tracks the history of visited states for this state machine.
     #[cfg(feature = "history")]
     pub history: FsmStateHistory,
 }
@@ -88,22 +116,8 @@ impl FsmStateMachine {
         let context = StateActionContext::new(service_target, entity, curr_state);
 
         'on_enter: {
-            let Some(on_enter) = world.get::<OnEnterSystem>(curr_state) else {
-                break 'on_enter;
-            };
-
-            let Some(id) = world
-                .resource::<StateActionRegistry>()
-                .get(on_enter.as_str())
-                .cloned()
+            let Some(id) = StateActionRegistry::get_system_id::<OnEnterSystem>(&world, curr_state)
             else {
-                warn!(
-                    "{}",
-                    StateMachineError::SystemNotFound {
-                        system_name: on_enter.to_string(),
-                        state: curr_state
-                    }
-                );
                 break 'on_enter;
             };
 
@@ -136,30 +150,14 @@ impl FsmStateMachine {
             None => entity,
         };
 
-        #[cfg(feature = "state_data")]
-        StateData::remove_components(&mut world, entity, service_target);
-
         let context = StateActionContext::new(service_target, entity, curr_state);
 
         'on_exit: {
-            let Some(on_exit) = world.get::<OnExitSystem>(curr_state) else {
+            let Some(id) = StateActionRegistry::get_system_id::<OnExitSystem>(&world, curr_state)
+            else {
                 break 'on_exit;
             };
 
-            let Some(id) = world
-                .resource::<StateActionRegistry>()
-                .get(on_exit.as_str())
-                .cloned()
-            else {
-                warn!(
-                    "{}",
-                    StateMachineError::SystemNotFound {
-                        system_name: on_exit.to_string(),
-                        state: curr_state
-                    }
-                );
-                break 'on_exit;
-            };
             unsafe {
                 let _ = world
                     .as_unsafe_world_cell()
@@ -167,6 +165,9 @@ impl FsmStateMachine {
                     .run_system_with(id, context);
             }
         };
+
+        #[cfg(feature = "state_data")]
+        StateData::remove_components(&mut world, entity, service_target);
 
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),
@@ -247,11 +248,6 @@ impl FsmStateMachine {
                 Err(_) => state_machine_id,
             };
 
-            #[cfg(feature = "state_data")]
-            if let Ok(state_data) = query_state_data.get(from).cloned() {
-                commands.queue(state_data.remove_state_data_command(service_target));
-            }
-
             let context = StateActionContext::new(service_target, state_machine_id, from);
 
             'on_remove_update: {
@@ -287,6 +283,11 @@ impl FsmStateMachine {
                 };
 
                 commands.run_system_with(id, context);
+            }
+
+            #[cfg(feature = "state_data")]
+            if let Ok(state_data) = query_state_data.get(from).cloned() {
+                commands.queue(state_data.remove_state_data_command(service_target));
             }
 
             state_machine.set_curr_state(to);
@@ -507,13 +508,33 @@ impl FsmStateMachine {
     }
 }
 
-///# 有限状态机初始化配置/Finite state machine initial configuration
+/// # FSM 蓝图
+/// * 一个用于配置和创建 `FsmStateMachine` 实例的数据结构。
+///
+/// 这不是一个组件，而是一个普通的结构体，用作数据传输对象（DTO）。
+/// 它的主要用途是在更复杂的结构中（例如 `HsmState`）定义一个嵌套的 FSM，
+/// 允许在创建时精确控制 FSM 的初始状态和配置。
+///
+/// # FSM Blueprint
+/// * A data structure for configuring and creating an `FsmStateMachine` instance.
+///
+/// This is not a component but a plain struct that acts as a Data Transfer Object (DTO).
+/// Its primary use is to define a nested FSM within more complex structures (e.g., an `HsmState`),
+/// allowing for precise control over the FSM's initial state and configuration upon creation.
 #[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FsmBlueprint {
+    /// FSM 将要使用的图实体。
+    /// The graph entity that the FSM will use.
     pub graph_id: Entity,
+    /// FSM 的初始状态实体。
+    /// The initial state entity for the FSM.
     pub init_state: Entity,
+    /// 可选的当前状态。如果设置了此值，状态机将从这个状态开始，而不是 `init_state`。
+    /// Optional current state. If this is set, the state machine will start in this state instead of `init_state`.
     pub curr_state: Option<Entity>,
     #[cfg(feature = "history")]
+    /// 状态历史记录大小（当 `history` 特性启用时）。
+    /// The size of the state history (when the `history` feature is enabled).
     pub history_size: usize,
 }
 

@@ -97,10 +97,6 @@ pub type GetBufferId = Arc<
 pub struct ActionDispatch(HashMap<String, GetBufferId>);
 
 impl ActionDispatch {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
     pub(super) fn insert(&mut self, action_name: impl Into<String>, system_id: GetBufferId) {
         let action_name = action_name.into();
         self.0.insert(action_name, system_id);
@@ -258,6 +254,10 @@ impl StateActionBuffer {
         self.interceptor.insert(context);
     }
 
+    pub fn remove_filter(&mut self, context: StateActionContext) {
+        self.filter.remove(&context);
+    }
+
     /// 移除一个拦截器
     ///
     /// Remove an interceptor
@@ -307,8 +307,8 @@ impl Debug for StateActionBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "StateActionBuffer[curr: {:?}, next: {:?}, filter: {:?}]",
-            self.curr, self.next, self.filter
+            "StateActionBuffer[curr: {:?}, next: {:?}, filter: {:?}, interceptor: {:?} ]",
+            self.curr, self.next, self.filter, self.interceptor
         )
     }
 }

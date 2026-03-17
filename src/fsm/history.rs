@@ -30,12 +30,8 @@ impl FsmStateHistory {
             .copied()
     }
 
-    pub fn iter(&self) -> FsmStateHistoryIterator<'_> {
-        FsmStateHistoryIterator {
-            history: self,
-            down: 0,
-            up: self.history.len(),
-        }
+    pub fn iter(&self) -> std::collections::vec_deque::Iter<'_, Entity> {
+        self.history.iter()
     }
 
     pub fn take(&mut self) -> Self {
@@ -51,34 +47,5 @@ impl FsmStateHistory {
 
     pub fn clear(&mut self) {
         self.history.clear();
-    }
-}
-
-pub struct FsmStateHistoryIterator<'a> {
-    history: &'a FsmStateHistory,
-    down: usize,
-    up: usize,
-}
-
-impl<'a> Iterator for FsmStateHistoryIterator<'a> {
-    type Item = Entity;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.down >= self.up {
-            return None;
-        }
-        let node = &self.history.history[self.down];
-        self.down += 1;
-        Some(*node)
-    }
-}
-
-impl<'a> DoubleEndedIterator for FsmStateHistoryIterator<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.down >= self.up {
-            return None;
-        }
-        self.up -= 1;
-        Some(self.history.history[self.up])
     }
 }

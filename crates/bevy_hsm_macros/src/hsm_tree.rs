@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -28,10 +28,11 @@ pub(crate) struct HsmTreeImpl {
 impl From<StateNode> for HsmTreeImpl {
     fn from(value: StateNode) -> Self {
         let mut states = Vec::new();
-        let mut transitions = HashMap::new();
+        let mut transitions = Vec::new();
         let mut state_buffer = vec![value];
         let mut state_buffer2 = Vec::new();
         while !state_buffer.is_empty() {
+            let mut start = states.len() + state_buffer.len();
             for StateNode {
                 config,
                 name,
@@ -39,8 +40,8 @@ impl From<StateNode> for HsmTreeImpl {
                 state_children,
             } in std::mem::take(&mut state_buffer)
             {
-                let start = states.len() + 1;
-                transitions.insert(states.len(), start..start + state_children.len());
+                transitions.push(start..start + state_children.len());
+                start += state_children.len();
                 state_buffer2.extend(state_children);
                 states.push(StateNodeImpl {
                     name,
@@ -72,11 +73,11 @@ impl quote::ToTokens for HsmTreeImpl {
 }
 
 #[derive(Debug)]
-struct TransitionImpl(HashMap<usize, std::ops::Range<usize>>);
+struct TransitionImpl(Vec<std::ops::Range<usize>>);
 
 impl quote::ToTokens for TransitionImpl {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        for (id, range) in self.0.iter() {
+        for (id, range) in self.0.iter().enumerate() {
             if range.is_empty() {
                 continue;
             }

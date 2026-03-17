@@ -8,6 +8,19 @@ use bevy::{
     prelude::*,
 };
 
+/// # 状态数据
+/// * 持有一个与特定状态相关联的组件类型（`ComponentId`）列表。
+///
+/// 当状态机进入一个带有 `StateData` 的状态时，这里定义的组件会被添加到目标实体上。
+/// 当退出该状态时，这些组件会被移除。
+/// 这允许我们管理仅在特定状态下才需要存在的数据。
+///
+/// # State Data
+/// * Holds a list of component types (`ComponentId`) that are associated with a specific state.
+///
+/// When a state machine enters a state with `StateData`, the components defined here
+/// are added to the target entity. When the state is exited, these components are removed.
+/// This allows for managing data that is specific to a particular state.
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, Hash, Deref)]
 pub struct StateData(Vec<ComponentId>);
 
@@ -47,10 +60,6 @@ impl StateData {
             return;
         };
         let Some(state_data) = curr_state_ref.get::<StateData>().cloned() else {
-            warn!(
-                "Attempted to clone components from an entity without StateData: {:?}",
-                entity
-            );
             return;
         };
 
@@ -73,10 +82,6 @@ impl StateData {
             return;
         };
         let Some(state_data) = curr_state_ref.get::<StateData>().cloned() else {
-            warn!(
-                "Attempted to remove components from an entity without StateData: {:?}",
-                entity
-            );
             return;
         };
         commands.queue(state_data.remove_state_data_command(service_target));
@@ -105,8 +110,21 @@ impl StateData {
     }
 }
 
+/// # 状态数据包
+/// * 一个一次性的“安装器”组件，用于将一个 `Bundle` 动态地添加到实体上。
+///
+/// 当 `StateDataBundle` 被添加到实体时，它的 `on_insert` 钩子会立即触发。
+/// 这个钩子会取出内部包装的 `Bundle`，并将其组件添加到同一个实体上。
+/// 完成后，`StateDataBundle` 自身会被移除。
+///
+/// # State Data Bundle
+/// * A one-time "installer" component used to dynamically add a `Bundle` to an entity.
+///
+/// When a `StateDataBundle` is added to an entity, its `on_insert` hook is immediately triggered.
+/// This hook takes the inner wrapped `Bundle` and adds its components to the same entity.
+/// After completion, the `StateDataBundle` itself is removed.
 #[derive(Component)]
-#[component(on_insert=Self::on_insert)]
+#[component(on_insert = Self::on_insert)]
 pub struct StateDataBundle<T: Bundle>(Option<T>);
 
 impl<T> StateDataBundle<T>
@@ -176,7 +194,7 @@ mod tests {
         use crate::hsm::{HsmState, event::*, state_machine::*, state_tree::*};
 
         let mut app = App::new();
-        app.add_plugins(StateMachinePlugin::<Last>::default());
+        app.add_plugins(StateMachinePlugin::default());
 
         let world = app.world_mut();
 

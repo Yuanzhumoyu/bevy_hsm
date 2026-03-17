@@ -455,7 +455,7 @@ impl Parse for StateRef {
 
 #[derive(Debug)]
 enum TransitionDirection {
-    // <= =>
+    // <= <=
     Left,
     // => =>
     Right,
@@ -473,7 +473,7 @@ enum TransitionCondition {
 impl Parse for TransitionCondition {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.peek(Token![=>]) || input.peek(Token![<=]) {
-            // =>=> or <=<=
+            // => or <=
             Ok(TransitionCondition::Unconditional)
         } else if input.peek(Token![:]) {
             // =>:guard=>

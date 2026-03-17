@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use bevy::{ecs::system::SystemId, prelude::*};
 
 pub type StateActionId = SystemId<In<StateActionContext>, ()>;
@@ -7,16 +9,24 @@ pub type GuardContext = StateContext<context_type::ConditionContext>;
 pub type StateActionContext = StateContext<Entity>;
 
 mod context_type {
+    use std::fmt::Debug;
+
     use bevy::ecs::entity::Entity;
 
     pub trait ContextRelationship {}
 
     impl ContextRelationship for Entity {}
 
-    #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+    #[derive(Clone, Copy, Hash, PartialEq, Eq)]
     pub struct ConditionContext {
         pub(super) from: Entity,
         pub(super) to: Entity,
+    }
+
+    impl Debug for ConditionContext {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("[{} -> {}]", self.from, self.to))
+        }
     }
 
     impl ContextRelationship for ConditionContext {}
@@ -34,13 +44,13 @@ mod context_type {
 /// # 作用\Purpose
 /// * 用于在系统中传递状态上下文
 /// - Used to pass state context in systems
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StateContext<C: context_type::ContextRelationship = Entity> {
     /// 主体实体
     ///
     /// Main body entity
-    /// + 当状态机拥有[ServiceTarget]时,该成员为[ServiceTarget]的值,否则默认为该状态的状态机[Entity]
-    /// - When the state machine possesses [ServiceTarget], this member is the value of [ServiceTarget]; otherwise, it defaults to the state machine's [Entity] state
+    /// + 当状态机拥有\[ServiceTarget\]时,该成员为\[ServiceTarget\]的值,否则默认为该状态的状态机[Entity]
+    /// - When the state machine possesses \[ServiceTarget\], this member is the value of \[ServiceTarget\]; otherwise, it defaults to the state machine's [Entity] state
     pub service_target: Entity,
     /// 状态机实体
     ///
@@ -60,6 +70,16 @@ impl StateContext<Entity> {
 
     pub const fn state(&self) -> Entity {
         self.relationship
+    }
+}
+
+impl Debug for StateActionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("StateActionContext")
+            .field(&self.service_target)
+            .field(&self.state_machine)
+            .field(&self.relationship)
+            .finish()
     }
 }
 
@@ -83,5 +103,15 @@ impl StateContext<context_type::ConditionContext> {
 
     pub fn to_state(&self) -> Entity {
         self.relationship.to
+    }
+}
+
+impl Debug for GuardContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GuardContext")
+            .field(&self.service_target)
+            .field(&self.state_machine)
+            .field(&self.relationship)
+            .finish()
     }
 }

@@ -141,7 +141,7 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins)
-        .add_plugins(StateMachinePlugin::<Last>::default());
+        .add_plugins(StateMachinePlugin::default());
 
     app.add_action_system(Update, "debug_light", debug_light);
 

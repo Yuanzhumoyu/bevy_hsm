@@ -5,8 +5,10 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A hierarchical and finite state machine library for the Bevy game engine."
 repository = "https://github.com/Yuanzhumoyu/bevy_hsm"
-keywords = ["bevy", "hsm", "fsm", "state-machine"]
+keywords = ["bevy", "hsm", "fsm", "state-machine", "ecs"]
+include = ["/src"]
 resolver = "2"
+readme = "README.md"
 
 [features]
 default = ["hybrid", "history", "state_data"]
@@ -63,6 +65,10 @@ path = "examples/macros/hsm.rs"
 [[example]]
 name = "macros_fsm"
 path = "examples/macros/fsm.rs"
+
+[[example]]
+name = "forced_transition"
+path = "examples/forced_transition.rs"
 
 [[test]]
 name = "action_system"

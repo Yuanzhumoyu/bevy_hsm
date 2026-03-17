@@ -69,7 +69,10 @@ fn startup(mut commands: Commands) {
     let start_id = commands
         .spawn((
             Name::new("Start"),
-            HsmState::default(),
+            HsmState::with(
+                StateTransitionStrategy::Parallel,
+                ExitTransitionBehavior::Rebirth,
+            ),
             OnEnterSystem::new("debug_on_enter"),
             OnExitSystem::new("debug_on_exit"),
         ))
@@ -137,7 +140,7 @@ fn key_event(input: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Switch>) {
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
-        .add_plugins(StateMachinePlugin::<Last>::default());
+        .add_plugins(StateMachinePlugin::default());
 
     app.add_action_system(Update, "计数", Count::action);
 

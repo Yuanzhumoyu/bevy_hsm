@@ -227,6 +227,11 @@ impl StateTree {
         self.tree.is_empty()
     }
 
+    /// 用于迭代所有的状态实体
+    pub fn iter(&self) -> StateTreeIterator<'_> {
+        StateTreeIterator(self.tree.keys())
+    }
+
     /// 从target开始，迭代其所有父节点
     pub fn path_iter(&self, target: Entity) -> impl Iterator<Item = Entity> {
         std::iter::successors(
@@ -283,6 +288,57 @@ impl StateTree {
             }
             None => Vec::new(),
         }
+    }
+
+    /// 计算两个状态之间的最近共同祖先（LCA）以及转换所需的退出和进入路径。
+    ///
+    /// # Arguments
+    /// * `from` - 起始状态实体。
+    /// * `to` - 目标状态实体。
+    ///
+    /// # Returns
+    /// 返回一个可选元组 `Option<(lca, exit_path, enter_path)>`：
+    /// * `exit_path`: 从 `from`（含）到 `lca`（不含）需要退出的状态路径。
+    /// * `enter_path`: 从 `lca`（不含）到 `to`（含）需要进入的状态路径。
+    /// * 两个路径最后一个状态为最近共同祖先
+    pub fn find_lca_and_paths(
+        &self,
+        from: Entity,
+        to: Entity,
+    ) -> Option<(Vec<Entity>, Vec<Entity>)> {
+        if !self.contains(from) || !self.contains(to) {
+            return None;
+        }
+
+        if from == to {
+            return Some((vec![from], vec![to]));
+        }
+
+        // 收集从 `from` 到根的路径
+        let mut from_path: Vec<Entity> =
+            std::iter::once(from).chain(self.path_iter(from)).collect();
+
+        // 收集从 `to` 到根的路径
+        let mut to_path: Vec<Entity> = std::iter::once(to).chain(self.path_iter(to)).collect();
+
+        let lca_index = {
+            let mut lac = -1;
+            for (a, b) in from_path.iter().rev().zip(to_path.iter().rev()) {
+                if a != b {
+                    break;
+                }
+                lac += 1;
+            }
+
+            lac
+        };
+
+        (lca_index != -1).then(|| {
+            let index = lca_index as usize;
+            from_path.truncate(from_path.len() - index);
+            to_path.truncate(to_path.len() - index);
+            (from_path, to_path)
+        })
     }
 }
 
@@ -344,6 +400,18 @@ impl HsmStateId {
 impl Display for HsmStateId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.tree, self.state)
+    }
+}
+
+pub struct StateTreeIterator<'a>(
+    bevy::platform::collections::hash_map::Keys<'a, Entity, StateTreeNode>,
+);
+
+impl Iterator for StateTreeIterator<'_> {
+    type Item = Entity;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().copied()
     }
 }
 
@@ -442,5 +510,35 @@ mod tests {
                 assert_eq!(actual_path, expected_path);
             }
         }
+    }
+
+    #[test]
+    fn test_lca() {
+        let enititys = (0..5u32)
+            .filter_map(Entity::from_raw_u32)
+            .collect::<Vec<_>>();
+        let mut tree = StateTree::new(enititys[0]);
+        tree.add(enititys[0], enititys[1]);
+        tree.add(enititys[0], enititys[2]);
+        tree.add(enititys[1], enititys[3]);
+        tree.add(enititys[2], enititys[4]);
+
+        let (exit_path, enter_path) = tree.find_lca_and_paths(enititys[3], enititys[4]).unwrap();
+
+        assert_eq!(exit_path, vec![enititys[3], enititys[1], enititys[0]]);
+        assert_eq!(enter_path, vec![enititys[4], enititys[2], enititys[0]]);
+
+        assert_eq!(
+            tree.find_lca_and_paths(enititys[1], enititys[2]),
+            Some((
+                vec![enititys[1], enititys[0]],
+                vec![enititys[2], enititys[0]]
+            ))
+        );
+
+        assert_eq!(
+            tree.find_lca_and_paths(enititys[1], enititys[3]),
+            Some((vec![enititys[1]], vec![enititys[3], enititys[1]]))
+        );
     }
 }

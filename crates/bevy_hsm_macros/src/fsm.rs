@@ -6,7 +6,7 @@ use syn::{
     punctuated::Punctuated,
 };
 
-use crate::{fsm_graph::FsmGraph, kw};
+use crate::{fsm_graph::FsmGraph, hsm::ConfigFn, kw};
 
 // 宏入口
 pub fn fsm_impl(item: TokenStream) -> TokenStream {
@@ -17,6 +17,7 @@ pub fn fsm_impl(item: TokenStream) -> TokenStream {
 #[derive(Debug)]
 struct Fsm {
     components: Punctuated<Expr, Token![,]>,
+    config_fn: Option<ConfigFn>,
     fsm_graph: FsmGraph,
 }
 
@@ -37,7 +38,15 @@ impl Parse for Fsm {
             }
             false => Punctuated::new(),
         };
-        // 允许整个宏有尾随逗号
+        let config_fn = match input.peek(Token![,])&&input.peek2(Token![:]) {
+            true => {
+                input.parse::<Token![,]>()?;
+                input.parse::<Token![:]>()?;
+                ConfigFn::parse(&input)
+            }
+            false => None,
+        };
+
         if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
         }
@@ -45,6 +54,7 @@ impl Parse for Fsm {
         Ok(Fsm {
             components,
             fsm_graph,
+            config_fn,
         })
     }
 }
@@ -54,6 +64,7 @@ impl quote::ToTokens for Fsm {
         let Fsm {
             components,
             fsm_graph,
+            config_fn
         } = self;
 
         tokens.extend(quote! {
@@ -72,6 +83,7 @@ impl quote::ToTokens for Fsm {
                     graph,
                     (#components)
                 ));
+                #config_fn
             })
         });
     }

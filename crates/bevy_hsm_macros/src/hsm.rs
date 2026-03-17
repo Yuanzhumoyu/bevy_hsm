@@ -9,6 +9,7 @@ pub fn hsm_impl(item: TokenStream) -> TokenStream {
     let hsm_impl = HsmImpl {
         state_tree: hsm.init_state.into(),
         components: hsm.components,
+        config_fn: hsm.config_fn,
     };
     quote! {#hsm_impl}.into()
 }
@@ -16,6 +17,7 @@ pub fn hsm_impl(item: TokenStream) -> TokenStream {
 #[derive(Debug)]
 struct HsmImpl {
     state_tree: HsmTreeImpl,
+    config_fn: Option<ConfigFn>,
     components: Punctuated<Expr, Token![,]>,
 }
 
@@ -24,6 +26,7 @@ impl quote::ToTokens for HsmImpl {
         let Self {
             state_tree,
             components,
+            config_fn,
         } = self;
 
         tokens.extend(quote::quote! {
@@ -41,6 +44,7 @@ impl quote::ToTokens for HsmImpl {
                     state_tree,
                     #components
                 ));
+                #config_fn
             })
         });
     }
@@ -49,6 +53,7 @@ impl quote::ToTokens for HsmImpl {
 #[derive(Debug)]
 struct Hsm {
     init_state: StateNode,
+    config_fn: Option<ConfigFn>,
     components: Punctuated<Expr, Token![,]>,
 }
 
@@ -56,6 +61,7 @@ impl Parse for Hsm {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut components = Punctuated::<Expr, Token![,]>::new();
         let mut root_state: Option<StateNode> = None;
+        let mut config_fn: Option<ConfigFn> = None;
         while !input.is_empty() {
             let fork = input.fork();
             let is_state = if let Ok(attrs) = fork.call(syn::Attribute::parse_outer) {
@@ -71,6 +77,14 @@ impl Parse for Hsm {
                     ));
                 }
                 root_state = Some(input.parse()?);
+            }else if fork.peek(Token![:]) {
+                if config_fn.is_some() {
+                    return Err(syn::Error::new(
+                        input.span(),
+                        "Only one config function is allowed",
+                    ));
+                }
+                config_fn = ConfigFn::parse(&input);
             } else {
                 components.push(input.parse::<Expr>()?);
             }
@@ -82,6 +96,40 @@ impl Parse for Hsm {
         Ok(Hsm {
             init_state: root_state.ok_or_else(|| input.error("Root state is required"))?,
             components,
+            config_fn,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum ConfigFn {
+    Closure(syn::ExprClosure),
+    FnCall(syn::Ident),
+}
+
+impl ConfigFn {
+    pub fn parse(input: &syn::parse::ParseStream) -> Option<Self> {
+        if !input.peek(Token![:]) {
+            return None;
+        }
+        input.parse::<Token![:]>().ok()?;
+        if input.peek(syn::Ident) {
+            Some(ConfigFn::FnCall(input.parse().ok()?))
+        } else {
+            Some(ConfigFn::Closure(input.parse().ok()?))
+        }
+    }
+}
+
+impl quote::ToTokens for ConfigFn {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            ConfigFn::FnCall(fn_call) =>{
+                quote::quote! {#fn_call(entity_commands, &ids);}
+            },
+            ConfigFn::Closure(closure) =>{
+                quote::quote! {(#closure)(entity_commands, &ids);}
+            },
         })
     }
 }

@@ -12,16 +12,16 @@ use smallvec::SmallVec;
 
 /// 状态条件的系统ID
 ///
-/// 用于判断[`HsmState`]是否满足进入或退出的条件,其中上下文中的实体是当前检测的实体
+/// 用于判断`HsmState`是否满足进入或退出的条件,其中上下文中的实体是当前检测的实体
 ///
 /// State condition system ID
 ///
-/// Used to determine if [`HsmState`] meets the conditions for entering or exiting, where the context entity is the entity currently being checked
+/// Used to determine if `HsmState` meets the conditions for entering or exiting, where the context entity is the entity currently being checked
 pub type GuardId = SystemId<In<GuardContext>, bool>;
 
-/// 注册用于判断[`HsmState`]是否满足进入或退出的条件
+/// 注册用于判断`HsmState`是否满足进入或退出的条件
 ///
-/// Register to determine if [`HsmState`] meets the conditions for entering or exiting
+/// Register to determine if `HsmState` meets the conditions for entering or exiting
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -188,7 +188,7 @@ impl CompiledGuard {
 ///
 /// // 使用解析方法创建
 /// // Using the parsing method to create
-/// let condition2 = GuardCondition::parse("And(condition_a, condition_b)").unwrap();
+/// let condition2 = GuardCondition::parse("and(condition_a, condition_b)").unwrap();
 ///
 /// // 使用构造方法创建
 /// // Using the constructor method to create   
@@ -219,7 +219,7 @@ impl GuardCondition {
             conditions.into_iter().map(Box::new).collect();
 
         if conditions.len() < 2 {
-            return Err("And condition must have at least 2 conditions");
+            return Err("and condition must have at least 2 conditions");
         }
 
         Ok(GuardCondition::And(conditions))
@@ -233,7 +233,7 @@ impl GuardCondition {
             conditions.into_iter().map(Box::new).collect();
 
         if conditions.len() < 2 {
-            return Err("Or condition must have at least 2 conditions");
+            return Err("or condition must have at least 2 conditions");
         }
 
         Ok(GuardCondition::Or(conditions))
@@ -285,14 +285,57 @@ impl GuardCondition {
 impl GuardCondition {
     ///# 编写规则\Write rules
     ///- combination_condition := not_condition | and_condition | or_condition | id_condition
-    ///- not_condition := `Not` `(` combination_condition `)`
-    ///- and_condition := `And` `(` combination_condition `,` ( combination_condition )+ `)`
-    ///- or_condition := `Or` `(` combination_condition `,` ( combination_condition )+ `)`
+    ///- not_condition := `not` `(` combination_condition `)`
+    ///- and_condition := `and` `(` combination_condition `,` ( combination_condition )+ `)`
+    ///- or_condition := `or` `(` combination_condition `,` ( combination_condition )+ `)`
     ///- id_condition := ident
     pub fn parse(s: impl AsRef<str>) -> Result<Self, String> {
         let input = s.as_ref().trim();
         let mut parser = Parser::new(input);
         parser.parse_combination_condition()
+    }
+}
+
+impl Display for GuardCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardCondition::And(ands) => {
+                let joined = ands
+                    .iter()
+                    .map(|x| format!("{}", x))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "and({})", joined)
+            }
+            GuardCondition::Or(ors) => {
+                let joined = ors
+                    .iter()
+                    .map(|x| format!("{}", x))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "or({})", joined)
+            }
+            GuardCondition::Not(not) => write!(f, "not({})", not),
+            GuardCondition::Id(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+impl Debug for GuardCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(self, f)
+    }
+}
+
+impl From<String> for GuardCondition {
+    fn from(value: String) -> Self {
+        GuardCondition::Id(value)
+    }
+}
+
+impl<'a> From<&'a str> for GuardCondition {
+    fn from(value: &'a str) -> Self {
+        GuardCondition::Id(value.into())
     }
 }
 
@@ -417,14 +460,14 @@ impl<'a> Parser<'a> {
 
     fn parse_combination_condition(&mut self) -> Result<GuardCondition, String> {
         match &self.current_token {
-            Some(Token::Identifier(id)) if id == "Not" => self.parse_not_condition(),
-            Some(Token::Identifier(id)) if id == "And" => self.parse_and_condition(),
-            Some(Token::Identifier(id)) if id == "Or" => self.parse_or_condition(),
+            Some(Token::Identifier(id)) if id == "not" => self.parse_not_condition(),
+            Some(Token::Identifier(id)) if id == "and" => self.parse_and_condition(),
+            Some(Token::Identifier(id)) if id == "or" => self.parse_or_condition(),
             Some(Token::Identifier(id)) => {
                 let next_token = self.lexer.peek();
                 if matches!(next_token, Some('(')) {
                     return Err(format!(
-                        "combination_condition: invalid operator '{}', only 'And', 'Or', 'Not' are allowed",
+                        "combination_condition: invalid operator '{}', only 'and', 'or', 'not' are allowed",
                         id
                     ));
                 }
@@ -433,15 +476,15 @@ impl<'a> Parser<'a> {
                 let id = self.expect_identifier()?;
                 Ok(GuardCondition::Id(id))
             }
-            _ => Err("combination_condition: expect 'Not', 'And', 'Or' or identifier".to_string()),
+            _ => Err("combination_condition: expect 'not', 'and', 'or' or identifier".to_string()),
         }
     }
 
     fn parse_not_condition(&mut self) -> Result<GuardCondition, String> {
-        // 期望 "Not("
-        self.expect_identifier()?; // "Not"
+        // 期望 "not("
+        self.expect_identifier()?; // "not"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'Not'".to_string());
+            return Err("combination_condition: expect '(' after 'not'".to_string());
         }
         self.advance(); // '('
 
@@ -456,10 +499,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_and_condition(&mut self) -> Result<GuardCondition, String> {
-        // 期望 "And("
-        self.expect_identifier()?; // "And"
+        // 期望 "and("
+        self.expect_identifier()?; // "and"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'And'".to_string());
+            return Err("combination_condition: expect '(' after 'and'".to_string());
         }
         self.advance(); // '('
 
@@ -477,17 +520,17 @@ impl<'a> Parser<'a> {
         self.advance(); // ')'
 
         if conditions.len() == 1 {
-            Err("combination_condition: expect at least 2 conditions after 'And'".to_string())
+            Err("combination_condition: expect at least 2 conditions after 'and'".to_string())
         } else {
             Ok(GuardCondition::And(conditions))
         }
     }
 
     fn parse_or_condition(&mut self) -> Result<GuardCondition, String> {
-        // 期望 "Or("
-        self.expect_identifier()?; // "Or"
+        // 期望 "or("
+        self.expect_identifier()?; // "or"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'Or'".to_string());
+            return Err("combination_condition: expect '(' after 'or'".to_string());
         }
         self.advance(); // '('
 
@@ -505,59 +548,10 @@ impl<'a> Parser<'a> {
         self.advance(); // ')'
 
         if conditions.len() == 1 {
-            Err("combination_condition: expect at least 2 conditions after 'Or'".to_string())
+            Err("combination_condition: expect at least 2 conditions after 'or'".to_string())
         } else {
             Ok(GuardCondition::Or(conditions))
         }
-    }
-}
-
-impl Display for GuardCondition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GuardCondition::And(ands) => {
-                let joined = ands
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "And({})", joined)
-            }
-            GuardCondition::Or(ors) => {
-                let joined = ors
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "Or({})", joined)
-            }
-            GuardCondition::Not(not) => write!(f, "Not({})", not),
-            GuardCondition::Id(id) => write!(f, "{}", id),
-        }
-    }
-}
-
-impl Debug for GuardCondition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <Self as Display>::fmt(self, f)
-    }
-}
-
-impl From<String> for GuardCondition {
-    fn from(value: String) -> Self {
-        GuardCondition::Id(value)
-    }
-}
-
-impl<'a> From<&'a str> for GuardCondition {
-    fn from(value: &'a str) -> Self {
-        GuardCondition::Id(value.into())
-    }
-}
-
-impl Default for GuardCondition {
-    fn default() -> Self {
-        Self::Id("".into())
     }
 }
 
@@ -609,12 +603,12 @@ mod test {
         let a_conditions = GuardCondition::new("a").add_and(GuardCondition::new("b"));
         let b_conditions = GuardCondition::new("c").add_and(GuardCondition::new("d"));
         let conditions = a_conditions.add_and(b_conditions);
-        assert_eq!(format!("{}", conditions), "And(a, b, c, d)");
+        assert_eq!(format!("{}", conditions), "and(a, b, c, d)");
 
         let a_conditions = GuardCondition::new("a").add_or(GuardCondition::new("b"));
         let b_conditions = GuardCondition::new("c").add_or(GuardCondition::new("d"));
         let conditions = a_conditions.add_or(b_conditions);
-        assert_eq!(format!("{}", conditions), "Or(a, b, c, d)");
+        assert_eq!(format!("{}", conditions), "or(a, b, c, d)");
     }
 
     #[test]
@@ -622,51 +616,51 @@ mod test {
         let conditions = GuardCondition::new("a")
             .add_and(GuardCondition::new("b"))
             .add_or(GuardCondition::new("c"));
-        assert_eq!(format!("{}", conditions), "Or(And(a, b), c)");
-        assert_eq!(format!("{:?}", conditions), "Or(And(a, b), c)");
+        assert_eq!(format!("{}", conditions), "or(and(a, b), c)");
+        assert_eq!(format!("{:?}", conditions), "or(and(a, b), c)");
     }
 
     #[test]
     fn test_hsm_combination_condition() {
         let and_condition = combination_condition!(and("a", "b"));
-        assert_eq!(format!("{}", and_condition), "And(a, b)");
+        assert_eq!(format!("{}", and_condition), "and(a, b)");
 
         let or_condition = combination_condition!(or("a", "b"));
-        assert_eq!(format!("{}", or_condition), "Or(a, b)");
+        assert_eq!(format!("{}", or_condition), "or(a, b)");
 
         let not_condition = combination_condition!(not("a"));
-        assert_eq!(format!("{}", not_condition), "Not(a)");
+        assert_eq!(format!("{}", not_condition), "not(a)");
 
         let id_condition = combination_condition!("a");
         assert_eq!(format!("{}", id_condition), "a");
 
         let combination_condition = combination_condition!(and(or("a", "b"), "c"));
-        assert_eq!(format!("{}", combination_condition), "And(Or(a, b), c)");
+        assert_eq!(format!("{}", combination_condition), "and(or(a, b), c)");
 
         let combination_condition =
             combination_condition!(and(and_condition, not_condition, or_condition));
         assert_eq!(
             format!("{}", combination_condition),
-            "And(And(a, b), Not(a), Or(a, b))"
+            "and(and(a, b), not(a), or(a, b))"
         );
     }
 
     #[test]
     fn test_parse_combination_condition() {
-        let condition = GuardCondition::parse("And(a, b)").unwrap();
-        assert_eq!(format!("{}", condition), "And(a, b)");
+        let condition = GuardCondition::parse("and(a, b)").unwrap();
+        assert_eq!(format!("{}", condition), "and(a, b)");
 
-        let condition = GuardCondition::parse("Or(a, b)").unwrap();
-        assert_eq!(format!("{}", condition), "Or(a, b)");
+        let condition = GuardCondition::parse("or(a, b)").unwrap();
+        assert_eq!(format!("{}", condition), "or(a, b)");
 
-        let condition = GuardCondition::parse("Not(a)").unwrap();
-        assert_eq!(format!("{}", condition), "Not(a)");
+        let condition = GuardCondition::parse("not(a)").unwrap();
+        assert_eq!(format!("{}", condition), "not(a)");
 
         let condition = GuardCondition::parse("a").unwrap();
         assert_eq!(format!("{}", condition), "a");
 
-        let condition = GuardCondition::parse("And(a, Not(b), Or(c, b))").unwrap();
-        assert_eq!(format!("{}", condition), "And(a, Not(b), Or(c, b))");
+        let condition = GuardCondition::parse("and(a, not(b), or(c, b))").unwrap();
+        assert_eq!(format!("{}", condition), "and(a, not(b), or(c, b))");
     }
 
     #[test]
@@ -675,14 +669,14 @@ mod test {
         // Test new construction method
         let and_condition =
             GuardCondition::and([GuardCondition::new("a"), GuardCondition::new("b")]).unwrap();
-        assert_eq!(format!("{}", and_condition), "And(a, b)");
+        assert_eq!(format!("{}", and_condition), "and(a, b)");
 
         let or_condition =
             GuardCondition::or([GuardCondition::new("a"), GuardCondition::new("b")]).unwrap();
-        assert_eq!(format!("{}", or_condition), "Or(a, b)");
+        assert_eq!(format!("{}", or_condition), "or(a, b)");
 
         let not_condition = GuardCondition::not(GuardCondition::new("a"));
-        assert_eq!(format!("{}", not_condition), "Not(a)");
+        assert_eq!(format!("{}", not_condition), "not(a)");
     }
 
     #[test]
@@ -691,10 +685,10 @@ mod test {
         // Test error handling
         // 至少需要2个条件
         // Need at least 2 conditions
-        assert!(GuardCondition::parse("And(a)").is_err());
+        assert!(GuardCondition::parse("and(a)").is_err());
         // 至少需要2个条件
         // Need at least 2 conditions
-        assert!(GuardCondition::parse("Or(b)").is_err());
+        assert!(GuardCondition::parse("or(b)").is_err());
         // 空输入
         // Empty input
         assert!(GuardCondition::parse("").is_err());
@@ -703,6 +697,6 @@ mod test {
         assert!(GuardCondition::parse("InvalidOp(a, b)").is_err());
         // 无效的操作符
         // Invalid operator
-        assert!(GuardCondition::parse("And(Op(a, b), c)").is_err());
+        assert!(GuardCondition::parse("and(Op(a, b), c)").is_err());
     }
 }

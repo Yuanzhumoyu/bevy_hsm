@@ -6,10 +6,53 @@ use dyn_clone::{DynClone, clone_trait_object};
 use dyn_eq::{DynEq, eq_trait_object};
 use dyn_hash::{DynHash, hash_trait_object};
 
-/// # 有限状态机状态转换事件/Finite state machine state transition event
-/// # 作用\Effect
-/// * 用于在状态机系统中发送状态转换事件
-/// - Used to send state transition events in the state machine system
+/// # FSM 触发器
+/// * 用于驱动有限状态机（FSM）进行状态转换的核心事件。
+///
+/// 当这个事件被发送时，它会指定目标 `FsmStateMachine` 实体，并附带一个 `FsmTriggerType`，
+/// 该类型描述了要执行的转换的具体种类（例如，无条件转换、事件触发的转换或带守卫的转换）。
+///
+/// # FSM Trigger
+/// * The core event used to drive state transitions in a Finite State Machine (FSM).
+///
+/// When this event is sent, it specifies the target `FsmStateMachine` entity and includes an
+/// `FsmTriggerType`, which describes the specific kind of transition to perform (e.g., an
+/// unconditional, event-triggered, or guard-conditioned transition).
+///
+/// # Example
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// #
+/// # #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// # struct MyEvent;
+/// # impl StateEvent for MyEvent {}
+/// #
+/// # fn fsm_system(
+/// #     mut commands: Commands,
+/// #     mut trigger_writer: EventWriter<FsmTrigger>
+/// # ) {
+/// # // Define states
+/// # let idle = commands.spawn(FsmState::default()).id();
+/// # let walking = commands.spawn(FsmState::default()).id();
+/// #
+/// # // Define graph
+/// # let graph = commands.spawn(FsmGraph::new(idle).with_transition(idle, walking)).id();
+/// #
+/// # // Spawn state machine
+/// # let sm_entity = commands.spawn(FsmStateMachine::new(graph)).id();
+/// #
+/// // To trigger an unconditional transition to a specific state:
+/// trigger_writer.send(FsmTrigger::next(sm_entity, walking));
+///
+/// // To trigger a transition based on an event:
+/// trigger_writer.send(FsmTrigger::event(sm_entity, MyEvent));
+///
+/// // To trigger a transition that needs to be checked by a guard:
+/// trigger_writer.send(FsmTrigger::transition(sm_entity, idle));
+/// # }
+/// ```
 #[derive(EntityEvent, Clone)]
 pub struct FsmTrigger {
     #[event_target]
@@ -55,7 +98,7 @@ impl FsmTrigger {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum FsmTriggerType {
     /// 直接跳转下一个状态
     Next(Entity),
@@ -76,6 +119,16 @@ impl FsmTriggerType {
 
     pub fn event(event: impl StateEvent + 'static) -> Self {
         Self::Event(Box::new(event))
+    }
+}
+
+impl Debug for FsmTriggerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Next(target) => f.debug_tuple("Next").field(target).finish(),
+            Self::Transition(target) => f.debug_tuple("Transition").field(target).finish(),
+            Self::Event(event) => f.debug_tuple("Event").field(event).finish(),
+        }
     }
 }
 

@@ -93,7 +93,7 @@ fn setup(mut commands: Commands) {
 fn remove_action_system() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins(StateMachinePlugin::<Last>::default());
+        .add_plugins(StateMachinePlugin::default());
 
     app.add_action_system(Update, "debug_hello_world", debug_hello_world);
 

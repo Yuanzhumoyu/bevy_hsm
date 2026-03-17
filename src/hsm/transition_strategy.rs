@@ -190,14 +190,12 @@ fn get_on_exit_transition_queue(
                     state_id
                 ));
             };
-            if state_tree.get_root() == state_id.state() {
-                let nex_state = match behavior == ExitTransitionBehavior::Death {
-                    true => Transition::Next((state_id, behavior.into())),
-                    false => Transition::None,
-                };
-                return Ok(vec![nex_state]);
-            }
+
             let mut transition_queue = vec![Transition::Next((state_id, StateLifecycle::Exit))];
+
+            if state_tree.get_root() == state_id.state() {
+                return Ok(transition_queue);
+            }
 
             while let Some(state) = state_tree.get_super_state(state_id.state()) {
                 let Some(HsmState {
@@ -211,11 +209,7 @@ fn get_on_exit_transition_queue(
                 };
                 let state_id = HsmStateId::new(state_id.tree(), state);
                 if state_tree.get_root() == state_id.state() {
-                    let nex_state = match behavior == ExitTransitionBehavior::Death {
-                        true => Transition::Next((state_id, behavior.into())),
-                        false => Transition::None,
-                    };
-                    transition_queue.push(nex_state);
+                    transition_queue.push(Transition::Next((state_id, behavior.into())));
                     return Ok(transition_queue);
                 }
                 match !(strategy == StateTransitionStrategy::Nested
@@ -520,6 +514,7 @@ pub(super) fn handle_on_exit_state_command(
         };
 
         state_machine.push_next_states(transition_queue);
+        state_machine.set_curr_state(curr_state_id);
         service_target.insert(StateLifecycle::Exit);
         Ok(())
     }
@@ -594,7 +589,7 @@ mod tests {
         states: Vec<(StateTransitionStrategy, ExitTransitionBehavior)>,
     ) {
         app.add_plugins(MinimalPlugins)
-            .add_plugins(StateMachinePlugin::<Last>::default());
+            .add_plugins(StateMachinePlugin::default());
 
         app.add_action_system(Update, "set_condition_false", set_condition_false);
 

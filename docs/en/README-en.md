@@ -17,8 +17,13 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
   - **HSM**: Automatically triggers transitions through composable **condition systems** (`EnterGuard`, `ExitGuard`), or precisely controls them by sending **events** (`HsmTrigger`).
   - **FSM**: Precisely controls transitions by sending **events** (`FsmTrigger`).
 - **Advanced Transition Control (HSM)**:
-  - **Transition Strategy**: Configurable behavior for parent-child state transitions (`StateTransitionStrategy`: `Nested` / `Parallel`).
-  - **Return Behavior**: Configurable behavior for the parent state after a child state returns (`ExitTransitionBehavior`: `Rebirth` / `Resurrection` / `Death`).
+  - **Transition Strategy(`StateTransitionStrategy`)**: Configurable behavior for parent-child state transitions.
+    - `Nested`: The parent state remains active while the child state executes its lifecycle within the parent.
+    - `Parallel` The parent state exits before the child state enters, separating their lifecycles.
+  - **Return Behavior(`ExitTransitionBehavior`)**: Configurable behavior for the parent state after a child state returns.
+    - `Rebirth`: Triggers the parent state's OnEnter.
+    - `Resurrection`: Returns to the parent state's OnUpdate.
+    - `Death`: Causes the parent state to exit as well, propagating the exit behavior up the hierarchy.
 - **Bevy-Idiomatic**: The entire architecture follows Bevy's ECS paradigm, driven by components, events, and systems for seamless integration with the engine.
 - **State History**: Built-in state transition history for easier debugging.
 
@@ -74,7 +79,7 @@ The FSM is driven by external events, making it ideal for responsive, direct sta
 The `hsm!` macro is used to build a Hierarchical State Machine. It defines a tree structure with a single root state and optional additional Bevy components attached to the state machine entity.
 
 ```ebnf
-hsm ::= state_node, { ',', component };
+hsm ::= state_node, { ',', component }, [ ',', ':', config_fn ];
 state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
 state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
 state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
@@ -84,16 +89,20 @@ state_attribute_param ::= 'enter_guard' '=' guard_condition
                         | 'on_update' '=' string_literal
                         | 'on_enter' '=' string_literal
                         | 'on_exit' '=' string_literal
-                        | 'strategy' '=' ( 'Deep' | 'Shallow' | 'No' )
-                        | 'behavior' '=' ( 'Exit' | 'Pause' )
+                        | 'strategy' '=' ( 'Nested' | 'Parallel' )
+                        | 'behavior' '=' ( 'Rebirth' | 'Resurrection' | 'Death' )
                         | 'fsm_blueprint' '=' rust_expression
                         | 'minimal';
+config_fn ::= expr_closure
+            | fn_identifier;
 guard_condition ::= rust_expression; (* Any Rust expression that returns a bool *)
 component ::= rust_expression; (* Any valid Bevy component *)
 state_name ::= identifier; (* The name of the state *)
 identifier ::= (* A Rust identifier, e.g., MyState, StateA *) ;
 string_literal ::= (* A Rust string literal, e.g., "my_system" *) ;
 rust_expression ::= (* Any valid Rust expression *) ;
+expr_closure ::= (* A Rust closure expression *,e.g., |entity_commands: EntityCommands, states: &[Entity]| { ... } *) ;
+fn_identifier ::= (* A Rust function identifier, e.g., my_function *, parameter type `fn (EntityCommands, &[Entity]){ ... }` *) ;
 ```
 
 **Key Points**:
@@ -109,7 +118,7 @@ rust_expression ::= (* Any valid Rust expression *) ;
 The `fsm!` macro is used to build a flat Finite State Machine. It defines a set of states, a set of transition rules, and optional additional components.
 
 ```ebnf
-fsm ::= fsm_graph, [ [','], 'components', ':', '{', [ component, { ',', component } ], '}' ];
+fsm ::= fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ],[',', ':', config_fn] ,[','];
 fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', [','],
               'transitions', ':', '{', transition, { ',', transition }, '}';
 state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
@@ -117,7 +126,7 @@ transition ::= state_ref, ( '=>' | '<=' ), [ transition_condition ], ( '=>' | '<
 transition_condition ::= rust_expression (* Event *)
                        | ':', rust_expression; (* Conditional Guard *)
 state_ref ::= identifier | integer_literal; (* State name or index *)
-(* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression` are the same as in the hsm! macro. *)
+(* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression`, `config_fn` are the same as in the hsm! macro. *)
 ```
 
 **Key Points**:
@@ -127,8 +136,12 @@ state_ref ::= identifier | integer_literal; (* State name or index *)
 - The `states<...>` syntax allows you to specify the initial state by name or index (`state_ref`). If omitted, the first state in the list is the initial state.
 - The syntax for `state_definition` is similar to `state_node` in `hsm!`, but it cannot contain nested states.
 - A `transition` defines the rules for moving between states. It can be unconditional or conditional (via an event or a guard).
-- The arrows (`=>`, `<=`, `<=>`) define the direction of the transition.
-
+  - The arrows define the direction of the transition. There are three valid patterns:
+    - A => event => B: A unidirectional transition from A to B.
+    - A <= event <= B: A unidirectional transition from B to A.
+    - A => event => B: A bidirectional transition between A and B.
+  - Note that the arrows on both sides of the transition condition must match.
+  
 ### `hsm_tree!`
 
 `hsm_tree!` is a utility macro for building a standalone state tree (`StateTree`). Its syntax is a subset of the `hsm!` macro, accepting only a single root `state_node`.
@@ -179,7 +192,7 @@ To enable features, add them to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.18", features = ["history", "hsm", "fsm"] }
+bevy_hsm = { version = "0.18", features = ["history", "hyybrid"] }
 ```
 
 ## Epilogue
