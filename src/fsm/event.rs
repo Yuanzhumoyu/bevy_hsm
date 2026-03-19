@@ -25,32 +25,30 @@ use dyn_hash::{DynHash, hash_trait_object};
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
 /// #
-/// # #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// # #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// # struct MyEvent;
-/// # impl StateEvent for MyEvent {}
 /// #
-/// # fn fsm_system(
-/// #     mut commands: Commands,
-/// #     mut trigger_writer: EventWriter<FsmTrigger>
-/// # ) {
+/// # fn fsm_system(mut commands: Commands) {
 /// # // Define states
 /// # let idle = commands.spawn(FsmState::default()).id();
 /// # let walking = commands.spawn(FsmState::default()).id();
 /// #
 /// # // Define graph
-/// # let graph = commands.spawn(FsmGraph::new(idle).with_transition(idle, walking)).id();
+/// # let mut graph = FsmGraph::new(idle);
+/// # graph.add(idle, walking);
+/// # let graph_id = commands.spawn(graph).id();
 /// #
 /// # // Spawn state machine
-/// # let sm_entity = commands.spawn(FsmStateMachine::new(graph)).id();
+/// # let sm_entity = commands.spawn(FsmStateMachine::new(graph_id, idle, 10)).id();
 /// #
 /// // To trigger an unconditional transition to a specific state:
-/// trigger_writer.send(FsmTrigger::next(sm_entity, walking));
+/// commands.trigger(FsmTrigger::with_next(sm_entity, walking));
 ///
 /// // To trigger a transition based on an event:
-/// trigger_writer.send(FsmTrigger::event(sm_entity, MyEvent));
+/// commands.trigger(FsmTrigger::with_event(sm_entity, MyEvent));
 ///
 /// // To trigger a transition that needs to be checked by a guard:
-/// trigger_writer.send(FsmTrigger::transition(sm_entity, idle));
+/// commands.trigger(FsmTrigger::with_condition(sm_entity, idle));
 /// # }
 /// ```
 #[derive(EntityEvent, Clone)]

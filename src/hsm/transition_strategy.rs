@@ -160,6 +160,9 @@ impl StateTraversalStrategy for SequentialTraversal {
     }
 }
 
+/// 一个基本的逆序遍历策略
+///
+/// 此策略简单地按照提供的逆序返回子状态。
 pub struct ReverseTraversal;
 
 impl StateTraversalStrategy for ReverseTraversal {

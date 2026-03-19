@@ -18,10 +18,11 @@ use crate::fsm::state_machine::FsmStateMachine;
 ///
 /// Indicates that the state machine has terminated and no longer processes state transitions
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-#[component(on_remove = Self::on_remove)]
+#[cfg_attr(any(feature = "hsm",feature = "fsm"), component(on_remove = Self::on_remove))]
 #[require(Paused)]
 pub struct Terminated;
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 impl Terminated {
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         #[cfg(feature = "fsm")]
@@ -67,7 +68,7 @@ impl Terminated {
             let init_state = fsm_state_machine.init_state();
             fsm_state_machine.set_curr_state(init_state);
 
-            #[cfg(feature = "history")]
+            #[cfg(all(feature = "history", feature = "hybrid"))]
             'set_fsm_history: {
                 if fsm_state_machine.history.is_empty() {
                     break 'set_fsm_history;
@@ -131,7 +132,7 @@ impl Terminated {
 /// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的OnEnter、OnExit、OnUpdate系统
 /// - If it exists, the OnEnter, OnExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-#[cfg_attr(any(feature = "hsm",feature = "fsm"), component(on_insert = Self::on_insert,on_remove = Self::on_remove))]
+#[cfg_attr(any(feature = "hsm",feature = "fsm"), component(on_insert = Self::on_insert, on_remove = Self::on_remove))]
 pub struct Paused;
 
 #[cfg(any(feature = "hsm", feature = "fsm"))]

@@ -47,9 +47,7 @@ impl Parse for Fsm {
             false => None,
         };
 
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-        }
+        input.parse::<Option<Token![,]>>()?;
 
         Ok(Fsm {
             components,

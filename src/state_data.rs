@@ -105,7 +105,7 @@ impl StateData {
     pub(crate) fn remove_state_data_command(self, entity: Entity) -> impl Command {
         move |world: &mut World| {
             let mut entity_mut = world.entity_mut(entity);
-            entity_mut.remove_by_ids(&self);
+            entity_mut.remove_by_ids(&self.0);
         }
     }
 }
@@ -143,7 +143,7 @@ where
                 .to_vec();
             let mut e = world.entity_mut(entity);
             if let Some(bundle) = e.get_mut::<Self>().and_then(|mut e| e.0.take()) {
-                e.insert((StateData(component_ids), bundle));
+                e.insert((StateData::new(component_ids), bundle));
             }
             e.remove::<Self>();
         });

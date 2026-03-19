@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Expr, Ident, LitInt, LitStr, Result, Token, braced,
+    Expr, Ident, LitInt, LitStr, Result, Token, braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     token,
 };
 
-use crate::{kw, state_config::StateConfig};
+use crate::{guard_condition::GuardCondition, kw, state_config::StateConfig};
 
 pub fn fsm_graph_impl(item: TokenStream) -> TokenStream {
     let fsm_graph: FsmGraph = syn::parse_macro_input!(item as FsmGraph);
@@ -38,7 +38,7 @@ impl Parse for FsmGraph {
         }
         input.parse::<kw::states>()?;
         let mut init_state: Option<StateRef> = None;
-        if input.peek(token::Lt) {
+        if input.peek(Token![<]) {
             input.parse::<Token![<]>()?;
             init_state = Some(input.parse()?);
             input.parse::<Token![>]>()?;
@@ -47,9 +47,7 @@ impl Parse for FsmGraph {
         let content;
         braced!(content in input);
         let states = content.parse_terminated(State::parse, Token![,])?;
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-        }
+        input.parse::<Option<Token![,]>>()?;
         if !input.peek(kw::transitions) {
             return Err(input.error("expected `transitions: { ... }` block"));
         }
@@ -393,39 +391,23 @@ impl Parse for Transition {
         let from = input.parse::<StateRef>()?;
 
         let direction_token = input.lookahead1();
-        let left = if direction_token.peek(Token![=>]) {
+        let direction = if direction_token.peek(kw::Both) {
+            input.parse::<kw::Both>()?;
+            TransitionDirection::Both
+        } else if direction_token.peek(Token![=>]) {
             input.parse::<Token![=>]>()?;
-            true
+            TransitionDirection::Right
         } else if direction_token.peek(Token![<=]) {
             input.parse::<Token![<=]>()?;
-            false
+            TransitionDirection::Left
         } else {
-            return Err(syn::Error::new(input.span(), "Expected `=>`, `<=`"));
-        };
-        let condition = input.parse::<TransitionCondition>()?;
-        let right = if direction_token.peek(Token![=>]) {
-            input.parse::<Token![=>]>()?;
-            true
-        } else if direction_token.peek(Token![<=]) {
-            input.parse::<Token![<=]>()?;
-            false
-        } else {
-            return Err(syn::Error::new(input.span(), "Expected `=>`, `<=`"));
-        };
-
-        let direction = match (left, right) {
-            (true, true) => TransitionDirection::Right,
-            (false, true) => TransitionDirection::Both,
-            (false, false) => TransitionDirection::Left,
-            (true, false) => {
-                return Err(syn::Error::new(
-                    input.span(),
-                    "Expected `=> =>`, `<= <=`, `<= =>`",
-                ));
-            }
+            return Err(direction_token.error());
         };
 
         let to = input.parse::<StateRef>()?;
+
+        let condition = input.parse::<TransitionCondition>()?;
+
         Ok(Transition {
             from,
             to,
@@ -455,33 +437,49 @@ impl Parse for StateRef {
 
 #[derive(Debug)]
 enum TransitionDirection {
-    // <= <=
+    // <=
     Left,
-    // => =>
+    // =>
     Right,
-    // <= =>
+    // <=>
     Both,
 }
 
 #[derive(Debug)]
 enum TransitionCondition {
     Unconditional,
-    OnGuard(Expr),
+    OnGuard(GuardCondition),
     OnEvent(Expr),
 }
 
 impl Parse for TransitionCondition {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(Token![=>]) || input.peek(Token![<=]) {
-            // => or <=
-            Ok(TransitionCondition::Unconditional)
-        } else if input.peek(Token![:]) {
-            // =>:guard=>
+        fn parse_condition<T: Parse>(input: &ParseStream) -> Result<T> {
+            let content;
+            parenthesized!(content in input);
+            if content.is_empty() {
+                return Err(content.error("The content of the parentheses is empty."));
+            }
+            content.parse::<T>()
+        }
+        if input.peek(Token![:]) {
             input.parse::<Token![:]>()?;
-            Ok(TransitionCondition::OnGuard(input.parse()?))
+            let lookahead = input.lookahead1();
+            if lookahead.peek(kw::guard) {
+                input.parse::<kw::guard>()?;
+                Ok(TransitionCondition::OnGuard(parse_condition::<
+                    GuardCondition,
+                >(&input)?))
+            } else if lookahead.peek(kw::event) {
+                input.parse::<kw::event>()?;
+                Ok(TransitionCondition::OnEvent(parse_condition::<Expr>(
+                    &input,
+                )?))
+            } else {
+                return Err(lookahead.error());
+            }
         } else {
-            // =>event=>
-            Ok(TransitionCondition::OnEvent(input.parse()?))
+            Ok(TransitionCondition::Unconditional)
         }
     }
 }

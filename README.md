@@ -122,9 +122,9 @@ fsm ::= fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component 
 fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', [','],
               'transitions', ':', '{', transition, { ',', transition }, '}';
 state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
-transition ::= state_ref, ( '=>' | '<=' ), [ transition_condition ], ( '=>' | '<=' ), state_ref;
-transition_condition ::= rust_expression (* 事件 *)
-                       | ':', rust_expression; (* 条件守卫 *)
+transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref [ ':', transition_condition ];
+transition_condition ::= 'event', '(', rust_expression ')' (* 事件 *)
+                       | 'guard', '(', guard_expression ')'; (* 条件守卫 *)
 state_ref ::= identifier | integer_literal; (* 状态名称或索引 *)
 (* `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression`, `config_fn` 的定义与 hsm! 宏相同 *)
 ```
@@ -137,9 +137,9 @@ state_ref ::= identifier | integer_literal; (* 状态名称或索引 *)
 - `state_definition` 的语法与 `hsm!` 中的 `state_node` 类似，但它不能嵌套其他状态。
 - `transition` 定义了状态之间的转换规则，可以是有条件的（通过事件或 `guard`）或无条件的。
   - 箭头定义了转换的方向。存在三种有效的模式：
-    - A => event => B: 表示从 A 到 B 的单向转换。
-    - A <= event <= B: 表示从 B 到 A 的单向转换。
-    - A <= event => B: 表示 A 和 B 之间的双向转换。
+    - A => B: 表示从 A 到 B 的单向转换。
+    - A <= B: 表示从 B 到 A 的单向转换。
+    - A <=> B: 表示 A 和 B 之间的双向转换。
   - 请注意，转换条件两侧的箭头必须匹配。
 
 ### `hsm_tree!`
@@ -173,9 +173,9 @@ combination_condition ::= guard_expression;
 guard_expression ::= 'and', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
                    | 'or', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
                    | 'not', '(', guard_expression, ')'
-                   | rust_expression;
- 
-rust_expression ::= (* 任何可以转换为 `GuardCondition` 的 Rust 表达式 *);
+                   | guard_id;
+guard_id ::= LitStr
+           | '#' identifier
 ```
 
 ## Cargo 特性

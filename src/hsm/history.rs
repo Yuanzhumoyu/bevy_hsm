@@ -36,6 +36,7 @@ impl StateHistory {
     }
 
     /// 设置当前状态的FSM历史记录
+    #[cfg(all(feature = "history", feature = "hybrid"))]
     pub fn set_last_state_fsm_history(
         &mut self,
         fsm_history: crate::fsm::history::FsmStateHistory,
@@ -80,7 +81,7 @@ impl StateHistory {
     ///
     /// Get the history state at the specified index
     pub fn get_at(&self, index: usize) -> Option<&HistoricalNode> {
-        self.history.get(self.history.len().saturating_sub(index))
+        self.history.get(self.history.len().checked_sub(index + 1)?)
     }
 
     /// 清除历史记录
@@ -166,7 +167,10 @@ impl HistoricalNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HsmStateLifecycleRecord {
     Enter,
+    #[cfg(feature = "fsm")]
     Update(Option<crate::fsm::history::FsmStateHistory>),
+    #[cfg(not(feature = "fsm"))]
+    Update,
     Exit,
 }
 
@@ -174,7 +178,10 @@ impl From<HsmStateLifecycleRecord> for StateLifecycle {
     fn from(value: HsmStateLifecycleRecord) -> Self {
         match value {
             HsmStateLifecycleRecord::Enter => StateLifecycle::Enter,
+            #[cfg(feature = "fsm")]
             HsmStateLifecycleRecord::Update(_) => StateLifecycle::Update,
+            #[cfg(not(feature = "fsm"))]
+            HsmStateLifecycleRecord::Update => StateLifecycle::Update,
             HsmStateLifecycleRecord::Exit => StateLifecycle::Exit,
         }
     }
@@ -184,7 +191,10 @@ impl From<StateLifecycle> for HsmStateLifecycleRecord {
     fn from(value: StateLifecycle) -> Self {
         match value {
             StateLifecycle::Enter => HsmStateLifecycleRecord::Enter,
+            #[cfg(feature = "fsm")]
             StateLifecycle::Update => HsmStateLifecycleRecord::Update(None),
+            #[cfg(not(feature = "fsm"))]
+            StateLifecycle::Update => HsmStateLifecycleRecord::Update,
             StateLifecycle::Exit => HsmStateLifecycleRecord::Exit,
         }
     }

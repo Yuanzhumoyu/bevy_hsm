@@ -49,12 +49,12 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry
             #[state(minimal)]:MinimalState
         },
         transitions:{
-            state => MyEvent::Go => 1,
-            1 => MyEvent::Go => 2,
-            2 => MyEvent::Go => MinimalState,
-            MinimalState => MyEvent::Back => 2,
-            2 => MyEvent::Back => 1,
-            1 => MyEvent::Back => 0,
+            state => 1 :event(MyEvent::Go),
+            1 => 2 :event(MyEvent::Go),
+            2 => MinimalState :event(MyEvent::Go),
+            MinimalState => 2 :event(MyEvent::Back),
+            2 => 1 :event(MyEvent::Back),
+            1 => 0 :event(MyEvent::Back),
         },
         components:{
             ComponentA,

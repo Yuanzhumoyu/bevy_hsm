@@ -72,23 +72,13 @@ pub struct HsmStateMachine {
 }
 
 impl HsmStateMachine {
-    #[cfg(feature = "history")]
-    pub fn new(curr_state: HsmStateId, history_len: usize) -> Self {
-        let history = StateHistory::new(history_len);
-        Self {
-            history,
-            curr_state,
-            init_state: curr_state,
-            transition_queue: VecDeque::new(),
-        }
-    }
-
-    #[cfg(not(feature = "history"))]
-    pub fn new(curr_state: HsmStateId) -> Self {
+    pub fn new(curr_state: HsmStateId, #[cfg(feature = "history")] history_len: usize) -> Self {
         Self {
             curr_state,
             init_state: curr_state,
             transition_queue: VecDeque::new(),
+            #[cfg(feature = "history")]
+            history: StateHistory::new(history_len),
         }
     }
 
@@ -487,8 +477,9 @@ impl HsmStateMachine {
         query_state: &Query<&HsmState>,
     ) {
         use crate::prelude::StateTransitionStrategy::*;
-        for (i, window) in enter_path.windows(2).rev().enumerate() {
-            let (sub_state_id, curr_state_id) = (window[0], window[1]);
+        for (i, [sub_state_id, curr_state_id]) in
+            enter_path.array_windows::<2>().copied().rev().enumerate()
+        {
             let Ok(curr_state) = query_state.get(curr_state_id) else {
                 error!("{}", StateMachineError::HsmStateMissing(curr_state_id));
                 return;
@@ -595,18 +586,31 @@ impl StateLifecycle {
         state_machine_id: Entity,
         curr_state_id: HsmStateId,
     ) {
-        let Some(HsmState {
-            fsm_config: Some(fsm_config),
-            ..
-        }) = world.get::<HsmState>(curr_state_id.state()).cloned()
+        use crate::prelude::FsmGraph;
+
+        let Some(state) = world.get::<HsmState>(curr_state_id.state()) else {
+            error!(
+                "{}",
+                StateMachineError::HsmStateMissing(curr_state_id.state())
+            );
+            return;
+        };
+        let Some(fsm_config) = state.fsm_config else {
+            return;
+        };
+
+        let Some(init_state) = world
+            .get::<FsmGraph>(fsm_config.graph_id)
+            .map(|graph| graph.init_state())
         else {
+            error!("{}", StateMachineError::GraphNotFound(fsm_config.graph_id));
             return;
         };
 
         world.commands().entity(state_machine_id).insert(
             crate::fsm::state_machine::FsmStateMachine::new(
                 fsm_config.graph_id,
-                fsm_config.init_state,
+                init_state,
                 #[cfg(feature = "history")]
                 fsm_config.history_size,
             ),
@@ -639,9 +643,11 @@ impl StateLifecycle {
             &mut crate::fsm::state_machine::FsmStateMachine,
             &mut HsmStateMachine,
         )>() {
-            let fsm_history = fsm.history.take();
-            hsm.history.set_last_state_fsm_history(fsm_history);
-
+            #[cfg(feature = "history")]
+            {
+                let fsm_history = fsm.history.take();
+                hsm.history.set_last_state_fsm_history(fsm_history);
+            }
             commands
                 .entity(state_machine_id)
                 .remove::<crate::fsm::state_machine::FsmStateMachine>();

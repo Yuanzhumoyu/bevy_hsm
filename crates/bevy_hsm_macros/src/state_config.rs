@@ -1,7 +1,7 @@
 use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, spanned::Spanned};
 
-use crate::guard_condition::GuardCondition;
+use crate::{guard_condition::GuardCondition, kw};
 
 #[derive(Debug, Default)]
 pub(crate) struct StateConfig {
@@ -31,7 +31,10 @@ impl StateConfig {
             || self.on_update.is_some()
             || self.on_enter.is_some()
             || self.on_exit.is_some()
+            || self.strategy.is_some()
+            || self.behavior.is_some()
             || !self.state_datas.is_empty()
+            || self.fsm_blueprint.is_some()
     }
 
     pub(super) fn hsm_state_token_stream(&self) -> proc_macro2::TokenStream {
@@ -61,14 +64,8 @@ impl StateConfig {
                 if matches!(attr.meta, syn::Meta::Path(_)) {
                     continue;
                 }
-                let Ok(parsed_attrs) =
-                    attr.parse_args_with(Punctuated::<StateAttrType, Token![,]>::parse_terminated)
-                else {
-                    return Err(syn::Error::new(
-                        attr.span(),
-                        "Invalid state attribute format. Expected `#[state]` or `#[state(...)]`",
-                    ));
-                };
+                let parsed_attrs =
+                    attr.parse_args_with(Punctuated::<StateAttrType, Token![,]>::parse_terminated)?;
 
                 for state_attr in parsed_attrs {
                     match state_attr {
@@ -218,22 +215,52 @@ enum StateAttrType {
 
 impl Parse for StateAttrType {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let ident: Ident = input.parse()?;
-        let ident_str = ident.to_string();
-        if ident_str == "minimal" {
-            return Ok(StateAttrType::Minimal);
+        fn parse_attr<T: Parse, O: Parse>(input: &syn::parse::ParseStream) -> syn::Result<O> {
+            input.parse::<T>()?;
+            input.parse::<Token![=]>()?;
+            input.parse::<O>()
         }
-        input.parse::<Token![=]>()?;
-        match ident_str.as_str() {
-            "exit_guard" => Ok(StateAttrType::ExitGuard(input.parse()?)),
-            "enter_guard" => Ok(StateAttrType::EnterGuard(input.parse()?)),
-            "on_update" => Ok(StateAttrType::OnUpdate(input.parse()?)),
-            "on_enter" => Ok(StateAttrType::OnEnter(input.parse()?)),
-            "on_exit" => Ok(StateAttrType::OnExit(input.parse()?)),
-            "strategy" => Ok(StateAttrType::Strategy(input.parse()?)),
-            "behavior" => Ok(StateAttrType::Behavior(input.parse()?)),
-            "fsm_blueprint" => Ok(StateAttrType::FsmBlueprint(input.parse()?)),
-            _ => Err(syn::Error::new(ident.span(), "Invalid state attribute")),
+        let lookahead = input.lookahead1();
+        if lookahead.peek(kw::minimal) {
+            input.parse::<kw::minimal>()?;
+            Ok(StateAttrType::Minimal)
+        } else if lookahead.peek(kw::enter_guard) {
+            Ok(StateAttrType::EnterGuard(parse_attr::<
+                kw::enter_guard,
+                GuardCondition,
+            >(&input)?))
+        } else if lookahead.peek(kw::exit_guard) {
+            Ok(StateAttrType::ExitGuard(parse_attr::<
+                kw::exit_guard,
+                GuardCondition,
+            >(&input)?))
+        } else if lookahead.peek(kw::on_update) {
+            Ok(StateAttrType::OnUpdate(
+                parse_attr::<kw::on_update, LitStr>(&input)?,
+            ))
+        } else if lookahead.peek(kw::on_enter) {
+            Ok(StateAttrType::OnEnter(parse_attr::<kw::on_enter, LitStr>(
+                &input,
+            )?))
+        } else if lookahead.peek(kw::on_exit) {
+            Ok(StateAttrType::OnExit(parse_attr::<kw::on_exit, LitStr>(
+                &input,
+            )?))
+        } else if lookahead.peek(kw::strategy) {
+            Ok(StateAttrType::Strategy(parse_attr::<kw::strategy, Ident>(
+                &input,
+            )?))
+        } else if lookahead.peek(kw::behavior) {
+            Ok(StateAttrType::Behavior(parse_attr::<kw::behavior, Ident>(
+                &input,
+            )?))
+        } else if lookahead.peek(kw::fsm_blueprint) {
+            Ok(StateAttrType::FsmBlueprint(parse_attr::<
+                kw::fsm_blueprint,
+                Expr,
+            >(&input)?))
+        } else {
+            Err(lookahead.error())
         }
     }
 }

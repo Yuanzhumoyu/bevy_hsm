@@ -122,9 +122,9 @@ fsm ::= fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component 
 fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', [','],
               'transitions', ':', '{', transition, { ',', transition }, '}';
 state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
-transition ::= state_ref, ( '=>' | '<=' ), [ transition_condition ], ( '=>' | '<=' ), state_ref;
-transition_condition ::= rust_expression (* Event *)
-                       | ':', rust_expression; (* Conditional Guard *)
+transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref [ ':', transition_condition ];
+transition_condition ::= 'event', '(', rust_expression ')' (* Event *)
+                       | 'guard', '(', guard_expression ')'; (* Conditional Guard *)
 state_ref ::= identifier | integer_literal; (* State name or index *)
 (* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression`, `config_fn` are the same as in the hsm! macro. *)
 ```
@@ -137,9 +137,9 @@ state_ref ::= identifier | integer_literal; (* State name or index *)
 - The syntax for `state_definition` is similar to `state_node` in `hsm!`, but it cannot contain nested states.
 - A `transition` defines the rules for moving between states. It can be unconditional or conditional (via an event or a guard).
   - The arrows define the direction of the transition. There are three valid patterns:
-    - A => event => B: A unidirectional transition from A to B.
-    - A <= event <= B: A unidirectional transition from B to A.
-    - A => event => B: A bidirectional transition between A and B.
+    - A => B: A unidirectional transition from A to B.
+    - A <= B: A unidirectional transition from B to A.
+    - A <=> B: A bidirectional transition between A and B.
   - Note that the arrows on both sides of the transition condition must match.
   
 ### `hsm_tree!`
@@ -173,9 +173,9 @@ combination_condition ::= guard_expression;
 guard_expression ::= 'and', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
                    | 'or', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
                    | 'not', '(', guard_expression, ')'
-                   | rust_expression;
- 
-rust_expression ::= (* Any Rust expression that can be converted into a `GuardCondition` *);
+                   | guard_id;
+guard_id ::= LitStr
+           | '#' identifier
 ```
 
 ## Cargo Features

@@ -638,7 +638,7 @@ mod test {
         assert_eq!(format!("{}", combination_condition), "and(or(a, b), c)");
 
         let combination_condition =
-            combination_condition!(and(and_condition, not_condition, or_condition));
+            combination_condition!(and(#and_condition, #not_condition, #or_condition));
         assert_eq!(
             format!("{}", combination_condition),
             "and(and(a, b), not(a), or(a, b))"

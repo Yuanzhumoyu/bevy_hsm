@@ -117,11 +117,10 @@ impl OutgoingTransitions {
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use crate::prelude::{FsmGraph, FsmStateMachine, FsmState, StateEvent, GuardCondition};
+/// # use bevy_hsm::prelude::{FsmGraph, FsmStateMachine, FsmState, StateEvent, GuardCondition};
 /// #
 /// # #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// # struct MyEvent;
-/// # impl StateEvent for MyEvent {}
 /// #
 /// # fn setup(mut commands: Commands) {
 /// // 1. Define states as entities
@@ -140,10 +139,10 @@ impl OutgoingTransitions {
 ///     .add_condition(running, "is_tired", idle);
 ///
 /// // 3. Spawn an entity with the graph component
-/// let graph_entity = commands.spawn(graph).id();
+/// let graph_id = commands.spawn(graph).id();
 ///
 /// // 4. Spawn a state machine instance that uses this graph
-/// commands.spawn(FsmStateMachine::new(graph_entity));
+/// commands.spawn(FsmStateMachine::new(graph_id, idle, 10));
 /// # }
 /// ```
 #[derive(Component, Debug, Clone, PartialEq, Eq)]

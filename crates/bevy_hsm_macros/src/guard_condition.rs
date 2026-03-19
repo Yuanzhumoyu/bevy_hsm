@@ -1,5 +1,7 @@
 use proc_macro::TokenStream;
-use syn::{Expr, Ident, Token, parse::Parse, parse_macro_input};
+use syn::{Expr, Token, parse::Parse, parse_macro_input};
+
+use crate::kw;
 
 pub fn guard_condition_impl(item: TokenStream) -> TokenStream {
     let constant_value = parse_macro_input!(item as GuardCondition);
@@ -50,52 +52,46 @@ impl quote::ToTokens for GuardCondition {
 
 impl Parse for GuardCondition {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let Ok(ident) = input.parse::<Ident>() else {
-            return if let Ok(lit) = input.parse::<syn::ExprLit>() {
-                Ok(GuardCondition::Id(Expr::Lit(lit)))
-            } else {
-                Ok(GuardCondition::Id(input.parse::<Expr>()?))
-            };
+        let lookahead = input.lookahead1();
+        let gc = if lookahead.peek(kw::and) {
+            input.parse::<kw::and>()?;
+            let conditions = Self::parse_tuple(input)?;
+            if conditions.len() < 2 {
+                return Err(syn::Error::new(
+                    input.span(),
+                    "and condition must have at least two arguments",
+                ));
+            }
+            GuardCondition::And(conditions)
+        } else if lookahead.peek(kw::or) {
+            input.parse::<kw::or>()?;
+            let conditions = Self::parse_tuple(input)?;
+            if conditions.len() < 2 {
+                return Err(syn::Error::new(
+                    input.span(),
+                    "or condition must have at least two arguments",
+                ));
+            }
+            GuardCondition::Or(conditions)
+        } else if lookahead.peek(kw::not) {
+            input.parse::<kw::not>()?;
+            let conditions = Self::parse_tuple(input)?;
+            if conditions.len() != 1 {
+                return Err(syn::Error::new(
+                    input.span(),
+                    "not condition must have exactly one argument",
+                ));
+            }
+            GuardCondition::Not(Box::new(conditions.into_iter().next().unwrap()))
+        } else if lookahead.peek(syn::LitStr) {
+            GuardCondition::Id(input.parse()?)
+        } else if lookahead.peek(Token![#]) && input.peek2(syn::Ident) {
+            input.parse::<Token![#]>()?;
+            GuardCondition::Id(input.parse()?)
+        } else {
+            return Err(lookahead.error());
         };
-        let cc = match ident.to_string().as_str() {
-            "and" => {
-                let conditions = Self::parse_tuple(input)?;
-                if conditions.len() < 2 {
-                    return Err(syn::Error::new(
-                        input.span(),
-                        "and condition must have at least two arguments",
-                    ));
-                }
-                GuardCondition::And(conditions)
-            }
-            "or" => {
-                let conditions = Self::parse_tuple(input)?;
-                if conditions.len() < 2 {
-                    return Err(syn::Error::new(
-                        input.span(),
-                        "or condition must have at least two arguments",
-                    ));
-                }
-
-                GuardCondition::Or(conditions)
-            }
-            "not" => {
-                let conditions = Self::parse_tuple(input)?;
-                if conditions.len() != 1 {
-                    return Err(syn::Error::new(
-                        input.span(),
-                        "not condition must have exactly one argument",
-                    ));
-                }
-                GuardCondition::Not(Box::new(conditions.into_iter().next().unwrap()))
-            }
-            _ => GuardCondition::Id(Expr::Path(syn::ExprPath {
-                attrs: Vec::new(),
-                qself: None,
-                path: syn::Path::from(ident),
-            })),
-        };
-        Ok(cc)
+        Ok(gc)
     }
 }
 

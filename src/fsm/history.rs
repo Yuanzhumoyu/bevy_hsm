@@ -26,7 +26,7 @@ impl FsmStateHistory {
 
     pub fn get_at(&self, index: usize) -> Option<Entity> {
         self.history
-            .get(self.history.len().saturating_sub(index))
+            .get(self.history.len().checked_sub(index + 1)?)
             .copied()
     }
 

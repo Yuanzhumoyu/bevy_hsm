@@ -112,7 +112,7 @@ pub mod prelude {
 
     #[cfg(feature = "hsm")]
     pub use crate::hsm::{
-        HsmState, guards::*, state_machine::*, state_tree::*, transition_strategy::*,
+        HsmState, event::*, guards::*, state_machine::*, state_tree::*, transition_strategy::*,
     };
 
     #[cfg(feature = "hsm")]
@@ -124,5 +124,5 @@ pub mod prelude {
     #[cfg(feature = "fsm")]
     pub use crate::bevy_hsm_macros::{fsm, fsm_graph};
 
-    pub use crate::bevy_hsm_macros::combination_condition;
+    pub use bevy_hsm_macros::combination_condition;
 }

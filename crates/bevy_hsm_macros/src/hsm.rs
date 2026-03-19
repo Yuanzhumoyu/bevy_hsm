@@ -88,9 +88,7 @@ impl Parse for Hsm {
             } else {
                 components.push(input.parse::<Expr>()?);
             }
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-            }
+            input.parse::<Option<Token![,]>>()?;
         }
 
         Ok(Hsm {

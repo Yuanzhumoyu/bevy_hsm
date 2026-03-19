@@ -22,7 +22,7 @@
 //!     
 //!     // 添加子状态
 //!     let child_state = commands.spawn(HsmState::default()).id();
-//!     state_tree.add(root_state, child_state)
+//!     state_tree.with_add(root_state, child_state)
 //!               .with_traversal(root_state, TraversalStrategy::default());
 //!     
 //!     // 查询子状态
@@ -53,21 +53,13 @@ pub struct StateTree {
 
 impl StateTree {
     /// 创建新的状态树
-    ///
-    /// # 参数
-    /// * `root` - 根状态实体
-    /// * `traversal` - 默认的遍历策略
-    ///
-    /// # 返回值
-    /// 返回初始化的状态树实例
-    ///
     /// # 示例
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
     /// # fn example(mut commands: Commands) {
     /// let root_entity = commands.spawn(HsmState::default()).id();
-    /// let state_tree = StateTree::new(root_entity, TraversalStrategy::default());
+    /// let state_tree = StateTree::new(root_entity);
     /// # }
     /// ```
     pub fn new(root: Entity) -> Self {
@@ -120,16 +112,17 @@ impl StateTree {
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// # fn example(mut commands: Commands, mut state_tree: StateTree) {
+    /// # fn example(mut commands: Commands) {
     /// let parent = commands.spawn(HsmState::default()).id();
     /// let child = commands.spawn(HsmState::default()).id();
     ///
+    /// let mut state_tree = StateTree::new(parent);
     /// // 添加成功
-    /// assert!(state_tree.add(parent, child, TraversalStrategy::default()));
+    /// assert!(state_tree.add(parent, child));
     ///
     /// // 添加失败（parent不在树中）
     /// let orphan = commands.spawn(HsmState::default()).id();
-    /// assert!(!state_tree.add(orphan, child, TraversalStrategy::default()));
+    /// assert!(!state_tree.add(orphan, child));
     /// # }
     /// ```
     pub fn add(&mut self, from: Entity, to: Entity) -> bool {

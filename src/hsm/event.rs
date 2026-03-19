@@ -19,29 +19,28 @@ use bevy::prelude::*;
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
 /// #
-/// # fn hsm_system(
-/// #     mut commands: Commands,
-/// #     mut trigger_writer: EventWriter<HsmTrigger>
-/// # ) {
+/// # fn hsm_system(mut commands: Commands) {
 /// # // Define states
 /// # let root = commands.spawn(HsmState::default()).id();
 /// # let child_a = commands.spawn(HsmState::default()).id();
 /// # let child_b = commands.spawn(HsmState::default()).id();
 /// #
 /// # // Define tree
-/// # let tree = commands.spawn(StateTree::new(root).with_child(root, child_a).with_child(root, child_b)).id();
+/// # let mut tree = StateTree::new(root);
+/// # tree.with_add(root, child_a).with_add(root, child_b);
+/// # let tree_id = commands.spawn(tree).id();
 /// #
 /// # // Spawn state machine
-/// # let sm_entity = commands.spawn(HsmStateMachine::new(tree)).id();
+/// # let sm_entity = commands.spawn(HsmStateMachine::new(HsmStateId::new(tree_id,root), 10)).id();
 /// #
 /// // To transition to a specific sub-state:
-/// trigger_writer.send(HsmTrigger::with_sub(sm_entity, child_a));
+/// commands.trigger(HsmTrigger::with_sub(sm_entity, child_a));
 ///
 /// // To transition back to the immediate super-state:
-/// trigger_writer.send(HsmTrigger::with_super(sm_entity));
+/// commands.trigger(HsmTrigger::with_super(sm_entity));
 ///
 /// // To trigger a conditional transition to a sub-state:
-/// trigger_writer.send(HsmTrigger::with_transition(sm_entity, child_b, false));
+/// commands.trigger(HsmTrigger::with_transition(sm_entity, child_b, false));
 /// # }
 /// ```
 #[derive(EntityEvent, Clone, PartialEq, Eq, Hash)]
