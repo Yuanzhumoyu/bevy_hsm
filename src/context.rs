@@ -2,11 +2,11 @@ use std::fmt::Debug;
 
 use bevy::{ecs::system::SystemId, prelude::*};
 
-pub type StateActionId = SystemId<In<StateActionContext>, ()>;
+pub type ActionId = SystemId<In<ActionContext>, ()>;
 /// 用于条件守卫的上下文
 pub type GuardContext = StateContext<context_type::ConditionContext>;
 /// 用于状态动作的上下文
-pub type StateActionContext = StateContext<Entity>;
+pub type ActionContext = StateContext<Entity>;
 
 mod context_type {
     use std::fmt::Debug;
@@ -73,9 +73,9 @@ impl StateContext<Entity> {
     }
 }
 
-impl Debug for StateActionContext {
+impl Debug for ActionContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("StateActionContext")
+        f.debug_tuple("ActionContext")
             .field(&self.service_target)
             .field(&self.state_machine)
             .field(&self.relationship)
@@ -113,5 +113,15 @@ impl Debug for GuardContext {
             .field(&self.state_machine)
             .field(&self.relationship)
             .finish()
+    }
+}
+
+impl<T: Default + context_type::ContextRelationship> Default for StateContext<T> {
+    fn default() -> Self {
+        Self {
+            service_target: Entity::PLACEHOLDER,
+            state_machine: Entity::PLACEHOLDER,
+            relationship: Default::default(),
+        }
     }
 }

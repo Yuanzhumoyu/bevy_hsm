@@ -26,30 +26,30 @@ pub struct Terminated;
 impl Terminated {
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         #[cfg(feature = "fsm")]
-        {
+        'fsm: {
             let service_target = match world.get::<ServiceTarget>(entity) {
                 Some(service_target) => service_target.0,
                 None => entity,
             };
 
             let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
-                return;
+                break 'fsm;
             };
 
             'on_exit: {
-                let Some(on_exit) = world.get::<OnExitSystem>(fsm_state_machine.curr_state())
+                let Some(on_exit) = world.get::<OnExitSystem>(fsm_state_machine.curr_state_id())
                 else {
                     break 'on_exit;
                 };
                 let Some(id) = world
-                    .resource::<StateActionRegistry>()
+                    .resource::<ActionRegistry>()
                     .get(on_exit.as_str())
                     .cloned()
                 else {
                     break 'on_exit;
                 };
                 let context =
-                    StateActionContext::new(service_target, entity, fsm_state_machine.curr_state());
+                    ActionContext::new(service_target, entity, fsm_state_machine.curr_state_id());
                 unsafe {
                     let _ = world
                         .as_unsafe_world_cell()
@@ -62,10 +62,10 @@ impl Terminated {
             crate::state_data::StateData::remove_components(&mut world, entity, service_target);
 
             let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
-                return;
+                break 'fsm;
             };
 
-            let init_state = fsm_state_machine.init_state();
+            let init_state = fsm_state_machine.init_state_id();
             fsm_state_machine.set_curr_state(init_state);
 
             #[cfg(all(feature = "history", feature = "hybrid"))]
@@ -77,7 +77,7 @@ impl Terminated {
                 let fsm_history = fsm_state_machine.history.take();
 
                 let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(entity) else {
-                    return;
+                    break 'fsm;
                 };
                 state_machine
                     .history
@@ -92,13 +92,13 @@ impl Terminated {
                     break 'on_enter;
                 };
                 let Some(id) = world
-                    .resource::<StateActionRegistry>()
+                    .resource::<ActionRegistry>()
                     .get(on_enter.as_str())
                     .cloned()
                 else {
                     break 'on_enter;
                 };
-                let context = StateActionContext::new(service_target, entity, init_state);
+                let context = ActionContext::new(service_target, entity, init_state);
                 unsafe {
                     let _ = world
                         .as_unsafe_world_cell()
@@ -150,8 +150,7 @@ impl Paused {
             };
             // 查看当前状态是否有OnUpdateSystem,则将其添加进延期表中
             let curr_state_id = state_machine.curr_state_id();
-            let state_context =
-                StateActionContext::new(service_target, entity, curr_state_id.state());
+            let state_context = ActionContext::new(service_target, entity, curr_state_id.state());
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(
@@ -169,8 +168,8 @@ impl Paused {
                 break 'fsm;
             };
 
-            let curr_state_id = state_machine.curr_state();
-            let state_context = StateActionContext::new(service_target, entity, curr_state_id);
+            let curr_state_id = state_machine.curr_state_id();
+            let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(
@@ -195,8 +194,7 @@ impl Paused {
                 break 'hsm;
             };
             let curr_state_id = state_machine.curr_state_id();
-            let state_context =
-                StateActionContext::new(service_target, entity, curr_state_id.state());
+            let state_context = ActionContext::new(service_target, entity, curr_state_id.state());
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(
@@ -214,8 +212,8 @@ impl Paused {
                 break 'fsm;
             };
 
-            let curr_state_id = state_machine.curr_state();
-            let state_context = StateActionContext::new(service_target, entity, curr_state_id);
+            let curr_state_id = state_machine.curr_state_id();
+            let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(

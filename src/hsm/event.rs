@@ -27,20 +27,23 @@ use bevy::prelude::*;
 /// #
 /// # // Define tree
 /// # let mut tree = StateTree::new(root);
-/// # tree.with_add(root, child_a).with_add(root, child_b);
+/// # tree.with_child(root, child_a).with_child(root, child_b);
 /// # let tree_id = commands.spawn(tree).id();
 /// #
 /// # // Spawn state machine
-/// # let sm_entity = commands.spawn(HsmStateMachine::new(HsmStateId::new(tree_id,root), 10)).id();
+/// # let sm_entity = commands.spawn(HsmStateMachine::with(HsmStateId::new(tree_id,root), 10)).id();
 /// #
 /// // To transition to a specific sub-state:
-/// commands.trigger(HsmTrigger::with_sub(sm_entity, child_a));
+/// commands.trigger(HsmTrigger::to_sub(sm_entity, child_a));
 ///
 /// // To transition back to the immediate super-state:
-/// commands.trigger(HsmTrigger::with_super(sm_entity));
+/// commands.trigger(HsmTrigger::to_super(sm_entity));
 ///
 /// // To trigger a conditional transition to a sub-state:
-/// commands.trigger(HsmTrigger::with_transition(sm_entity, child_b, false));
+/// commands.trigger(HsmTrigger::guarded_sub(sm_entity, child_b));
+///
+/// // To trigger a conditional transition to a super-state:
+/// commands.trigger(HsmTrigger::guarded_super(sm_entity));
 /// # }
 /// ```
 #[derive(EntityEvent, Clone, PartialEq, Eq, Hash)]
@@ -58,33 +61,48 @@ impl HsmTrigger {
         }
     }
 
-    pub const fn with_super(state_machine: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::Super)
+    /// 创建一个向上级状态转换的触发器
+    ///
+    /// Creates a trigger for transitioning to a parent state
+    pub const fn to_super(state_machine: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::ToSuper)
     }
 
-    pub const fn with_sub(state_machine: Entity, target: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::Sub(target))
+    /// 创建一个向子状态转换的触发器
+    ///
+    /// Creates a trigger for transitioning to a child state
+    pub const fn to_sub(state_machine: Entity, target: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::ToSub(target))
     }
 
-    pub const fn with_transition(state_machine: Entity, target: Entity, is_super: bool) -> Self {
-        Self::new(
-            state_machine,
-            if is_super {
-                HsmTriggerType::SuperTransition(target)
-            } else {
-                HsmTriggerType::SubTransition(target)
-            },
-        )
+    /// 创建一个带条件的向上级状态转换的触发器
+    pub const fn guarded_super(state_machine: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::ToSuper)
     }
 
-    pub const fn with_next(state_machine: Entity, target: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::Next(target))
+    /// 创建一个带条件的向子状态转换的触发器
+    pub const fn guarded_sub(state_machine: Entity, target: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::GuardedSub(target))
     }
 
+    /// 创建一个链式过渡到目标状态的触发器, 该触发器会查询当前状态到目标状态之间的所有子状态，并依次触发子状态的更新
+    ///
+    /// Creates a trigger for chaining transitions to a target state, querying all intermediate sub-states
+    /// and updating them in sequence.
+    pub const fn chain(state_machine: Entity, target: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::Chain(target))
+    }
+
+    /// 获取触发器关联的状态机实体
+    ///
+    /// Gets the state machine entity associated with the trigger
     pub const fn state_machine(&self) -> Entity {
         self.state_machine
     }
 
+    /// 获取触发器的类型
+    ///
+    /// Gets the type of the trigger
     pub const fn typed(&self) -> &HsmTriggerType {
         &self.typed
     }
@@ -93,13 +111,23 @@ impl HsmTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HsmTriggerType {
     /// 直接返回父状态
-    Super,
+    ///
+    /// Directly return to parent state
+    ToSuper,
     /// 根据条件跳转父状态
-    SuperTransition(Entity),
+    ///
+    /// Jump to parent state based on condition
+    GuardedSuper,
     /// 直接跳转下一个状态
-    Sub(Entity),
+    ///
+    /// Directly jump to next state
+    ToSub(Entity),
     /// 根据条件跳转状态
-    SubTransition(Entity),
+    ///
+    /// Jump to state based on condition
+    GuardedSub(Entity),
     /// 直接跳转指定状态
-    Next(Entity),
+    ///
+    /// Directly jump to specified state
+    Chain(Entity),
 }

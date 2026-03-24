@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_hsm::{hsm::event::HsmTrigger, prelude::*};
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -17,7 +17,7 @@ fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, Wi
 //     ├── Aiming (瞄准)
 //     └── Attacking (攻击)
 //
-fn setup(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry>) {
+fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     let id = commands.register_system(debug_on_state("enter"));
     action_registry.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("exit"));
@@ -27,7 +27,7 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry
         let id = entity_commands.id();
         entity_commands
             .commands()
-            .trigger(HsmTrigger::with_next(id, states[3]));
+            .trigger(HsmTrigger::chain(id, states[3]));
     }
 
     commands.spawn(hsm! {
@@ -68,7 +68,7 @@ fn player_input_system(
     .for_each(|(key, state_name)| {
         if input.just_pressed(*key) {
             println!("Switching to {}", state_name);
-            commands.trigger(HsmTrigger::with_next(
+            commands.trigger(HsmTrigger::chain(
                 hsm.entity(),
                 get_state_id(*state_name).unwrap(),
             ));

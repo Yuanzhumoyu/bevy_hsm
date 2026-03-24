@@ -12,16 +12,16 @@ use smallvec::SmallVec;
 
 /// 状态条件的系统ID
 ///
-/// 用于判断`HsmState`是否满足进入或退出的条件,其中上下文中的实体是当前检测的实体
+/// 用于判断`State`是否满足进入或退出的条件,其中上下文中的实体是当前检测的实体
 ///
 /// State condition system ID
 ///
-/// Used to determine if `HsmState` meets the conditions for entering or exiting, where the context entity is the entity currently being checked
+/// Used to determine if `State` meets the conditions for entering or exiting, where the context entity is the entity currently being checked
 pub type GuardId = SystemId<In<GuardContext>, bool>;
 
-/// 注册用于判断`HsmState`是否满足进入或退出的条件
+/// 注册用于判断`State`是否满足进入或退出的条件
 ///
-/// Register to determine if `HsmState` meets the conditions for entering or exiting
+/// Register to determine if `State` meets the conditions for entering or exiting
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
@@ -95,6 +95,12 @@ impl GuardRegistry {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl<S: Into<String>> Extend<(S, GuardId)> for GuardRegistry {
+    fn extend<T: IntoIterator<Item = (S, GuardId)>>(&mut self, iter: T) {
+        self.0.extend(iter.into_iter().map(|(s, a)| (s.into(), a)));
     }
 }
 
@@ -347,7 +353,6 @@ use crate::context::GuardContext;
 struct Lexer<'a> {
     chars: Chars<'a>,
     current_char: Option<char>,
-    position: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -357,7 +362,6 @@ impl<'a> Lexer<'a> {
         Self {
             chars,
             current_char,
-            position: 0,
         }
     }
 
@@ -367,7 +371,6 @@ impl<'a> Lexer<'a> {
 
     fn advance(&mut self) {
         self.current_char = self.chars.next();
-        self.position += 1;
     }
 
     fn skip_whitespace(&mut self) {

@@ -20,7 +20,7 @@ hsm = []
 
 [dependencies]
 bevy_hsm_macros = { path = "crates/bevy_hsm_macros" }
-bevy = { version = "~0.18.0", default-features = false, features = [
+bevy = { version = "~0.18.1", default-features = false, features = [
   "bevy_log",
 ] }
 smallvec = "1.15.1"
@@ -30,11 +30,10 @@ dyn-hash = "1.0.0"
 bimap = "0.6.3"
 
 [dev-dependencies]
-bevy = { version = "~0.18.0", default-features = false, features = [
+bevy = { version = "~0.18.1", default-features = false, features = [
+  "experimental_bevy_feathers",
   "bevy_log",
-  "bevy_winit",
-  "bevy_ui",
-  "bevy_picking",
+  "ui",
 ] }
 
 [lints.clippy]
@@ -67,6 +66,15 @@ path = "examples/macros/fsm.rs"
 [[example]]
 name = "forced_transition"
 path = "examples/forced_transition.rs"
+
+[[example]]
+name = "vending_machine"
+path = "examples/vending_machine.rs"
+
+[[example]]
+name = "calculator"
+path = "examples/calculator.rs"
+
 
 [[test]]
 name = "action_system"

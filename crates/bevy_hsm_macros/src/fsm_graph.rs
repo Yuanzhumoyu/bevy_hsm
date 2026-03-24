@@ -3,31 +3,53 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Expr, Ident, LitInt, LitStr, Result, Token, braced, parenthesized,
+    Expr, Ident, LitStr, Result, Token, braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     token,
 };
 
-use crate::{guard_condition::GuardCondition, kw, state_config::StateConfig};
+use crate::{
+    action_id::ActionRegistry, guard_condition::GuardCondition, hsm::ConfigFn, kw,
+    machine_config::StateRef, state_config::StateConfig,
+};
 
 pub fn fsm_graph_impl(item: TokenStream) -> TokenStream {
-    let fsm_graph: FsmGraph = syn::parse_macro_input!(item as FsmGraph);
+    let FsmGraphImpl { graph, config_fn } = syn::parse_macro_input!(item as FsmGraphImpl);
     quote! {
         bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands| {
             use bevy_hsm::prelude::*;
             let mut commands = entity_commands.commands();
-            #fsm_graph
+            #graph
             entity_commands.insert(graph);
+            #config_fn
         })
     }
     .into()
 }
 
 #[derive(Debug)]
+pub struct FsmGraphImpl {
+    graph: FsmGraph,
+    config_fn: Option<ConfigFn>,
+}
+
+impl Parse for FsmGraphImpl {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let graph = input.parse()?;
+        let config_fn = if input.peek(Token![:]) {
+            Some(input.parse()?)
+        } else {
+            None
+        };
+        Ok(Self { graph, config_fn })
+    }
+}
+
+#[derive(Debug)]
 pub struct FsmGraph {
-    init_state: Option<StateRef>,
-    states: Punctuated<State, Token![,]>,
+    action_registry: ActionRegistry,
+    pub(crate) states: Punctuated<State, Token![,]>,
     transitions: Punctuated<Transition, Token![,]>,
 }
 
@@ -37,12 +59,6 @@ impl Parse for FsmGraph {
             return Err(input.error("expected `states: { ... }` block"));
         }
         input.parse::<kw::states>()?;
-        let mut init_state: Option<StateRef> = None;
-        if input.peek(Token![<]) {
-            input.parse::<Token![<]>()?;
-            init_state = Some(input.parse()?);
-            input.parse::<Token![>]>()?;
-        }
         input.parse::<Token![:]>()?;
         let content;
         braced!(content in input);
@@ -57,10 +73,15 @@ impl Parse for FsmGraph {
         braced!(content in input);
         let transitions = content.parse_terminated(Transition::parse, Token![,])?;
 
+        let mut action_registry = Vec::new();
+        for state in states.iter() {
+            state.config.to_actions(&mut action_registry);
+        }
+
         Ok(Self {
-            init_state,
             states,
             transitions,
+            action_registry: ActionRegistry(action_registry),
         })
     }
 }
@@ -68,8 +89,8 @@ impl Parse for FsmGraph {
 impl quote::ToTokens for FsmGraph {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let FsmGraph {
-            init_state,
             states,
+            action_registry,
             transitions,
         } = self;
 
@@ -92,38 +113,6 @@ impl quote::ToTokens for FsmGraph {
                 }
             }
         }
-
-        let init_state_index = match init_state {
-            Some(StateRef::Named(name)) => {
-                if let Some(index) = name_to_index.get(name) {
-                    *index
-                } else {
-                    tokens.extend(
-                        syn::Error::new_spanned(name, "Initial state with this name not found.")
-                            .to_compile_error(),
-                    );
-                    return;
-                }
-            }
-            Some(StateRef::Index(i)) => {
-                let index = match i.base10_parse::<usize>() {
-                    Ok(index) => index,
-                    Err(e) => {
-                        tokens.extend(e.to_compile_error());
-                        return;
-                    }
-                };
-                if index >= states.len() {
-                    tokens.extend(
-                        syn::Error::new_spanned(i, "Initial state index out of bounds.")
-                            .to_compile_error(),
-                    );
-                    return;
-                }
-                index
-            }
-            None => 0,
-        };
 
         let mut config_errors = Vec::new();
         let spawn_states = states
@@ -165,25 +154,25 @@ impl quote::ToTokens for FsmGraph {
 
                 let add_transition_code = match &transition.condition {
                     TransitionCondition::Unconditional => {
-                        quote! { graph.add(#from, #to); }
+                        quote! { graph.with_add(#from, #to); }
                     }
                     TransitionCondition::OnGuard(guard_expr) => {
-                        quote! { graph.add_condition(#from, #guard_expr, #to); }
+                        quote! { graph.with_condition(#from, #guard_expr, #to); }
                     }
                     TransitionCondition::OnEvent(event_expr) => {
-                        quote! { graph.add_event(#from, #event_expr, #to); }
+                        quote! { graph.with_event(#from, #event_expr, #to); }
                     }
                 };
 
                 let add_reverse_transition_code = match &transition.condition {
                     TransitionCondition::Unconditional => {
-                        quote! { graph.add(#to, #from); }
+                        quote! { graph.with_add(#to, #from); }
                     }
                     TransitionCondition::OnGuard(guard_expr) => {
-                        quote! { graph.add_condition(#to, #guard_expr, #from); }
+                        quote! { graph.with_condition(#to, #guard_expr, #from); }
                     }
                     TransitionCondition::OnEvent(event_expr) => {
-                        quote! { graph.add_event(#to, #event_expr, #from); }
+                        quote! { graph.with_event(#to, #event_expr, #from); }
                     }
                 };
                 Ok(match transition.direction {
@@ -229,8 +218,9 @@ impl quote::ToTokens for FsmGraph {
         tokens.extend(quote! {
             #(#resolution_errors);*
             #(#config_errors);*
+            #action_registry
             let ids = [#(#spawn_states),*];
-            let init_state_id = ids[#init_state_index];
+            let init_state_id = ids[0];
             let mut graph = FsmGraph::new(init_state_id);
             #(#build_transitions)*
         });
@@ -238,8 +228,8 @@ impl quote::ToTokens for FsmGraph {
 }
 
 #[derive(Debug)]
-struct State {
-    name: Option<Ident>,
+pub(crate) struct State {
+    pub(crate) name: Option<Ident>,
     config: StateConfig,
     components: Punctuated<Expr, Token![,]>,
     span: proc_macro2::Span,
@@ -267,14 +257,14 @@ impl State {
                     .to_compile_error(),
             );
         }
-        if self.config.enter_guard.is_some() {
+        if self.config.guard_enter.is_some() {
             errs.push(
                 syn::Error::new(self.span, "Enter guard is not supported for FSM states.")
                     .to_compile_error(),
             );
         }
 
-        if self.config.exit_guard.is_some() {
+        if self.config.guard_exit.is_some() {
             errs.push(
                 syn::Error::new(self.span, "Exit guard is not supported for FSM states.")
                     .to_compile_error(),
@@ -414,24 +404,6 @@ impl Parse for Transition {
             condition,
             direction,
         })
-    }
-}
-
-#[derive(Debug)]
-enum StateRef {
-    Named(Ident),
-    Index(LitInt),
-}
-
-impl Parse for StateRef {
-    fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(LitInt) {
-            Ok(StateRef::Index(input.parse()?))
-        } else if input.peek(Ident) {
-            Ok(StateRef::Named(input.parse()?))
-        } else {
-            Err(input.error("Expected a state name (identifier) or index (integer literal)"))
-        }
     }
 }
 

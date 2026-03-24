@@ -49,3 +49,9 @@ impl FsmStateHistory {
         self.history.clear();
     }
 }
+
+impl Default for FsmStateHistory {
+    fn default() -> Self {
+        Self::new(10)
+    }
+}

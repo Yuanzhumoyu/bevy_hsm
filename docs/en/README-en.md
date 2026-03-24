@@ -79,30 +79,34 @@ The FSM is driven by external events, making it ideal for responsive, direct sta
 The `hsm!` macro is used to build a Hierarchical State Machine. It defines a tree structure with a single root state and optional additional Bevy components attached to the state machine entity.
 
 ```ebnf
-hsm ::= state_node, { ',', component }, [ ',', ':', config_fn ];
+hsm ::= [ machine_config, ',', ], state_node, { ',', component }, [ ',', config_fn ];
+machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
+machine_config_param ::= 'history_capacity', '=', integer_literal
+                       | ( 'init_state' | 'curr_state' ), '=', state_ref;
 state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
 state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
 state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
                   | '#[state_data(', component, { ',', component }, ')]';
-state_attribute_param ::= 'enter_guard' '=' guard_condition
-                        | 'exit_guard' '=' guard_condition
-                        | 'on_update' '=' string_literal
-                        | 'on_enter' '=' string_literal
-                        | 'on_exit' '=' string_literal
-                        | 'strategy' '=' ( 'Nested' | 'Parallel' )
-                        | 'behavior' '=' ( 'Rebirth' | 'Resurrection' | 'Death' )
-                        | 'fsm_blueprint' '=' rust_expression
+state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
+                        | ( 'on_update' | 'on_enter' | 'on_exit' ), '=', action_id
+                        | 'strategy', '=', ( 'Nested' | 'Parallel' )
+                        | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
+                        | 'fsm_blueprint', '=', rust_expression
                         | 'minimal';
-config_fn ::= expr_closure
-            | fn_identifier;
-guard_condition ::= rust_expression; (* Any Rust expression that returns a bool *)
+config_fn ::= ':', ( expr_closure | fn_identifier | expr_call );
 component ::= rust_expression; (* Any valid Bevy component *)
 state_name ::= identifier; (* The name of the state *)
+state_ref ::= identifier | integer_literal;
+action_id ::= lit_str
+            | fn_identifier
+            | action_name, ':', ( expr_closure | expr_call | fn_identifier );
+action_name ::= identifier;
 identifier ::= (* A Rust identifier, e.g., MyState, StateA *) ;
-string_literal ::= (* A Rust string literal, e.g., "my_system" *) ;
+lit_str ::= (* A Rust string literal, e.g., "my_system" *) ;
 rust_expression ::= (* Any valid Rust expression *) ;
 expr_closure ::= (* A Rust closure expression *,e.g., |entity_commands: EntityCommands, states: &[Entity]| { ... } *) ;
-fn_identifier ::= (* A Rust function identifier, e.g., my_function *, parameter type `fn (EntityCommands, &[Entity]){ ... }` *) ;
+fn_identifier ::= (* A Rust function identifier, e.g., my_function *, parameter type fn (EntityCommands, &[Entity]){ ... } *) ;
+expr_call ::= (* Any valid Rust function call expression, e.g., my_function(a, b) *) ;
 ```
 
 **Key Points**:
@@ -118,15 +122,15 @@ fn_identifier ::= (* A Rust function identifier, e.g., my_function *, parameter 
 The `fsm!` macro is used to build a flat Finite State Machine. It defines a set of states, a set of transition rules, and optional additional components.
 
 ```ebnf
-fsm ::= fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ],[',', ':', config_fn] ,[','];
-fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', [','],
+fsm ::= [ machine_config, ',', ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
+fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}', ',',
               'transitions', ':', '{', transition, { ',', transition }, '}';
 state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
-transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref [ ':', transition_condition ];
+transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
 transition_condition ::= 'event', '(', rust_expression ')' (* Event *)
                        | 'guard', '(', guard_expression ')'; (* Conditional Guard *)
 state_ref ::= identifier | integer_literal; (* State name or index *)
-(* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `string_literal`, `rust_expression`, `config_fn` are the same as in the hsm! macro. *)
+(* Definitions for `state_attribute`, `component`, `state_name`, `identifier`, `lit_str`, `rust_expression`, `config_fn`, `action_id`, `machine_config`, `state_ref`, `fsm_graph` are the same as in the hsm! macro. *)
 ```
 
 **Key Points**:
@@ -147,9 +151,9 @@ state_ref ::= identifier | integer_literal; (* State name or index *)
 `hsm_tree!` is a utility macro for building a standalone state tree (`StateTree`). Its syntax is a subset of the `hsm!` macro, accepting only a single root `state_node`.
 
 ```ebnf
-hsm_tree ::= state_node;
+hsm_tree ::= state_node, [ ',', config_fn ];
  
-(* The definition of `state_node` is identical to the one in the `hsm!` macro. *)
+(* The definitions for `state_node` and `config_fn` are identical to those in the `hsm!` macro. *)
 ```
 
 ### `fsm_graph!`
@@ -157,10 +161,34 @@ hsm_tree ::= state_node;
 `fsm_graph!` is a utility macro for building a standalone state graph (`FsmGraph`). Its syntax is a subset of the `fsm!` macro.
 
 ```ebnf
-fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { ',', state_definition }, '}', ',',
-              'transitions', ':', '{', transition, { ',', transition }, '}';
+fsm_graph! ::= fsm_graph, [ ',', config_fn ];
  
-(* The definitions for `state_ref`, `state_definition`, and `transition` are identical to those in the `fsm!` macro. *)
+(* The definitions for `fsm_graph` and `config_fn` are identical to those in the `fsm!` macro. *)
+```
+
+### `system_registry!`
+
+`system_registry!` is a helper macro for dynamically registering multiple Bevy systems into a `SystemRegistry` resource. This is useful when you need to pass a collection of related systems (e.g., as state actions) to a state machine.
+
+```ebnf
+system_registry ::= '< ', source, ',', system_registry, '>', '[', [ system_definition, { ',', system_definition } ], ']';
+system_definition ::= ( lit_str | fn_identifier ), '=>', rust_expression;
+
+source ::= identifier; (* A variable of type `Commands` or `World` *)
+system_registry ::= identifier; (* A variable that implements `Extend<(String, SystemId)>` *)
+lit_str ::= (* A unique name within the system_registry *)
+fn_identifier ::= (* A unique name within the system_registry *)
+rust_expression ::= (* A Bevy system (function or closure) *)
+```
+
+**Example**:
+
+```rust
+let mut system_registry = SystemRegistry::new();
+system_registry!(<commands, system_registry>[
+    "on_enter_a" => on_enter_a,
+    "on_update_a" => || info!("Updating A"),
+]);
 ```
 
 ### `combination_condition!`
@@ -170,12 +198,10 @@ fsm_graph ::= 'states', [ '<', state_ref, '>' ], ':', '{', state_definition, { '
 ```ebnf
 combination_condition ::= guard_expression;
  
-guard_expression ::= 'and', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
-                   | 'or', '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
+guard_expression ::= ( 'and' | 'or' ), '(', guard_expression, ',', guard_expression, { ',', guard_expression }, ')'
                    | 'not', '(', guard_expression, ')'
                    | guard_id;
-guard_id ::= LitStr
-           | '#' identifier
+guard_id ::= lit_str | ( '#', identifier );
 ```
 
 ## Cargo Features
@@ -192,7 +218,7 @@ To enable features, add them to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.18", features = ["history", "hyybrid"] }
+bevy_hsm = { version = "0.18", features = ["history", "hybrid"] }
 ```
 
 ## Epilogue

@@ -4,22 +4,22 @@ use bevy_hsm::{StateMachinePlugin, prelude::*};
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct ToggleEvent;
 
-fn log_on_enter(In(context): In<StateActionContext>, query: Query<&Name>) {
+fn log_on_enter(In(context): In<ActionContext>, query: Query<&Name>) {
     if let Ok(name) = query.get(context.state()) {
         info!("Entering state: {}", name);
     }
 }
 
-fn log_on_exit(In(context): In<StateActionContext>, query: Query<&Name>) {
+fn log_on_exit(In(context): In<ActionContext>, query: Query<&Name>) {
     if let Ok(name) = query.get(context.state()) {
         info!("Exiting state: {}", name);
     }
 }
 
 fn log_on_update(
-    In(contexts): In<Vec<StateActionContext>>,
+    In(contexts): In<Vec<ActionContext>>,
     query: Query<&Name>,
-) -> Option<Vec<StateContext>> {
+) -> Option<Vec<ActionContext>> {
     let iter = query.iter_many(contexts.iter().map(|c| c.state()));
     for name in iter {
         info!("Updating state: {}", name);
@@ -27,7 +27,7 @@ fn log_on_update(
     Some(contexts)
 }
 
-fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry>) {
+fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     let system_id = commands.register_system(log_on_enter);
     action_registry.insert("log_on_enter", system_id);
     let system_id = commands.register_system(log_on_exit);
@@ -54,13 +54,13 @@ fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<StateActionRegi
 
     let mut graph = FsmGraph::new(state_a);
     graph
-        .add_event(state_a, ToggleEvent, state_b)
-        .add_event(state_b, ToggleEvent, state_a);
+        .with_event(state_a, ToggleEvent, state_b)
+        .with_event(state_b, ToggleEvent, state_a);
 
     let graph_id = commands.spawn(graph).id();
 
     commands.spawn((
-        FsmStateMachine::new(graph_id, state_a, 10),
+        FsmStateMachine::with(graph_id, state_a, 10),
         Name::new("MySimpleFsm"),
     ));
 }

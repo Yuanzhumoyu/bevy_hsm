@@ -1,17 +1,14 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
-fn debug_light(
-    states: In<Vec<StateActionContext>>,
-    query: Query<&Name>,
-) -> Option<Vec<StateActionContext>> {
+fn debug_light(states: In<Vec<ActionContext>>, query: Query<&Name>) -> Option<Vec<ActionContext>> {
     for light in query.iter_many(states.0.iter().map(|c| c.state())) {
         println!("Current light: {}", light);
     }
@@ -36,7 +33,7 @@ impl LightTimer {
 fn register_condition(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<StateActionRegistry>,
+    mut action_registry: ResMut<ActionRegistry>,
 ) {
     let id = commands.register_system(LightTimer::light_timer);
     guard_registry.insert("light_timer", id);
@@ -80,11 +77,11 @@ fn setup(mut commands: Commands) {
     let mut state_tree = StateTree::new(red);
     state_tree
         .with_traversal(red, traversal)
-        .with_add(red, yellow);
+        .with_child(red, yellow);
 
     commands.entity(state_machine).insert((
         state_tree,
-        HsmStateMachine::new(HsmStateId::new(state_machine, red), 10),
+        HsmStateMachine::with(HsmStateId::new(state_machine, red), 10),
         Name::new("Blinking Light Paused"),
         StateLifecycle::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),

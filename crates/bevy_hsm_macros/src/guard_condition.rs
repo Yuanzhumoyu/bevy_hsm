@@ -1,5 +1,6 @@
 use proc_macro::TokenStream;
-use syn::{Expr, Token, parse::Parse, parse_macro_input};
+use quote::quote;
+use syn::{Token, parse::Parse, parse_macro_input};
 
 use crate::kw;
 
@@ -16,7 +17,7 @@ pub(super) enum GuardCondition {
     And(Vec<GuardCondition>),
     Or(Vec<GuardCondition>),
     Not(Box<GuardCondition>),
-    Id(Expr),
+    Id(GuardId),
 }
 
 impl quote::ToTokens for GuardCondition {
@@ -103,5 +104,33 @@ impl GuardCondition {
 
         let result = conditions.into_iter().collect();
         Ok(result)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum GuardId {
+    Str(syn::LitStr),
+    Ident(syn::Ident),
+}
+
+impl Parse for GuardId {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(syn::LitStr) {
+            Ok(GuardId::Str(input.parse()?))
+        } else if lookahead.peek(syn::Ident) {
+            Ok(GuardId::Ident(input.parse()?))
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+impl quote::ToTokens for GuardId {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            GuardId::Str(lit_str) => quote! {#lit_str},
+            GuardId::Ident(ident) => quote! {#ident},
+        });
     }
 }

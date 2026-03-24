@@ -35,11 +35,11 @@ use dyn_hash::{DynHash, hash_trait_object};
 /// #
 /// # // Define graph
 /// # let mut graph = FsmGraph::new(idle);
-/// # graph.add(idle, walking);
+/// # graph.with_add(idle, walking);
 /// # let graph_id = commands.spawn(graph).id();
 /// #
 /// # // Spawn state machine
-/// # let sm_entity = commands.spawn(FsmStateMachine::new(graph_id, idle, 10)).id();
+/// # let sm_entity = commands.spawn(FsmStateMachine::with(graph_id, idle, 10)).id();
 /// #
 /// // To trigger an unconditional transition to a specific state:
 /// commands.trigger(FsmTrigger::with_next(sm_entity, walking));

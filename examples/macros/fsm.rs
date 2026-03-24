@@ -21,15 +21,15 @@ pub enum MyEvent {
     Back,
 }
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<FsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<FsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<FsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<FsmState>>| {
         let binding = Name::new("state");
         let state_name = query.get(context.state()).unwrap_or(&binding);
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
-fn setup(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry>) {
+fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     let id = commands.register_system(debug_on_state("Enter"));
     action_registry.insert("on_enter_name", id);
     let id = commands.register_system(debug_on_state("Exit"));
@@ -59,7 +59,7 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<StateActionRegistry
         components:{
             ComponentA,
             ComponentB,
-        }
+        },
     ));
 }
 

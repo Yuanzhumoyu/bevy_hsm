@@ -1,15 +1,15 @@
 use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, spanned::Spanned};
 
-use crate::{guard_condition::GuardCondition, kw};
+use crate::{action_id::ActionId, guard_condition::GuardCondition, hsm::ConfigFn, kw};
 
 #[derive(Debug, Default)]
 pub(crate) struct StateConfig {
-    pub(crate) enter_guard: Option<GuardCondition>,
-    pub(crate) exit_guard: Option<GuardCondition>,
+    pub(crate) guard_enter: Option<GuardCondition>,
+    pub(crate) guard_exit: Option<GuardCondition>,
     on_update: Option<LitStr>,
-    on_enter: Option<LitStr>,
-    on_exit: Option<LitStr>,
+    on_enter: Option<ActionId>,
+    on_exit: Option<ActionId>,
     pub(crate) strategy: Option<Ident>,
     pub(crate) behavior: Option<Ident>,
     pub(crate) fsm_blueprint: Option<Expr>,
@@ -26,8 +26,8 @@ impl StateConfig {
     }
 
     pub fn is_hsm_any(&self) -> bool {
-        self.enter_guard.is_some()
-            || self.exit_guard.is_some()
+        self.guard_enter.is_some()
+            || self.guard_exit.is_some()
             || self.on_update.is_some()
             || self.on_enter.is_some()
             || self.on_exit.is_some()
@@ -54,7 +54,20 @@ impl StateConfig {
             Some(fsm_blueprint) => quote::quote! { fsm_config: Some(#fsm_blueprint) },
             None => quote::quote! { fsm_config: None },
         };
-        quote::quote! {HsmState {#hsm_state_strategy_field, #hsm_state_behavior_field, #[cfg(feature = "fsm")] #hsm_state_fsm_blueprint_field,},}
+        quote::quote! {HsmState {#hsm_state_strategy_field, #hsm_state_behavior_field, #hsm_state_fsm_blueprint_field,},}
+    }
+
+    pub(crate) fn to_actions(&self, actions: &mut Vec<(LitStr, ConfigFn)>) {
+        if let Some(enter) = &self.on_enter
+            && let Some(action) = enter.to_action()
+        {
+            actions.push(action);
+        }
+        if let Some(exit) = &self.on_exit
+            && let Some(action) = exit.to_action()
+        {
+            actions.push(action);
+        }
     }
 
     pub(crate) fn from_attrs(attrs: &[syn::Attribute]) -> syn::Result<Self> {
@@ -70,22 +83,22 @@ impl StateConfig {
                 for state_attr in parsed_attrs {
                     match state_attr {
                         StateAttrType::EnterGuard(guard) => {
-                            if config.enter_guard.is_some() {
+                            if config.guard_enter.is_some() {
                                 return Err(syn::Error::new(
                                     guard.span(),
-                                    "enter_guard already exists",
+                                    "guard_enter already exists",
                                 ));
                             }
-                            config.enter_guard = Some(guard);
+                            config.guard_enter = Some(guard);
                         }
                         StateAttrType::ExitGuard(guard) => {
-                            if config.exit_guard.is_some() {
+                            if config.guard_exit.is_some() {
                                 return Err(syn::Error::new(
                                     guard.span(),
-                                    "exit_guard already exists",
+                                    "guard_exit already exists",
                                 ));
                             }
-                            config.exit_guard = Some(guard);
+                            config.guard_exit = Some(guard);
                         }
                         StateAttrType::OnUpdate(update) => {
                             if config.on_update.is_some() {
@@ -171,19 +184,19 @@ impl StateConfig {
 impl quote::ToTokens for StateConfig {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let Self {
-            enter_guard,
-            exit_guard,
+            guard_enter,
+            guard_exit,
             on_update,
             on_enter,
             on_exit,
             state_datas,
             ..
         } = self;
-        if let Some(enter_guard) = enter_guard {
-            tokens.extend(quote::quote! {EnterGuard(#enter_guard),});
+        if let Some(guard_enter) = guard_enter {
+            tokens.extend(quote::quote! {EnterGuard(#guard_enter),});
         }
-        if let Some(exit_guard) = exit_guard {
-            tokens.extend(quote::quote! {ExitGuard(#exit_guard),});
+        if let Some(guard_exit) = guard_exit {
+            tokens.extend(quote::quote! {ExitGuard(#guard_exit),});
         }
         if let Some(on_update) = on_update {
             tokens.extend(quote::quote! {OnUpdateSystem::new(#on_update),});
@@ -195,8 +208,7 @@ impl quote::ToTokens for StateConfig {
             tokens.extend(quote::quote! {OnExitSystem::new(#on_exit),});
         }
         if !state_datas.is_empty() {
-            tokens
-                .extend(quote::quote! {#[cfg(feature = "state_data")]state_data::StateDataBundle::new((#state_datas)),});
+            tokens.extend(quote::quote! {StateDataBundle::new((#state_datas)),});
         }
     }
 }
@@ -205,8 +217,8 @@ enum StateAttrType {
     EnterGuard(GuardCondition),
     ExitGuard(GuardCondition),
     OnUpdate(LitStr),
-    OnEnter(LitStr),
-    OnExit(LitStr),
+    OnEnter(ActionId),
+    OnExit(ActionId),
     Strategy(Ident),
     Behavior(Ident),
     FsmBlueprint(Expr),
@@ -224,14 +236,14 @@ impl Parse for StateAttrType {
         if lookahead.peek(kw::minimal) {
             input.parse::<kw::minimal>()?;
             Ok(StateAttrType::Minimal)
-        } else if lookahead.peek(kw::enter_guard) {
+        } else if lookahead.peek(kw::guard_enter) {
             Ok(StateAttrType::EnterGuard(parse_attr::<
-                kw::enter_guard,
+                kw::guard_enter,
                 GuardCondition,
             >(&input)?))
-        } else if lookahead.peek(kw::exit_guard) {
+        } else if lookahead.peek(kw::guard_exit) {
             Ok(StateAttrType::ExitGuard(parse_attr::<
-                kw::exit_guard,
+                kw::guard_exit,
                 GuardCondition,
             >(&input)?))
         } else if lookahead.peek(kw::on_update) {
@@ -239,11 +251,11 @@ impl Parse for StateAttrType {
                 parse_attr::<kw::on_update, LitStr>(&input)?,
             ))
         } else if lookahead.peek(kw::on_enter) {
-            Ok(StateAttrType::OnEnter(parse_attr::<kw::on_enter, LitStr>(
-                &input,
-            )?))
+            Ok(StateAttrType::OnEnter(
+                parse_attr::<kw::on_enter, ActionId>(&input)?,
+            ))
         } else if lookahead.peek(kw::on_exit) {
-            Ok(StateAttrType::OnExit(parse_attr::<kw::on_exit, LitStr>(
+            Ok(StateAttrType::OnExit(parse_attr::<kw::on_exit, ActionId>(
                 &input,
             )?))
         } else if lookahead.peek(kw::strategy) {

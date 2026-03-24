@@ -171,7 +171,7 @@ impl StateTraversalStrategy for ReverseTraversal {
     }
 }
 
-fn get_on_exit_transition_queue(
+fn build_exit_transition_plan(
     world: &World,
     mut state_id: HsmStateId,
     strategy: StateTransitionStrategy,
@@ -219,7 +219,7 @@ fn get_on_exit_transition_queue(
                     && behavior == ExitTransitionBehavior::Death)
                 {
                     true => {
-                        transition_queue.extend(get_on_exit_transition_queue(
+                        transition_queue.extend(build_exit_transition_plan(
                             world, state_id, strategy, behavior,
                         )?);
                         return Ok(transition_queue);
@@ -250,12 +250,7 @@ fn get_on_exit_transition_queue(
                 if !(strategy == StateTransitionStrategy::Parallel
                     && new_behavior == ExitTransitionBehavior::Death)
                 {
-                    return get_on_exit_transition_queue(
-                        world,
-                        new_state_id,
-                        strategy,
-                        new_behavior,
-                    );
+                    return build_exit_transition_plan(world, new_state_id, strategy, new_behavior);
                 }
                 state_id = new_state_id;
                 behavior = new_behavior;
@@ -279,10 +274,10 @@ fn get_on_exit_transition_queue(
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub(crate) struct CheckOnTransitionStates(HashSet<Entity>);
 
-pub(crate) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) {
+pub(crate) fn install_transition_systems<T: ScheduleLabel>(app: &mut App, schedule: T) {
     app.add_systems(
         schedule,
-        (handle_on_enter_states, handle_on_exit_states)
+        (handle_enter_transitions, handle_exit_transitions)
             .chain()
             .run_if(|check_on_transition_states: Res<CheckOnTransitionStates>| {
                 !check_on_transition_states.is_empty()
@@ -290,7 +285,7 @@ pub(crate) fn add_handle_on_state<T: ScheduleLabel>(app: &mut App, schedule: T) 
     );
 }
 
-fn handle_on_enter_states(
+fn handle_enter_transitions(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
     query_state_machines: Query<(Entity, &HsmStateMachine), Without<Paused>>,
@@ -363,23 +358,19 @@ fn handle_on_enter_states(
                 return;
             };
 
-            handle_on_enter_state_command(
-                state_machine_id,
-                curr_state_id,
-                enter_state_id,
-                strategy,
-            )
-            .apply(world);
+            let _ =
+                handle_enter_transition(state_machine_id, curr_state_id, enter_state_id, strategy)
+                    .apply(world);
         });
     }
 }
 
-pub(super) fn handle_on_enter_state_command(
+pub(super) fn handle_enter_transition(
     state_machine_id: Entity,
     curr_state_id: HsmStateId,
     enter_state_id: Entity,
     strategy: StateTransitionStrategy,
-) -> impl Command {
+) -> impl Command<Result<()>> {
     move |world: &mut World| {
         world
             .resource_mut::<CheckOnTransitionStates>()
@@ -391,7 +382,7 @@ pub(super) fn handle_on_enter_state_command(
                 "{}",
                 StateMachineError::HsmStateMachineMissing(state_machine_id)
             );
-            return;
+            return Ok(());
         };
 
         let state_id = HsmStateId::new(curr_state_id.tree(), enter_state_id);
@@ -408,10 +399,11 @@ pub(super) fn handle_on_enter_state_command(
         };
 
         service_target.insert(next_on_state);
+        Ok(())
     }
 }
 
-fn handle_on_exit_states(
+fn handle_exit_transitions(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
     query_state_machines: Query<(Entity, &HsmStateMachine), Without<Paused>>,
@@ -479,17 +471,16 @@ fn handle_on_exit_states(
                 }
             };
 
-            handle_on_exit_state_command(state_machine_id, curr_state_id, super_state_id)
-                .apply(world)
+            handle_exit_transition(state_machine_id, curr_state_id, super_state_id).apply(world)
         });
     }
 }
 
 #[inline]
-pub(super) fn handle_on_exit_state_command(
+pub(super) fn handle_exit_transition(
     state_machine_id: Entity,
     curr_state_id: HsmStateId,
-    super_state_id: Entity,
+    exit_state_id: Entity,
 ) -> impl Command<Result<()>> {
     move |world: &mut World| -> Result<()> {
         world
@@ -497,15 +488,15 @@ pub(super) fn handle_on_exit_state_command(
             .remove(&state_machine_id);
 
         let Some((strategy, behavior)) = world
-            .get::<HsmState>(super_state_id)
+            .get::<HsmState>(exit_state_id)
             .map(|state| (state.strategy, state.behavior))
         else {
-            warn!("{}", StateMachineError::HsmStateMissing(super_state_id));
+            warn!("{}", StateMachineError::HsmStateMissing(exit_state_id));
             return Ok(());
         };
 
-        let state_id = HsmStateId::new(curr_state_id.tree(), super_state_id);
-        let transition_queue = get_on_exit_transition_queue(world, state_id, strategy, behavior)?;
+        let state_id = HsmStateId::new(curr_state_id.tree(), exit_state_id);
+        let transition_queue = build_exit_transition_plan(world, state_id, strategy, behavior)?;
 
         let mut service_target = world.entity_mut(state_machine_id);
         let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
@@ -541,7 +532,7 @@ mod tests {
     struct Condition(bool);
 
     fn log_on_enter(
-        entity: In<StateActionContext>,
+        entity: In<ActionContext>,
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
@@ -552,7 +543,7 @@ mod tests {
     }
 
     fn log_on_exit(
-        entity: In<StateActionContext>,
+        entity: In<ActionContext>,
         query: Query<&Name, With<HsmState>>,
         mut collector: ResMut<DebugInfoCollector>,
     ) {
@@ -577,9 +568,9 @@ mod tests {
     }
 
     fn set_condition_false(
-        contexts: In<Vec<StateActionContext>>,
+        contexts: In<Vec<ActionContext>>,
         mut query: Query<&mut Condition>,
-    ) -> Option<Vec<StateActionContext>> {
+    ) -> Option<Vec<ActionContext>> {
         let mut iter = query.iter_many_mut(contexts.0.iter().map(|a| a.state_machine));
         while let Some(mut condition) = iter.fetch_next() {
             condition.0 = false;
@@ -597,7 +588,7 @@ mod tests {
         app.add_action_system(Update, "set_condition_false", set_condition_false);
 
         let world = app.world_mut();
-        let systems = StateActionRegistry(HashMap::from([
+        let systems = ActionRegistry(HashMap::from([
             (
                 "log_on_enter".to_string(),
                 world.register_system(log_on_enter),
@@ -649,7 +640,7 @@ mod tests {
                     ExitGuard::new("is_condition_false"),
                 ))
                 .id();
-            state_tree.add(curr_state_id, new_state_id);
+            state_tree.with_child(curr_state_id, new_state_id);
             curr_state_id = new_state_id;
         }
 
@@ -659,7 +650,7 @@ mod tests {
 
         world.entity_mut(state_machine_id).insert((
             state_tree,
-            HsmStateMachine::new(
+            HsmStateMachine::with(
                 HsmStateId::new(state_machine_id, start_id),
                 #[cfg(feature = "history")]
                 10,

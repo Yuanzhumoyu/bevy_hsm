@@ -41,14 +41,19 @@ pub struct OutgoingTransitions {
 
 impl OutgoingTransitions {
     fn clear_outgoing_transitions(&mut self, target: Entity, except: FsmTransitionType) {
-        if !matches!(except, FsmTransitionType::Unconditional) {
-            self.unconditional.remove(&target);
-        }
-        if !matches!(except, FsmTransitionType::OnEvent) {
-            self.on_event.remove_by_right(&target);
-        }
-        if !matches!(except, FsmTransitionType::OnGuard) {
-            self.on_guard.remove_by_right(&target);
+        match except {
+            FsmTransitionType::Unconditional => {
+                self.on_event.remove_by_right(&target);
+                self.on_guard.remove_by_right(&target);
+            }
+            FsmTransitionType::OnEvent => {
+                self.unconditional.remove(&target);
+                self.on_guard.remove_by_right(&target);
+            }
+            FsmTransitionType::OnGuard => {
+                self.unconditional.remove(&target);
+                self.on_event.remove_by_right(&target);
+            }
         }
     }
 
@@ -117,7 +122,7 @@ impl OutgoingTransitions {
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use bevy_hsm::prelude::{FsmGraph, FsmStateMachine, FsmState, StateEvent, GuardCondition};
+/// # use bevy_hsm::prelude::{FsmGraph, FsmStateMachine, FsmState};
 /// #
 /// # #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// # struct MyEvent;
@@ -132,17 +137,17 @@ impl OutgoingTransitions {
 /// let mut graph = FsmGraph::new(idle);
 /// graph
 ///     // idle -> walking (unconditional)
-///     .add(idle, walking)
+///     .with_add(idle, walking)
 ///     // walking -> running (on event)
-///     .add_event(walking, MyEvent, running)
+///     .with_event(walking, MyEvent, running)
 ///     // running -> idle (with a guard condition)
-///     .add_condition(running, "is_tired", idle);
+///     .with_condition(running, "is_tired", idle);
 ///
 /// // 3. Spawn an entity with the graph component
 /// let graph_id = commands.spawn(graph).id();
 ///
 /// // 4. Spawn a state machine instance that uses this graph
-/// commands.spawn(FsmStateMachine::new(graph_id, idle, 10));
+/// commands.spawn(FsmStateMachine::with(graph_id, idle, 10));
 /// # }
 /// ```
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
@@ -186,12 +191,12 @@ impl FsmGraph {
         self.transitions.entry(state).or_default()
     }
 
-    pub fn add(&mut self, from: Entity, to: Entity) -> &mut Self {
+    pub fn with_add(&mut self, from: Entity, to: Entity) -> &mut Self {
         self.get_mut_or_default(from).with(to);
         self
     }
 
-    pub fn add_condition(
+    pub fn with_condition(
         &mut self,
         from: Entity,
         condition: impl Into<GuardCondition>,
@@ -201,7 +206,7 @@ impl FsmGraph {
         self
     }
 
-    pub fn add_event(&mut self, from: Entity, event: impl StateEvent, to: Entity) -> &mut Self {
+    pub fn with_event(&mut self, from: Entity, event: impl StateEvent, to: Entity) -> &mut Self {
         self.get_mut_or_default(from).with_event(event, to);
         self
     }

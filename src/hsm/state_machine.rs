@@ -6,18 +6,19 @@ use bevy::{
 };
 
 use crate::{
-    context::StateActionContext,
+    context::{ActionContext, GuardContext},
     error::StateMachineError,
+    guards::CompiledGuard,
     hsm::{
         HsmState,
         event::HsmTrigger,
         state_tree::HsmStateId,
         transition_strategy::{
-            CheckOnTransitionStates, handle_on_enter_state_command, handle_on_exit_state_command,
+            CheckOnTransitionStates, handle_enter_transition, handle_exit_transition,
         },
     },
     markers::{Paused, Terminated},
-    prelude::{ServiceTarget, StateActionBuffer, StateTree},
+    prelude::{EnterGuardCache, ExitGuardCache, ServiceTarget, StateActionBuffer, StateTree},
     state_actions::*,
 };
 
@@ -40,7 +41,7 @@ use crate::hsm::history::*;
 /// # fn  foo(mut commands: Commands) {
 /// let id = commands.spawn_empty().id();
 /// let tree_id = commands.spawn(StateTree::new(id)).id();
-/// let state_machine = HsmStateMachine::new(HsmStateId::new(tree_id, id), 10);
+/// let state_machine = HsmStateMachine::with(HsmStateId::new(tree_id, id), 10);
 /// # }
 /// ```
 #[derive(Component, Clone, PartialEq, Eq)]
@@ -72,10 +73,24 @@ pub struct HsmStateMachine {
 }
 
 impl HsmStateMachine {
-    pub fn new(curr_state: HsmStateId, #[cfg(feature = "history")] history_len: usize) -> Self {
+    pub fn new(
+        init_state: HsmStateId,
+        curr_state: HsmStateId,
+        #[cfg(feature = "history")] history_len: usize,
+    ) -> Self {
         Self {
+            init_state,
             curr_state,
-            init_state: curr_state,
+            transition_queue: VecDeque::new(),
+            #[cfg(feature = "history")]
+            history: StateHistory::new(history_len),
+        }
+    }
+
+    pub fn with(init_state: HsmStateId, #[cfg(feature = "history")] history_len: usize) -> Self {
+        Self {
+            init_state,
+            curr_state: init_state,
             transition_queue: VecDeque::new(),
             #[cfg(feature = "history")]
             history: StateHistory::new(history_len),
@@ -96,7 +111,7 @@ impl HsmStateMachine {
     /// 获取下一个状态的ID
     ///
     /// Get the ID of the next state
-    pub fn next_state_id(&self) -> Option<&Transition> {
+    pub fn next_transition(&self) -> Option<&Transition> {
         self.transition_queue.front()
     }
 
@@ -142,7 +157,7 @@ impl HsmStateMachine {
     /// 获取下一个状态的ID
     ///
     /// Get the ID of the next state
-    pub fn get_next_state(&self) -> Option<HsmStateId> {
+    pub fn next_state_id(&self) -> Option<HsmStateId> {
         self.transition_queue.front().and_then(|next| match next {
             Transition::Next((state_id, _)) => Some(*state_id),
             Transition::None => None,
@@ -152,7 +167,7 @@ impl HsmStateMachine {
     /// 获取下一个状态的OnState
     ///
     /// Get the OnState of the next state
-    pub fn get_next_state_on_state(&self) -> Option<StateLifecycle> {
+    pub fn next_state_lifecycle(&self) -> Option<StateLifecycle> {
         self.transition_queue.front().and_then(|next| match next {
             Transition::Next((_, on_state)) => Some(*on_state),
             Transition::None => None,
@@ -215,22 +230,27 @@ impl HsmStateMachine {
             .is_some_and(|n| *n != Transition::None)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn handle_hsm_trigger(
         on: On<HsmTrigger>,
         mut commands: Commands,
         query_state: Query<&HsmState>,
         query_state_tree: Query<&StateTree>,
         mut query: Query<&mut HsmStateMachine, Without<Paused>>,
+        query_service_target: Query<&ServiceTarget, With<HsmStateMachine>>,
+        enter_guard_cache: Res<EnterGuardCache>,
+        exit_guard_cache: Res<ExitGuardCache>,
     ) {
         let HsmTrigger {
-            state_machine: state_machine_id,
+            state_machine,
             typed,
         } = on.event();
+        let state_machine_id = *state_machine;
 
-        let Ok(mut state_machine) = query.get_mut(*state_machine_id) else {
+        let Ok(mut state_machine) = query.get_mut(state_machine_id) else {
             error!(
                 "{}",
-                StateMachineError::HsmStateMachineMissing(*state_machine_id)
+                StateMachineError::HsmStateMachineMissing(state_machine_id)
             );
             return;
         };
@@ -245,46 +265,22 @@ impl HsmStateMachine {
             return;
         };
 
-        let mut handle_sub_transition = |enter_state_id: Entity| {
-            let Ok(strategy) = query_state
-                .get(curr_state_id.state())
-                .map(|state| state.strategy)
-            else {
-                warn!(
-                    "{}",
-                    StateMachineError::HsmStateMissing(curr_state_id.state())
-                );
-                return;
-            };
-
-            commands.queue(handle_on_enter_state_command(
-                *state_machine_id,
-                curr_state_id,
-                enter_state_id,
-                strategy,
-            ));
-        };
-
         match typed {
-            super::event::HsmTriggerType::Super => {
+            super::event::HsmTriggerType::ToSuper => {
                 if let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) {
-                    commands.queue(handle_on_exit_state_command(
-                        *state_machine_id,
+                    commands.queue(handle_exit_transition(
+                        state_machine_id,
                         curr_state_id,
                         super_state_id,
                     ));
                 }
             }
-            super::event::HsmTriggerType::SuperTransition(super_state_id) => {
-                commands.queue(handle_on_exit_state_command(
-                    *state_machine_id,
-                    curr_state_id,
-                    *super_state_id,
-                ));
-            }
-            super::event::HsmTriggerType::Sub(enter_state_id) => {
-                let Some(sub_states) = state_tree.get_sub_states(curr_state_id.state()) else {
-                    error!(
+            super::event::HsmTriggerType::ToSub(enter_state_id) => {
+                if state_tree
+                    .get_sub_states(curr_state_id.state())
+                    .is_none_or(|sub_states| !sub_states.contains(enter_state_id))
+                {
+                    warn!(
                         "{}",
                         StateMachineError::SubStateNotFound {
                             state_tree: curr_state_id.tree(),
@@ -292,28 +288,148 @@ impl HsmStateMachine {
                         }
                     );
                     return;
+                }
+
+                let Ok(strategy) = query_state
+                    .get(curr_state_id.state())
+                    .map(|state| state.strategy)
+                else {
+                    warn!(
+                        "{}",
+                        StateMachineError::HsmStateMissing(curr_state_id.state())
+                    );
+                    return;
                 };
 
-                if sub_states.contains(enter_state_id) {
-                    handle_sub_transition(*enter_state_id);
-                }
+                commands.queue(handle_enter_transition(
+                    state_machine_id,
+                    curr_state_id,
+                    *enter_state_id,
+                    strategy,
+                ));
             }
-            super::event::HsmTriggerType::SubTransition(enter_state_id) => {
-                handle_sub_transition(*enter_state_id);
-            }
-            super::event::HsmTriggerType::Next(next_state_id) => {
-                state_machine.handle_next_trigger(
+            super::event::HsmTriggerType::Chain(next_state_id) => {
+                state_machine.handle_state_transition(
                     &mut commands,
-                    *state_machine_id,
+                    state_machine_id,
                     *next_state_id,
                     state_tree,
                     &query_state,
                 );
             }
+            _ => {
+                let service_target = match query_service_target.get(state_machine_id) {
+                    Ok(target) => target.0,
+                    Err(_) => state_machine_id,
+                };
+                match typed {
+                    super::event::HsmTriggerType::GuardedSub(enter_state_id) => {
+                        if state_tree
+                            .get_sub_states(curr_state_id.state())
+                            .is_none_or(|sub_states| !sub_states.contains(enter_state_id))
+                        {
+                            warn!(
+                                "{}",
+                                StateMachineError::SubStateNotFound {
+                                    state_tree: curr_state_id.tree(),
+                                    state: curr_state_id.state()
+                                }
+                            );
+                            return;
+                        }
+
+                        let Ok(strategy) = query_state
+                            .get(curr_state_id.state())
+                            .map(|state| state.strategy)
+                        else {
+                            warn!(
+                                "{}",
+                                StateMachineError::HsmStateMissing(curr_state_id.state())
+                            );
+                            return;
+                        };
+
+                        let Some(guard) = enter_guard_cache.get(enter_state_id).cloned() else {
+                            return;
+                        };
+                        let context = GuardContext::new(
+                            service_target,
+                            state_machine_id,
+                            curr_state_id.state(),
+                            *enter_state_id,
+                        );
+                        let enter_state_id = *enter_state_id;
+                        commands.queue(Self::handle_guarded_transition(
+                            guard,
+                            context,
+                            move || {
+                                handle_enter_transition(
+                                    state_machine_id,
+                                    curr_state_id,
+                                    enter_state_id,
+                                    strategy,
+                                )
+                            },
+                        ));
+                    }
+                    crate::prelude::HsmTriggerType::GuardedSuper => {
+                        let Some(exit_state_id) = state_tree.get_super_state(curr_state_id.state())
+                        else {
+                            warn!(
+                                "{}",
+                                StateMachineError::SuperStateNotFound {
+                                    state_tree: curr_state_id.tree(),
+                                    state: curr_state_id.state()
+                                }
+                            );
+                            return;
+                        };
+
+                        let Some(guard) = exit_guard_cache.get(&exit_state_id).cloned() else {
+                            return;
+                        };
+                        let context = GuardContext::new(
+                            service_target,
+                            state_machine_id,
+                            curr_state_id.state(),
+                            exit_state_id,
+                        );
+                        commands.queue(Self::handle_guarded_transition(
+                            guard,
+                            context,
+                            move || {
+                                handle_exit_transition(
+                                    state_machine_id,
+                                    curr_state_id,
+                                    exit_state_id,
+                                )
+                            },
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+            }
         };
     }
 
-    fn handle_next_trigger(
+    fn handle_guarded_transition<F, C>(
+        guard: CompiledGuard,
+        context: GuardContext,
+        handle_transition: F,
+    ) -> impl Command<Result<()>>
+    where
+        F: FnOnce() -> C + Send + Sync + 'static,
+        C: Command<Result<()>> + 'static,
+    {
+        move |world: &mut World| -> Result<()> {
+            if guard.run(world, context)? {
+                return handle_transition().apply(world);
+            }
+            Ok(())
+        }
+    }
+
+    fn handle_state_transition(
         &mut self,
         commands: &mut Commands,
         state_machine_id: Entity,
@@ -333,7 +449,7 @@ impl HsmStateMachine {
             return;
         };
 
-        let next_state_table = Self::calculate_transition_table(
+        let next_state_table = Self::build_transition_plan(
             self.curr_state_id(),
             exit_path,
             enter_path,
@@ -349,7 +465,7 @@ impl HsmStateMachine {
         }
     }
 
-    fn calculate_transition_table(
+    fn build_transition_plan(
         curr_state_id: HsmStateId,
         mut exit_path: Vec<Entity>,
         enter_path: Vec<Entity>,
@@ -532,7 +648,7 @@ pub enum Transition {
 }
 
 struct TransitionContext {
-    state_context: StateActionContext,
+    state_context: ActionContext,
     state_machine_id: Entity,
     curr_state_id: HsmStateId,
     hsm_state: StateLifecycle,
@@ -557,10 +673,9 @@ impl StateLifecycle {
     fn run_lifecycle_system<T: Component + std::ops::Deref<Target = String>>(
         world: &mut DeferredWorld,
         state_id: Entity,
-        state_context: StateActionContext,
+        state_context: ActionContext,
     ) {
-        let Some(action_system_id) = StateActionRegistry::get_system_id::<T>(world, state_id)
-        else {
+        let Some(action_system_id) = ActionRegistry::get_action_id::<T>(world, state_id) else {
             return;
         };
         if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
@@ -603,12 +718,12 @@ impl StateLifecycle {
             .get::<FsmGraph>(fsm_config.graph_id)
             .map(|graph| graph.init_state())
         else {
-            error!("{}", StateMachineError::GraphNotFound(fsm_config.graph_id));
+            error!("{}", StateMachineError::GraphMissing(fsm_config.graph_id));
             return;
         };
 
         world.commands().entity(state_machine_id).insert(
-            crate::fsm::state_machine::FsmStateMachine::new(
+            crate::fsm::state_machine::FsmStateMachine::with(
                 fsm_config.graph_id,
                 init_state,
                 #[cfg(feature = "history")]
@@ -671,7 +786,7 @@ impl StateLifecycle {
         state_machine.push_history(HistoricalNode::new(curr_state_id, hsm_state.into()));
 
         let state_context =
-            StateActionContext::new(service_target, state_machine_id, curr_state_id.state());
+            ActionContext::new(service_target, state_machine_id, curr_state_id.state());
 
         Some(TransitionContext {
             state_machine_id,
@@ -787,23 +902,23 @@ impl StateLifecycle {
         };
 
         world.commands().queue(move |world: &mut World| {
-            let (mut entites, mut commands) = world.entities_and_commands();
-            let Ok(mut state_machine_ref) = entites.get_mut(state_machine_id) else {
+            let (mut entities, mut commands) = world.entities_and_commands();
+            let Ok(mut state_machine_ref) = entities.get_mut(state_machine_id) else {
                 return;
             };
             let Some(mut state_machine) = state_machine_ref.get_mut::<HsmStateMachine>() else {
                 return;
             };
-            let mut enitty_commands = commands.entity(state_machine_id);
+            let mut entity_commands = commands.entity(state_machine_id);
             while let Some(Transition::Next((curr_state, on_state))) =
                 state_machine.transition_queue.pop_front()
             {
-                enitty_commands.queue(move |mut enitity_mut: EntityWorldMut<'_>| {
-                    let Some(mut state_machine) = enitity_mut.get_mut::<HsmStateMachine>() else {
+                entity_commands.queue(move |mut entity_mut: EntityWorldMut<'_>| {
+                    let Some(mut state_machine) = entity_mut.get_mut::<HsmStateMachine>() else {
                         return;
                     };
                     state_machine.set_curr_state(curr_state);
-                    enitity_mut.insert(on_state);
+                    entity_mut.insert(on_state);
                 });
             }
         });

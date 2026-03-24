@@ -21,6 +21,28 @@ use bevy::{
 /// When a state machine enters a state with `StateData`, the components defined here
 /// are added to the target entity. When the state is exited, these components are removed.
 /// This allows for managing data that is specific to a particular state.
+///
+/// # Example
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// #
+/// #[derive(Component)]
+/// struct PlayerIdleMarker;
+///
+/// #[derive(Component)]
+/// struct PlayerSpeed(f32);
+///
+/// fn setup_player(mut commands: Commands) {
+///     // 在玩家进入"行走"状态时自动添加速度组件
+///     commands.spawn((
+///         FsmState,
+///         PlayerIdleMarker,
+///         StateDataBundle::new(PlayerSpeed(5.0)),
+///     ));
+/// }
+/// ```
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, Hash, Deref)]
 pub struct StateData(Vec<ComponentId>);
 
@@ -220,33 +242,33 @@ mod tests {
         let id2 = world.spawn((HsmState::default(), Name::new("StateB"))).id();
 
         let mut state_tree = StateTree::new(id1);
-        state_tree.add(id1, id2);
+        state_tree.with_child(id1, id2);
 
-        let state_matchine_id = world.spawn_empty().id();
-        world.entity_mut(state_matchine_id).insert((
-            HsmStateMachine::new(HsmStateId::new(state_matchine_id, id1), 10),
+        let state_machine_id = world.spawn_empty().id();
+        world.entity_mut(state_machine_id).insert((
+            HsmStateMachine::with(HsmStateId::new(state_machine_id, id1), 10),
             StateLifecycle::default(),
             state_tree,
         ));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(state_machine.contains::<ComponentA>());
         assert!(state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());
 
-        world.trigger(HsmTrigger::with_sub(state_matchine_id, id2));
+        world.trigger(HsmTrigger::to_sub(state_machine_id, id2));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(!state_machine.contains::<ComponentA>());
         assert!(!state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());
 
-        world.trigger(HsmTrigger::with_super(state_matchine_id));
+        world.trigger(HsmTrigger::to_super(state_machine_id));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(state_machine.contains::<ComponentA>());
         assert!(state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());
@@ -258,11 +280,11 @@ mod tests {
         use crate::{
             fsm::{FsmState, event::*, graph::FsmGraph, state_machine::FsmStateMachine},
             guards::GuardRegistry,
-            prelude::{ActionDispatch, StateActionRegistry},
+            prelude::{ActionDispatch, ActionRegistry},
         };
 
         let mut app = App::new();
-        app.init_resource::<StateActionRegistry>();
+        app.init_resource::<ActionRegistry>();
         app.init_resource::<ActionDispatch>();
         app.init_resource::<GuardRegistry>();
 
@@ -289,31 +311,31 @@ mod tests {
         let id2 = world.spawn((FsmState::default(), Name::new("StateB"))).id();
 
         let mut graph = FsmGraph::new(id1);
-        graph.add(id1, id2).add(id2, id1);
+        graph.with_add(id1, id2).with_add(id2, id1);
 
-        let state_matchine_id = world.spawn_empty().id();
+        let state_machine_id = world.spawn_empty().id();
         world
-            .entity_mut(state_matchine_id)
-            .insert((FsmStateMachine::new(state_matchine_id, id1, 10), graph));
+            .entity_mut(state_machine_id)
+            .insert((FsmStateMachine::with(state_machine_id, id1, 10), graph));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(state_machine.contains::<ComponentA>());
         assert!(state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());
 
-        world.trigger(FsmTrigger::with_next(state_matchine_id, id2));
+        world.trigger(FsmTrigger::with_next(state_machine_id, id2));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(!state_machine.contains::<ComponentA>());
         assert!(!state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());
 
-        world.trigger(FsmTrigger::with_next(state_matchine_id, id1));
+        world.trigger(FsmTrigger::with_next(state_machine_id, id1));
 
         world.flush();
-        let state_machine = world.entity(state_matchine_id);
+        let state_machine = world.entity(state_machine_id);
         assert!(state_machine.contains::<ComponentA>());
         assert!(state_machine.contains::<ComponentB>());
         assert!(!state_machine.contains::<ComponentC>());

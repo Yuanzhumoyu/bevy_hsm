@@ -5,7 +5,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::{context::StateActionId, error::StateMachineError};
+use crate::{context::ActionId, error::StateMachineError};
 
 /// 注册一次性用于运行[`OnEnterSystem`] [`OnExitSystem`]的系统
 ///
@@ -14,19 +14,19 @@ use crate::{context::StateActionId, error::StateMachineError};
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn on_enter(entity:In<StateActionContext>) {
+/// # fn on_enter(entity:In<ActionContext>) {
 /// #     println!("进入系统");
 /// # }
-/// # fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
+/// # fn foo(mut commands:Commands, mut action_registry: ResMut<ActionRegistry>) {
 /// let system_id = commands.register_system(on_enter);
 /// action_registry.insert("on_enter", system_id);
 /// # }
 /// ```
 ///
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct StateActionRegistry(pub(super) HashMap<String, StateActionId>);
+pub struct ActionRegistry(pub(super) HashMap<String, ActionId>);
 
-impl StateActionRegistry {
+impl ActionRegistry {
     /// 注册系统
     ///
     /// Register system
@@ -34,19 +34,15 @@ impl StateActionRegistry {
     /// ```rust
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// # fn on_enter(entity:In<StateActionContext>) {
+    /// # fn on_enter(entity:In<ActionContext>) {
     /// #     println!("进入系统");
     /// # }
-    /// fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
+    /// fn foo(mut commands:Commands, mut action_registry: ResMut<ActionRegistry>) {
     ///     let system_id = commands.register_system(on_enter);
     ///     action_registry.insert("on_enter", system_id);
     /// }
     /// ```
-    pub fn insert(
-        &mut self,
-        name: impl Into<String>,
-        system_id: StateActionId,
-    ) -> Option<StateActionId> {
+    pub fn insert(&mut self, name: impl Into<String>, system_id: ActionId) -> Option<ActionId> {
         self.0.insert(name.into(), system_id)
     }
 
@@ -57,11 +53,11 @@ impl StateActionRegistry {
     /// ```rust
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// fn foo(mut commands:Commands, mut action_registry: ResMut<StateActionRegistry>) {
+    /// fn foo(mut commands:Commands, mut action_registry: ResMut<ActionRegistry>) {
     ///     action_registry.remove("on_enter");
     /// }
     /// ```
-    pub fn remove<Q>(&mut self, name: &Q) -> Option<StateActionId>
+    pub fn remove<Q>(&mut self, name: &Q) -> Option<ActionId>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
@@ -69,19 +65,19 @@ impl StateActionRegistry {
     }
 
     /// 获取系统
-    pub fn get<Q>(&self, name: &Q) -> Option<&StateActionId>
+    pub fn get<Q>(&self, name: &Q) -> Option<&ActionId>
     where
         Q: Hash + Equivalent<String> + ?Sized,
     {
         self.0.get(name)
     }
 
-    pub(crate) fn get_system_id<T: Component + std::ops::Deref<Target = String>>(
+    pub(crate) fn get_action_id<T: Component + std::ops::Deref<Target = String>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
-    ) -> Option<StateActionId> {
+    ) -> Option<ActionId> {
         let on_system = world.get::<T>(state_id)?;
-        let system = world.resource::<StateActionRegistry>();
+        let system = world.resource::<ActionRegistry>();
         let system_name: &str = on_system.as_ref();
         let id = system.get(system_name).cloned();
         if id.is_none() {
@@ -94,6 +90,12 @@ impl StateActionRegistry {
             )
         }
         id
+    }
+}
+
+impl<S: Into<String>> Extend<(S, ActionId)> for ActionRegistry {
+    fn extend<T: IntoIterator<Item = (S, ActionId)>>(&mut self, iter: T) {
+        self.0.extend(iter.into_iter().map(|(s, a)| (s.into(), a)));
     }
 }
 
@@ -141,7 +143,7 @@ define_state_action_component! {
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
-    /// # fn add(contexts:In<Vec<StateActionContext>>)->Option<Vec<StateActionContext>>{None}
+    /// # fn add(contexts:In<Vec<ActionContext>>)->Option<Vec<ActionContext>>{None}
     /// # fn my_fn(){
     /// # let mut app = App::new();
     ///

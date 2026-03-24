@@ -4,30 +4,52 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, token};
 
-use crate::state_config::StateConfig;
+use crate::{action_id::ActionRegistry, hsm::ConfigFn, state_config::StateConfig};
 
 pub fn hsm_tree_impl(item: TokenStream) -> TokenStream {
-    let hsm_tree: HsmTreeImpl = syn::parse_macro_input!(item as StateNode).into();
+    let HsmTreeImpl { tree, config_fn } = syn::parse_macro_input!(item as HsmTreeImpl);
     quote! {
         bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands|{
             use bevy_hsm::prelude::*;
             let mut commands = entity_commands.commands();
-            #hsm_tree
+            #tree
             entity_commands.insert(state_tree)
+            #config_fn
         })
     }
     .into()
 }
 
+struct HsmTreeImpl {
+    tree: HsmTree,
+    config_fn: Option<ConfigFn>,
+}
+
+impl Parse for HsmTreeImpl {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let tree = input.parse::<StateNode>()?.into();
+        let config_fn = if input.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+            Some(input.parse()?)
+        } else {
+            None
+        };
+
+        Ok(Self { tree, config_fn })
+    }
+}
+
 #[derive(Debug)]
-pub(crate) struct HsmTreeImpl {
-    states: Vec<StateNodeImpl>,
+pub(crate) struct HsmTree {
+    pub(crate) states: Vec<StateNodeImpl>,
+    action_registry: ActionRegistry,
     transitions: TransitionImpl,
 }
 
-impl From<StateNode> for HsmTreeImpl {
+impl From<StateNode> for HsmTree {
     fn from(value: StateNode) -> Self {
         let mut states = Vec::new();
+        let mut action_registry = Vec::new();
         let mut transitions = Vec::new();
         let mut state_buffer = vec![value];
         let mut state_buffer2 = Vec::new();
@@ -43,6 +65,7 @@ impl From<StateNode> for HsmTreeImpl {
                 transitions.push(start..start + state_children.len());
                 start += state_children.len();
                 state_buffer2.extend(state_children);
+                config.to_actions(&mut action_registry);
                 states.push(StateNodeImpl {
                     name,
                     config,
@@ -54,17 +77,20 @@ impl From<StateNode> for HsmTreeImpl {
         Self {
             states,
             transitions: TransitionImpl(transitions),
+            action_registry: ActionRegistry(action_registry),
         }
     }
 }
 
-impl quote::ToTokens for HsmTreeImpl {
+impl quote::ToTokens for HsmTree {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let Self {
             states,
             transitions,
+            action_registry,
         } = self;
         tokens.extend(quote::quote! {
+            #action_registry
             let ids = [#(commands.spawn((#states)).id()),*];
             let mut state_tree = StateTree::new(ids[0]);
             #transitions
@@ -84,11 +110,11 @@ impl quote::ToTokens for TransitionImpl {
             tokens.extend(match range.len() == 1 {
                 true => {
                     let index = range.start;
-                    quote::quote! {state_tree.with_add(ids[#id], ids[#index]);}
+                    quote::quote! {state_tree.with_child(ids[#id], ids[#index]);}
                 }
                 false => {
                     let Range { start, end } = range;
-                    quote::quote! {state_tree.with_adds(ids[#id], &ids[#start..#end]);}
+                    quote::quote! {state_tree.with_children(ids[#id], &ids[#start..#end]);}
                 }
             });
         }
@@ -147,8 +173,8 @@ impl Parse for StateNode {
 }
 
 #[derive(Debug)]
-struct StateNodeImpl {
-    name: Option<Ident>,
+pub(crate) struct StateNodeImpl {
+    pub(crate) name: Option<Ident>,
     config: StateConfig,
     components: Punctuated<Expr, Token![,]>,
 }

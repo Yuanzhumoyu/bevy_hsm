@@ -15,8 +15,8 @@ pub struct ComponentC;
 #[derive(Component)]
 pub struct ComponentD;
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -33,7 +33,7 @@ fn b(_context: In<GuardContext>) -> bool {
 fn setup(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<StateActionRegistry>,
+    mut action_registry: ResMut<ActionRegistry>,
 ) {
     let id = commands.register_system(a);
     guard_registry.insert("a", id);

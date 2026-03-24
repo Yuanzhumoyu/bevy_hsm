@@ -22,7 +22,7 @@
 //!     
 //!     // 添加子状态
 //!     let child_state = commands.spawn(HsmState::default()).id();
-//!     state_tree.with_add(root_state, child_state)
+//!     state_tree.with_child(root_state, child_state)
 //!               .with_traversal(root_state, TraversalStrategy::default());
 //!     
 //!     // 查询子状态
@@ -32,7 +32,7 @@
 //! }
 //! ```
 
-use std::fmt::Display;
+use std::{fmt::Display, ops::ControlFlow};
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
@@ -85,7 +85,7 @@ impl StateTree {
     /// let mut tree = StateTree::new(parent);
     /// tree
     ///     .with_traversal(parent, traversal)
-    ///     .with_add(parent, child);
+    ///     .with_child(parent, child);
     /// # }
     pub fn with_traversal(&mut self, target: Entity, traversal: TraversalStrategy) -> &mut Self {
         if let Some(node) = self.tree.get_mut(&target) {
@@ -94,56 +94,19 @@ impl StateTree {
         self
     }
 
-    /// 向状态树中添加父子关系
-    ///
-    /// # 参数
-    /// * `from` - 父状态实体
-    /// * `to` - 子状态实体
-    /// * `traversal` - 子状态的遍历策略
-    ///
-    /// # 返回值
-    /// 成功添加返回 `true`，失败返回 `false`
-    ///
-    /// # 失败条件
-    /// - 父状态不存在于树中
-    /// - 形成循环引用（子状态已经是父状态的祖先）
-    ///
-    /// # 示例
-    /// ```
-    /// # use bevy::prelude::*;
-    /// # use bevy_hsm::prelude::*;
-    /// # fn example(mut commands: Commands) {
-    /// let parent = commands.spawn(HsmState::default()).id();
-    /// let child = commands.spawn(HsmState::default()).id();
-    ///
-    /// let mut state_tree = StateTree::new(parent);
-    /// // 添加成功
-    /// assert!(state_tree.add(parent, child));
-    ///
-    /// // 添加失败（parent不在树中）
-    /// let orphan = commands.spawn(HsmState::default()).id();
-    /// assert!(!state_tree.add(orphan, child));
-    /// # }
-    /// ```
-    pub fn add(&mut self, from: Entity, to: Entity) -> bool {
+    pub fn with_child(&mut self, from: Entity, to: Entity) -> &mut Self {
         if self.has_link(to, from) {
-            return false;
+            return self;
         }
 
         if let Some(node) = self.tree.get_mut(&from) {
             node.push(to);
             self.tree.insert(to, StateTreeNode::new(Some(from)));
-            return true;
         }
-        false
-    }
-
-    pub fn with_add(&mut self, from: Entity, to: Entity) -> &mut Self {
-        self.add(from, to);
         self
     }
 
-    pub fn with_adds(&mut self, from: Entity, to: &[Entity]) -> &mut Self {
+    pub fn with_children(&mut self, from: Entity, to: &[Entity]) -> &mut Self {
         let to = to
             .iter()
             .filter(|to| !self.has_link(from, **to))
@@ -314,24 +277,20 @@ impl StateTree {
         // 收集从 `to` 到根的路径
         let mut to_path: Vec<Entity> = std::iter::once(to).chain(self.path_iter(to)).collect();
 
-        let lca_index = {
-            let mut lac = -1;
-            for (a, b) in from_path.iter().rev().zip(to_path.iter().rev()) {
-                if a != b {
-                    break;
-                }
-                lac += 1;
-            }
+        let lca_index = match from_path.iter().rev().zip(to_path.iter().rev()).try_fold(
+            0,
+            |acc, (a, b)| match a != b {
+                false => ControlFlow::Continue(acc + 1),
+                true => ControlFlow::Break(acc),
+            },
+        ) {
+            ControlFlow::Continue(i) => i,
+            ControlFlow::Break(i) => i,
+        } - 1;
 
-            lac
-        };
-
-        (lca_index != -1).then(|| {
-            let index = lca_index as usize;
-            from_path.truncate(from_path.len() - index);
-            to_path.truncate(to_path.len() - index);
-            (from_path, to_path)
-        })
+        from_path.truncate(from_path.len() - lca_index);
+        to_path.truncate(to_path.len() - lca_index);
+        Some((from_path, to_path))
     }
 }
 
@@ -423,25 +382,29 @@ mod tests {
 
         tree.with_traversal(v[0], traversal);
 
-        assert!(tree.add(v[0], v[1]));
-        assert!(tree.add(v[0], v[1]));
-        assert!(tree.add(v[0], v[1]));
+        tree.with_child(v[0], v[1]);
+        tree.with_child(v[0], v[1]);
+        tree.with_child(v[0], v[1]);
         assert_eq!(tree.get(v[0]), Some([v[1]].as_slice()));
 
-        assert!(!tree.add(v[2], v[1]));
+        // can't add from a state not in the tree
+        tree.with_child(v[2], v[1]);
+        assert!(!tree.contains(v[2]));
 
-        assert!(!tree.add(v[1], v[0]));
+        // can't create circular dependency
+        tree.with_child(v[1], v[0]);
+        assert!(!tree.has_link(v[1], v[0]));
 
-        assert!(tree.add(v[0], v[2]));
-        assert!(tree.add(v[1], v[3]));
-        assert!(tree.add(v[2], v[4]));
-        assert!(tree.add(v[3], v[6]));
-        assert!(tree.add(v[4], v[7]));
+        tree.with_child(v[0], v[2]);
+        tree.with_child(v[1], v[3]);
+        tree.with_child(v[2], v[4]);
+        tree.with_child(v[3], v[6]);
+        tree.with_child(v[4], v[7]);
 
         let new_tree = tree.remove(v[2], v[4]);
         assert_eq!(
             new_tree,
-            Some(StateTree::new(v[4]).with_add(v[4], v[7]).clone())
+            Some(StateTree::new(v[4]).with_child(v[4], v[7]).clone())
         );
     }
 
@@ -452,8 +415,8 @@ mod tests {
             .collect::<Vec<_>>();
         let mut tree = StateTree::new(v[0]);
 
-        assert!(tree.add(v[0], v[1]));
-        assert!(tree.add(v[1], v[2]));
+        tree.with_child(v[0], v[1]);
+        tree.with_child(v[1], v[2]);
 
         assert!(!tree.has_link(v[1], v[0]));
         assert!(!tree.has_link(v[2], v[1]));
@@ -467,8 +430,8 @@ mod tests {
             .collect::<Vec<_>>();
         let mut tree = StateTree::new(v[0]);
 
-        assert!(tree.add(v[0], v[1]));
-        assert!(tree.add(v[1], v[2]));
+        tree.with_child(v[0], v[1]);
+        tree.with_child(v[1], v[2]);
 
         assert_eq!(tree.path_iter(v[2]).collect::<Vec<_>>(), vec![v[1], v[0]]);
     }
@@ -494,7 +457,7 @@ mod tests {
             let mut tree = StateTree::new(v[0]);
             tree.with_traversal(v[0], traversal);
             for window in v.windows(2) {
-                assert!(tree.add(window[0], window[1]));
+                tree.with_child(window[0], window[1]);
             }
             if v.len() > 1 {
                 let last = v.last().expect("Path should not be empty");
@@ -507,31 +470,28 @@ mod tests {
 
     #[test]
     fn test_lca() {
-        let enititys = (0..5u32)
+        let entitys = (0..5u32)
             .filter_map(Entity::from_raw_u32)
             .collect::<Vec<_>>();
-        let mut tree = StateTree::new(enititys[0]);
-        tree.add(enititys[0], enititys[1]);
-        tree.add(enititys[0], enititys[2]);
-        tree.add(enititys[1], enititys[3]);
-        tree.add(enititys[2], enititys[4]);
+        let mut tree = StateTree::new(entitys[0]);
+        tree.with_child(entitys[0], entitys[1]);
+        tree.with_child(entitys[0], entitys[2]);
+        tree.with_child(entitys[1], entitys[3]);
+        tree.with_child(entitys[2], entitys[4]);
 
-        let (exit_path, enter_path) = tree.find_lca_and_paths(enititys[3], enititys[4]).unwrap();
+        let (exit_path, enter_path) = tree.find_lca_and_paths(entitys[3], entitys[4]).unwrap();
 
-        assert_eq!(exit_path, vec![enititys[3], enititys[1], enititys[0]]);
-        assert_eq!(enter_path, vec![enititys[4], enititys[2], enititys[0]]);
+        assert_eq!(exit_path, vec![entitys[3], entitys[1], entitys[0]]);
+        assert_eq!(enter_path, vec![entitys[4], entitys[2], entitys[0]]);
 
         assert_eq!(
-            tree.find_lca_and_paths(enititys[1], enititys[2]),
-            Some((
-                vec![enititys[1], enititys[0]],
-                vec![enititys[2], enititys[0]]
-            ))
+            tree.find_lca_and_paths(entitys[1], entitys[2]),
+            Some((vec![entitys[1], entitys[0]], vec![entitys[2], entitys[0]]))
         );
 
         assert_eq!(
-            tree.find_lca_and_paths(enititys[1], enititys[3]),
-            Some((vec![enititys[1]], vec![enititys[3], enititys[1]]))
+            tree.find_lca_and_paths(entitys[1], entitys[3]),
+            Some((vec![entitys[1]], vec![entitys[3], entitys[1]]))
         );
     }
 }

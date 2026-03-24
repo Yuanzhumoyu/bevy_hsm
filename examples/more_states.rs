@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -19,7 +19,7 @@ fn is_down(_entity: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool 
 fn register_condition(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<StateActionRegistry>,
+    mut action_registry: ResMut<ActionRegistry>,
 ) {
     let id = commands.register_system(is_up);
     guard_registry.insert("is_up", id);
@@ -79,16 +79,16 @@ fn setup(mut commands: Commands) {
     let mut state_tree = StateTree::new(start_id);
     state_tree
         .with_traversal(start_id, traversal.clone())
-        .with_add(start_id, id1)
+        .with_child(start_id, id1)
         .with_traversal(id1, traversal.clone())
-        .with_add(id1, id2)
+        .with_child(id1, id2)
         .with_traversal(id2, traversal)
-        .with_add(id2, id3);
+        .with_child(id2, id3);
 
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
         state_tree,
-        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
+        HsmStateMachine::with(HsmStateId::new(state_machine, start_id), 10),
         Name::new("More States"),
         StateLifecycle::default(),
     ));

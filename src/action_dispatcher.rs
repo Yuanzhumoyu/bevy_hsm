@@ -12,7 +12,7 @@ use bevy::{
 };
 
 use crate::{
-    action_dispatcher::system_state_trait::ExpandScheduleLabelFuction, context::*,
+    action_dispatcher::system_state_trait::ExpandScheduleLabelFunction, context::*,
     error::StateMachineError, state_actions::*,
 };
 
@@ -32,18 +32,14 @@ use crate::{
 ///             * `OnExit`  : 停止执行该状态
 ///             - `OnExit`  : Stop executing this state
 pub trait IntoActionSystem<M> {
-    fn into_system(
-        self,
-    ) -> impl IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M>;
+    fn into_system(self) -> impl IntoSystem<In<Vec<ActionContext>>, Option<Vec<ActionContext>>, M>;
 }
 
 impl<F, M> IntoActionSystem<M> for F
 where
-    F: IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M>,
+    F: IntoSystem<In<Vec<ActionContext>>, Option<Vec<ActionContext>>, M>,
 {
-    fn into_system(
-        self,
-    ) -> impl IntoSystem<In<Vec<StateActionContext>>, Option<Vec<StateActionContext>>, M> {
+    fn into_system(self) -> impl IntoSystem<In<Vec<ActionContext>>, Option<Vec<ActionContext>>, M> {
         self
     }
 }
@@ -51,7 +47,7 @@ where
 pub trait SystemState {
     fn add_action_system<M>(
         &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFunction + Default,
         action_name: impl Into<String>,
         system: impl IntoActionSystem<M>,
     ) -> &mut Self;
@@ -60,7 +56,7 @@ pub trait SystemState {
 impl SystemState for App {
     fn add_action_system<M>(
         &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFuction + Default,
+        schedule: impl ScheduleLabel + ExpandScheduleLabelFunction + Default,
         action_name: impl Into<String>,
         system: impl IntoActionSystem<M>,
     ) -> &mut Self {
@@ -168,19 +164,19 @@ pub struct StateActionBuffer {
     /// 当前帧状态组
     ///
     /// Current frame status group
-    pub curr: HashSet<StateActionContext>,
+    pub curr: HashSet<ActionContext>,
     /// 下一帧状态组
     ///
     /// Next frame status group
-    pub next: HashSet<StateActionContext>,
+    pub next: HashSet<ActionContext>,
     /// 过滤器: 用于筛选掉下一帧的状态
     ///
     /// Filter: used to filter out the next frame's status
-    filter: HashSet<StateActionContext>,
+    filter: HashSet<ActionContext>,
     /// 拦截器: 用于筛选掉当前帧的状态
     ///
     /// Interceptor: Use to filter out the current frame's status
-    interceptor: HashSet<StateActionContext>,
+    interceptor: HashSet<ActionContext>,
 }
 
 impl StateActionBuffer {
@@ -188,7 +184,7 @@ impl StateActionBuffer {
     ///
     /// Get the current state group
     #[inline(always)]
-    pub fn get_curr(&self) -> Vec<StateActionContext> {
+    pub fn current_actions(&self) -> Vec<ActionContext> {
         self.curr.iter().copied().collect()
     }
 
@@ -221,47 +217,35 @@ impl StateActionBuffer {
     ///
     /// Add a context
     #[inline(always)]
-    pub fn add(&mut self, context: StateActionContext) {
+    pub fn add(&mut self, context: ActionContext) {
         if self.interceptor.contains(&context) {
             return;
         }
         self.next.insert(context);
     }
 
-    /// 添加多个上下文
-    ///
-    /// Add multiple contexts
-    #[inline(always)]
-    pub fn adds<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = StateActionContext>,
-    {
-        self.next
-            .extend(iter.into_iter().filter(|c| !self.interceptor.contains(c)));
-    }
-
     /// 添加一个过滤器
     ///
     /// Add a filter
-    pub fn add_filter(&mut self, context: StateActionContext) {
+    pub fn add_filter(&mut self, context: ActionContext) {
         self.filter.insert(context);
     }
 
     /// 添加一个拦截器
     ///
     /// Add an interceptor
-    pub fn add_interceptor(&mut self, context: StateActionContext) {
+    pub fn add_interceptor(&mut self, context: ActionContext) {
         self.interceptor.insert(context);
     }
 
-    pub fn remove_filter(&mut self, context: StateActionContext) {
+    pub fn remove_filter(&mut self, context: ActionContext) {
         self.filter.remove(&context);
     }
 
     /// 移除一个拦截器
     ///
     /// Remove an interceptor
-    pub fn remove_interceptor(&mut self, context: StateActionContext) {
+    pub fn remove_interceptor(&mut self, context: ActionContext) {
         self.interceptor.remove(&context);
     }
 
@@ -296,10 +280,7 @@ impl StateActionBuffer {
             return;
         };
 
-        (get_buffer_scope)(
-            unsafe { world.as_unsafe_world_cell().world_mut() },
-            Box::new(f),
-        );
+        (get_buffer_scope)(world, Box::new(f));
     }
 }
 
@@ -313,13 +294,20 @@ impl Debug for StateActionBuffer {
     }
 }
 
+impl Extend<ActionContext> for StateActionBuffer {
+    fn extend<T: IntoIterator<Item = ActionContext>>(&mut self, iter: T) {
+        self.next
+            .extend(iter.into_iter().filter(|c| !self.interceptor.contains(c)));
+    }
+}
+
 /// 状态机系统运行模式
 ///
 /// State machine system run mode
 fn action_system_run_mode<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(In<Option<Vec<StateActionContext>>>, ResMut<ScheduleActionBuffers<T>>) {
-    move |state_contexts: In<Option<Vec<StateActionContext>>>,
+) -> impl Fn(In<Option<Vec<ActionContext>>>, ResMut<ScheduleActionBuffers<T>>) {
+    move |state_contexts: In<Option<Vec<ActionContext>>>,
           mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
         let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) else {
             return;
@@ -327,7 +315,7 @@ fn action_system_run_mode<T: ScheduleLabel>(
         if let bevy::prelude::In(Some(state_contexts)) = state_contexts
             && !state_contexts.is_empty()
         {
-            buffer.adds(state_contexts);
+            buffer.extend(state_contexts);
         }
         buffer.update_interceptor();
     }
@@ -353,11 +341,11 @@ fn run_action_system_condition<T: ScheduleLabel>(
 /// Update state machine system cache
 fn update_buffer<T: ScheduleLabel>(
     action_name: Arc<String>,
-) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) -> Vec<StateActionContext> {
-    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| -> Vec<StateActionContext> {
+) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) -> Vec<ActionContext> {
+    move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| -> Vec<ActionContext> {
         if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
             buffer.update();
-            buffer.get_curr()
+            buffer.current_actions()
         } else {
             Vec::new()
         }
@@ -372,7 +360,7 @@ pub(super) mod system_state_trait {
     use crate::action_dispatcher::IntoActionSystem;
 
     /// 系统状态
-    pub trait ExpandScheduleLabelFuction: Send + Sync + 'static {
+    pub trait ExpandScheduleLabelFunction: Send + Sync + 'static {
         fn add_system_info(
             &self,
             world: &mut World,
@@ -388,7 +376,7 @@ pub(super) mod system_state_trait {
     }
 }
 
-impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFuction for T {
+impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFunction for T {
     #[inline]
     fn add_system_info(&self, world: &mut World, action_name: Arc<String>) -> Result<(), String> {
         let mut buffers = world.get_resource_or_init::<ScheduleActionBuffers<T>>();

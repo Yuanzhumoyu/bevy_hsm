@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use bevy_hsm::prelude::*;
+use bevy_hsm::{prelude::*, system_registry};
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
@@ -13,9 +13,9 @@ pub struct Count(usize);
 
 impl Count {
     fn action(
-        states: In<Vec<StateActionContext>>,
+        states: In<Vec<ActionContext>>,
         mut query: Query<(&Name, &mut Count)>,
-    ) -> Option<Vec<StateActionContext>> {
+    ) -> Option<Vec<ActionContext>> {
         let mut iter = query.iter_many_mut(states.0.iter().map(|a| a.service_target));
         while let Some((name, mut count)) = iter.fetch_next() {
             count.0 += 1;
@@ -52,17 +52,17 @@ impl Switch {
 fn register_condition(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<StateActionRegistry>,
+    mut action_registry: ResMut<ActionRegistry>,
 ) {
-    let id = commands.register_system(Switch::condition_with_open);
-    guard_registry.insert("is_open", id);
-    let id = commands.register_system(Switch::condition_with_close);
-    guard_registry.insert("is_close", id);
+    system_registry!(<commands,guard_registry>[
+        "is_open"=>Switch::condition_with_open,
+        "is_close"=>Switch::condition_with_close
+    ]);
 
-    let id = commands.register_system(debug_on_state("Entering state."));
-    action_registry.insert("debug_on_enter", id);
-    let id = commands.register_system(debug_on_state("Exiting state."));
-    action_registry.insert("debug_on_exit", id);
+    system_registry!(<commands,action_registry>[
+        "debug_on_enter"=> debug_on_state("Entering state."),
+        "debug_on_exit"=> debug_on_state("Exiting state.")
+    ]);
 }
 
 fn startup(mut commands: Commands) {
@@ -97,10 +97,10 @@ fn startup(mut commands: Commands) {
     let mut state_tree = StateTree::new(start_id);
     state_tree
         .with_traversal(start_id, traversal)
-        .with_add(start_id, id);
+        .with_child(start_id, id);
 
     commands.entity(state_machine).insert((
-        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
+        HsmStateMachine::with(HsmStateId::new(state_machine, start_id), 10),
         Name::new("Switch Counter"),
         StateLifecycle::default(),
         Switch::Close,

@@ -7,17 +7,17 @@ enum Switch {
     Close,
 }
 
-fn debug_on_state(info: &str) -> impl Fn(In<StateActionContext>, Query<&Name, With<HsmState>>) {
-    move |context: In<StateActionContext>, query: Query<&Name, With<HsmState>>| {
+fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
+    move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
     }
 }
 
 fn debug_hello_world(
-    contexts: In<Vec<StateActionContext>>,
+    contexts: In<Vec<ActionContext>>,
     mut query_switch: Query<&mut Switch>,
-) -> Option<Vec<StateActionContext>> {
+) -> Option<Vec<ActionContext>> {
     let mut switch = query_switch.get_mut(contexts.0[0].service_target).unwrap();
     println!("Hello World {:?}", switch.as_ref());
     *switch = match *switch {
@@ -40,7 +40,7 @@ fn is_close(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
 fn register_condition(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<StateActionRegistry>,
+    mut action_registry: ResMut<ActionRegistry>,
 ) {
     let id = commands.register_system(is_open);
     guard_registry.insert("is_open", id);
@@ -77,11 +77,11 @@ fn setup(mut commands: Commands) {
         .id();
 
     let mut state_tree = StateTree::new(start_id);
-    state_tree.with_add(start_id, id);
+    state_tree.with_child(start_id, id);
 
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
-        HsmStateMachine::new(HsmStateId::new(state_machine, start_id), 10),
+        HsmStateMachine::with(HsmStateId::new(state_machine, start_id), 10),
         Name::new("More States"),
         StateLifecycle::default(),
         state_tree,

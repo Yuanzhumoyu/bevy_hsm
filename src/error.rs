@@ -34,7 +34,7 @@ pub enum StateMachineError {
     /// A required `FsmStateMachine` component was not found on an entity.
     FsmStateMachineMissing(Entity),
     /// A required `FsmGraph` component was not found on an entity.
-    GraphNotFound(Entity),
+    GraphMissing(Entity),
     /// A state was not found within the `FsmGraph`.
     StateNotInGraph { graph: Entity, state: Entity },
     /// An attempt was made to transition to a target that is not a valid state in the graph.
@@ -127,7 +127,7 @@ impl fmt::Display for StateMachineError {
                     entity
                 )
             }
-            StateMachineError::GraphNotFound(graph_entity) => {
+            StateMachineError::GraphMissing(graph_entity) => {
                 write!(
                     f,
                     "FsmGraph component not found on entity {:?}",
@@ -151,3 +151,5 @@ impl fmt::Display for StateMachineError {
         }
     }
 }
+
+impl std::error::Error for StateMachineError {}
