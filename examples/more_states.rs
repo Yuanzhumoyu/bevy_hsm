@@ -88,7 +88,11 @@ fn setup(mut commands: Commands) {
     let state_machine = commands.spawn_empty().id();
     commands.entity(state_machine).insert((
         state_tree,
-        HsmStateMachine::with(HsmStateId::new(state_machine, start_id), 10),
+        HsmStateMachine::with(
+            HsmStateId::new(state_machine, start_id),
+            #[cfg(feature = "history")]
+            10,
+        ),
         Name::new("More States"),
         StateLifecycle::default(),
     ));

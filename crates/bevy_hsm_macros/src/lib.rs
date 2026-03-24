@@ -1,21 +1,29 @@
 extern crate proc_macro;
 
+#[cfg(any(feature = "fsm", feature = "hsm"))]
+mod action_id;
+#[cfg(feature = "fsm")]
 mod fsm;
+#[cfg(feature = "fsm")]
 mod fsm_graph;
 mod guard_condition;
+#[cfg(feature = "hsm")]
 mod hsm;
+#[cfg(feature = "hsm")]
 mod hsm_tree;
 mod kw;
-mod state_config;
-mod action_id;
+#[cfg(any(feature = "fsm", feature = "hsm"))]
 mod machine_config;
+#[cfg(any(feature = "fsm", feature = "hsm"))]
+mod state_config;
 
 use proc_macro::TokenStream;
 
-/// Builds a complex combination guard condition for state transitions.
+/// Combines multiple guard conditions into a single complex condition for state transitions.
 ///
-/// This macro allows you to create nested logical conditions using `and`, `or`, and `not` operators.
-/// It is used within the `#[state]` attribute to define `guard_enter` or `guard_exit` conditions.
+/// This macro simplifies the creation of complex guard logic by allowing you to create nested
+/// logical conditions using `and`, `or`, and `not` operators. It is used within the `#[state]`
+/// attribute to define `guard_enter` or `guard_exit` conditions.
 ///
 /// # EBNF Syntax
 ///
@@ -46,7 +54,7 @@ use proc_macro::TokenStream;
 ///     let enter_condition = combination_condition!(and("is_a", not("is_b")));
 ///
 ///     commands.spawn(hsm!(
-///         #[state(guard_enter = enter_condition)]: Initial
+///         #[state(guard_enter = #enter_condition)]: Initial
 ///     ));
 /// }
 /// ```
@@ -69,7 +77,7 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 ///                        | ( 'init_state' | 'curr_state' ), '=', state_ref;
 /// state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
 /// state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
-/// state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']' 
+/// state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
 ///                   | '#[state_data(', component, { ',', component }, ')]';
 /// state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
 ///                         | ( 'on_update' | 'on_enter' | 'on_exit' ), '=', action_id
@@ -122,6 +130,7 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro]
+#[cfg(feature = "hsm")]
 pub fn hsm(item: TokenStream) -> TokenStream {
     hsm::hsm_impl(item)
 }
@@ -157,6 +166,7 @@ pub fn hsm(item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro]
+#[cfg(feature = "hsm")]
 pub fn hsm_tree(item: TokenStream) -> TokenStream {
     hsm_tree::hsm_tree_impl(item)
 }
@@ -170,7 +180,7 @@ pub fn hsm_tree(item: TokenStream) -> TokenStream {
 ///
 /// ```ebnf
 /// fsm ::= [ machine_config, ',', ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
-/// fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}', 
+/// fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}',
 ///               'transitions', ':', '{', transition, { ',', transition }, '}';
 /// state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
 /// transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
@@ -194,7 +204,6 @@ pub fn hsm_tree(item: TokenStream) -> TokenStream {
 ///             #[state]: A,
 ///             #[state]: B,
 ///         },
-///         },
 ///         transitions: {
 ///             A <=> B: event(MyEvent)
 ///         },
@@ -205,6 +214,7 @@ pub fn hsm_tree(item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro]
+#[cfg(feature = "fsm")]
 pub fn fsm(item: TokenStream) -> TokenStream {
     fsm::fsm_impl(item)
 }
@@ -218,9 +228,8 @@ pub fn fsm(item: TokenStream) -> TokenStream {
 ///
 /// ```ebnf
 /// fsm_graph! ::= fsm_graph, [ ',', config_fn ];
-/// 
+///
 /// (* The definitions for `fsm_graph` and `config_fn` are identical to those in the `fsm!` macro. *)
-/// ```
 /// ```
 ///
 /// # Example
@@ -247,6 +256,7 @@ pub fn fsm(item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro]
+#[cfg(feature = "fsm")]
 pub fn fsm_graph(item: TokenStream) -> TokenStream {
     fsm_graph::fsm_graph_impl(item)
 }

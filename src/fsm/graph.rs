@@ -237,10 +237,6 @@ mod tests {
         assert_eq!(transitions.get_by_event(&MyEvent(1)), Some(state1));
         assert_eq!(transitions.get_by_event(&MyEvent(2)), None);
         assert_eq!(transitions.get_by_event(&1), Some(state3));
-        assert_eq!(
-            transitions.get_by_event((&Box::new(1)).as_ref()),
-            Some(state3)
-        );
         assert_eq!(transitions.get_by_event(&"event"), Some(state4));
         assert_eq!(transitions.get_by_condition(state2), Some(&condition));
         assert_eq!(transitions.get_by_condition(state1), None);

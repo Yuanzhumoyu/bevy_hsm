@@ -7,7 +7,7 @@ use syn::{Expr, Token, parse::Parse, punctuated::Punctuated};
 use crate::{
     hsm_tree::{HsmTree, StateNode},
     kw,
-    machine_config::{StateMachineConfig, StateMachineConfigImpl},
+    machine_config::{ConfigFn, StateMachineConfig, StateMachineConfigImpl},
 };
 
 pub fn hsm_impl(item: TokenStream) -> TokenStream {
@@ -110,39 +110,6 @@ impl Parse for HsmImpl {
             components,
             config_fn,
             machine_config,
-        })
-    }
-}
-#[derive(Debug)]
-pub enum ConfigFn {
-    Closure(syn::ExprClosure),
-    Call(syn::ExprCall),
-    FnName(syn::Ident),
-}
-
-impl Parse for ConfigFn {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        input.parse::<Token![:]>()?;
-        if input.peek(syn::Ident) {
-            Ok(ConfigFn::FnName(input.parse()?))
-        } else {
-            Ok(ConfigFn::Closure(input.parse()?))
-        }
-    }
-}
-
-impl quote::ToTokens for ConfigFn {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        tokens.extend(match self {
-            ConfigFn::FnName(fn_call) => {
-                quote::quote! {#fn_call(entity_commands, &ids);}
-            }
-            ConfigFn::Closure(closure) => {
-                quote::quote! {(#closure)(entity_commands, &ids);}
-            }
-            ConfigFn::Call(call) => {
-                quote::quote! {#call;}
-            }
         })
     }
 }

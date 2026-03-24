@@ -11,12 +11,14 @@ use syn::{
 
 #[derive(Debug, Default)]
 pub(crate) struct StateMachineConfigImpl {
+    #[cfg(feature = "history")]
     pub history_capacity: Option<LitInt>,
     pub curr_state: usize,
     pub init_state: usize,
 }
 
 impl StateMachineConfigImpl {
+    #[cfg(feature = "history")]
     fn history_capacity(&self) -> proc_macro2::TokenStream {
         match &self.history_capacity {
             Some(history_capacity) => quote! {#history_capacity},
@@ -24,41 +26,54 @@ impl StateMachineConfigImpl {
         }
     }
 
+    #[cfg(feature = "hsm")]
     pub fn hsm_config(&self) -> proc_macro2::TokenStream {
         let Self {
             curr_state,
             init_state,
             ..
         } = self;
-        let history_capacity = self.history_capacity();
-
-        quote! {
-            HsmStateMachine::new(HsmStateId::new(structure_id,ids[#init_state]),HsmStateId::new(structure_id,ids[#curr_state]),
-                #[cfg(feature = "history")]
-                #history_capacity,
-            )
+        #[cfg(feature = "history")]
+        {
+            let history_capacity = self.history_capacity();
+            quote! {
+                HsmStateMachine::new(HsmStateId::new(structure_id,ids[#init_state]),HsmStateId::new(structure_id,ids[#curr_state]),#history_capacity)
+            }
+        }
+        #[cfg(not(feature = "history"))]
+        {
+            quote! {
+                HsmStateMachine::new(HsmStateId::new(structure_id,ids[#init_state]),HsmStateId::new(structure_id,ids[#curr_state]))
+            }
         }
     }
 
+    #[cfg(feature = "fsm")]
     pub fn fsm_config(&self) -> proc_macro2::TokenStream {
         let Self {
             curr_state,
             init_state,
             ..
         } = self;
-        let history_capacity = self.history_capacity();
-
-        quote! {
-            FsmStateMachine::new(structure_id,ids[#init_state],ids[#curr_state],
-                #[cfg(feature = "history")]
-                #history_capacity
-            )
+        #[cfg(feature = "history")]
+        {
+            let history_capacity = self.history_capacity();
+            quote! {
+                FsmStateMachine::new(structure_id,ids[#init_state],ids[#curr_state],#history_capacity)
+            }
+        }
+        #[cfg(not(feature = "history"))]
+        {
+            quote! {
+                FsmStateMachine::new(structure_id,ids[#init_state],ids[#curr_state])
+            }
         }
     }
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct StateMachineConfig {
+    #[cfg(feature = "history")]
     pub history_capacity: Option<LitInt>,
     pub curr_state: Option<StateRef>,
     pub init_state: Option<StateRef>,
@@ -69,12 +84,14 @@ impl Parse for StateMachineConfig {
         let content;
         parenthesized!(content in input);
         let attrs = Punctuated::<ConfigAttr, Token![,]>::parse_terminated(&content)?;
+        #[cfg(feature = "history")]
         let mut history_capacity: Option<LitInt> = None;
         let mut init_state: Option<StateRef> = None;
         let mut curr_state: Option<StateRef> = None;
 
         for attr in attrs {
             match attr {
+                #[cfg(feature = "history")]
                 ConfigAttr::HistoryCapacity(val) => {
                     if history_capacity.is_some() {
                         return Err(syn::Error::new(
@@ -106,6 +123,7 @@ impl Parse for StateMachineConfig {
         }
 
         Ok(Self {
+            #[cfg(feature = "history")]
             history_capacity,
             init_state,
             curr_state,
@@ -115,19 +133,13 @@ impl Parse for StateMachineConfig {
 
 impl StateMachineConfig {
     pub fn to_impl(
-        self,
+        &self,
         name_to_index: &HashMap<Ident, usize>,
         state_len: usize,
     ) -> syn::Result<StateMachineConfigImpl> {
-        let Self {
-            history_capacity,
-            curr_state,
-            init_state,
-        } = self;
-
-        let init_state = match init_state {
+        let init_state = match &self.init_state {
             Some(StateRef::Named(name)) => {
-                if let Some(index) = name_to_index.get(&name) {
+                if let Some(index) = name_to_index.get(name) {
                     *index
                 } else {
                     return Err(syn::Error::new_spanned(
@@ -149,9 +161,9 @@ impl StateMachineConfig {
             None => 0,
         };
 
-        let curr_state = match curr_state {
+        let curr_state = match &self.curr_state {
             Some(StateRef::Named(name)) => {
-                if let Some(index) = name_to_index.get(&name) {
+                if let Some(index) = name_to_index.get(name) {
                     *index
                 } else {
                     return Err(syn::Error::new_spanned(
@@ -174,7 +186,8 @@ impl StateMachineConfig {
         };
 
         Ok(StateMachineConfigImpl {
-            history_capacity,
+            #[cfg(feature = "history")]
+            history_capacity: self.history_capacity.clone(),
             curr_state,
             init_state,
         })
@@ -184,17 +197,20 @@ impl StateMachineConfig {
 enum ConfigAttr {
     InitState(StateRef),
     CurrState(StateRef),
+    #[cfg(feature = "history")]
     HistoryCapacity(LitInt),
 }
 
 impl Parse for ConfigAttr {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
+        #[cfg(feature = "history")]
         if lookahead.peek(kw::history_capacity) {
             input.parse::<kw::history_capacity>()?;
             input.parse::<Token![=]>()?;
-            Ok(ConfigAttr::HistoryCapacity(input.parse()?))
-        } else if lookahead.peek(kw::init_state) {
+            return Ok(ConfigAttr::HistoryCapacity(input.parse()?));
+        }
+        if lookahead.peek(kw::init_state) {
             input.parse::<kw::init_state>()?;
             input.parse::<Token![=]>()?;
             Ok(ConfigAttr::InitState(input.parse()?))
@@ -232,5 +248,39 @@ impl Parse for StateRef {
         } else {
             Err(input.error("Expected a state name (identifier) or index (integer literal)"))
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum ConfigFn {
+    Closure(syn::ExprClosure),
+    Call(syn::ExprCall),
+    FnName(syn::Ident),
+}
+
+impl Parse for ConfigFn {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        input.parse::<Token![:]>()?;
+        if input.peek(syn::Ident) {
+            Ok(ConfigFn::FnName(input.parse()?))
+        } else {
+            Ok(ConfigFn::Closure(input.parse()?))
+        }
+    }
+}
+
+impl quote::ToTokens for ConfigFn {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            ConfigFn::FnName(fn_call) => {
+                quote::quote! {#fn_call(entity_commands, &ids);}
+            }
+            ConfigFn::Closure(closure) => {
+                quote::quote! {(#closure)(entity_commands, &ids);}
+            }
+            ConfigFn::Call(call) => {
+                quote::quote! {#call;}
+            }
+        })
     }
 }

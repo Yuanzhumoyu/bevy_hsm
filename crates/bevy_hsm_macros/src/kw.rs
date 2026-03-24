@@ -2,12 +2,11 @@ syn::custom_keyword!(and);
 syn::custom_keyword!(not);
 syn::custom_keyword!(or);
 
-
 syn::custom_keyword!(states);
 syn::custom_keyword!(components);
 syn::custom_keyword!(transitions);
 
-// 
+//
 syn::custom_keyword!(guard);
 syn::custom_keyword!(event);
 

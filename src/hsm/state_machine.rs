@@ -722,10 +722,16 @@ impl StateLifecycle {
             return;
         };
 
+        let curr_state = match fsm_config.curr_state {
+            Some(state) => state,
+            None => init_state,
+        };
+
         world.commands().entity(state_machine_id).insert(
-            crate::fsm::state_machine::FsmStateMachine::with(
+            crate::fsm::state_machine::FsmStateMachine::new(
                 fsm_config.graph_id,
                 init_state,
+                curr_state,
                 #[cfg(feature = "history")]
                 fsm_config.history_size,
             ),
@@ -737,12 +743,56 @@ impl StateLifecycle {
         hook_context: HookContext,
     ) -> Option<TransitionContext> {
         let state_machine_id = hook_context.entity;
+        #[cfg(feature = "history")]
         let (mut entitys, mut commands) = world.entities_and_commands();
+        #[cfg(all(
+            not(feature = "history"),
+            any(not(feature = "hsm"), feature = "hybrid")
+        ))]
+        let (entitys, mut commands) = world.entities_and_commands();
+        #[cfg(all(not(feature = "history"), feature = "hsm", not(feature = "hybrid")))]
+        let (entitys, _) = world.entities_and_commands();
+
+        #[cfg(feature = "history")]
         let mut entity_mut = match entitys.get_mut(state_machine_id) {
             Ok(entity_mut) => entity_mut,
             Err(e) => {
                 warn!("{}", e);
                 return None;
+            }
+        };
+
+        #[cfg(not(feature = "history"))]
+        let entity_mut = match entitys.get(state_machine_id) {
+            Ok(entity_mut) => entity_mut,
+            Err(e) => {
+                warn!("{}", e);
+                return None;
+            }
+        };
+
+        #[cfg(feature = "hybrid")]
+        {
+            use crate::fsm::state_machine::FsmStateMachine;
+
+            #[cfg(feature = "history")]
+            if let Ok((mut fsm, mut hsm)) = entity_mut.get_components_mut::<(
+                &mut crate::fsm::state_machine::FsmStateMachine,
+                &mut HsmStateMachine,
+            )>() {
+                let fsm_history = fsm.history.take();
+                hsm.history.set_last_state_fsm_history(fsm_history);
+
+                commands
+                    .entity(state_machine_id)
+                    .remove::<FsmStateMachine>();
+            }
+
+            #[cfg(not(feature = "history"))]
+            if entity_mut.contains::<FsmStateMachine>() {
+                commands
+                    .entity(state_machine_id)
+                    .remove::<FsmStateMachine>();
             }
         };
 
@@ -753,26 +803,13 @@ impl StateLifecycle {
             );
             return None;
         };
-        #[cfg(feature = "hybrid")]
-        if let Ok((mut fsm, mut hsm)) = entity_mut.get_components_mut::<(
-            &mut crate::fsm::state_machine::FsmStateMachine,
-            &mut HsmStateMachine,
-        )>() {
-            #[cfg(feature = "history")]
-            {
-                let fsm_history = fsm.history.take();
-                hsm.history.set_last_state_fsm_history(fsm_history);
-            }
-            commands
-                .entity(state_machine_id)
-                .remove::<crate::fsm::state_machine::FsmStateMachine>();
-        }
 
         let service_target = match entity_mut.get::<ServiceTarget>() {
             Some(service_target) => service_target.0,
             None => state_machine_id,
         };
 
+        #[cfg(feature = "history")]
         let Some(mut state_machine) = entity_mut.get_mut::<HsmStateMachine>() else {
             warn!(
                 "{}",
@@ -780,6 +817,15 @@ impl StateLifecycle {
             );
             return None;
         };
+        #[cfg(not(feature = "history"))]
+        let Some(state_machine) = entity_mut.get::<HsmStateMachine>() else {
+            warn!(
+                "{}",
+                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            );
+            return None;
+        };
+
         let curr_state_id = state_machine.curr_state_id();
 
         #[cfg(feature = "history")]

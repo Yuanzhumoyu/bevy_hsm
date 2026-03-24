@@ -125,7 +125,7 @@ fn setup(
             dispensing => idle,
         },
         components:{
-            VendingMachine::default(),
+            VendingMachine,
             Name::new("VendingMachine"),
         },
         :create_resource,

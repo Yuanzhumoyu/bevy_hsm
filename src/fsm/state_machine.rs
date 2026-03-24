@@ -116,11 +116,18 @@ impl FsmStateMachine {
     }
 
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        #[cfg(feature = "history")]
         let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
             error!("{}", StateMachineError::FsmStateMachineMissing(entity));
             return;
         };
+        #[cfg(not(feature = "history"))]
+        let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
+            error!("{}", StateMachineError::FsmStateMachineMissing(entity));
+            return;
+        };
         let curr_state = fsm_state_machine.curr_state_id();
+        #[cfg(feature = "history")]
         fsm_state_machine.history.push(curr_state);
         let service_target = match world.get::<ServiceTarget>(entity) {
             Some(service_target) => service_target.0,
@@ -183,7 +190,7 @@ impl FsmStateMachine {
         };
 
         #[cfg(feature = "state_data")]
-        StateData::remove_components(&mut world, entity, service_target);
+        StateData::remove_components(&mut world, curr_state, service_target);
 
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),

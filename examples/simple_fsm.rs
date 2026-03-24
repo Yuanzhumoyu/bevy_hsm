@@ -60,7 +60,12 @@ fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>
     let graph_id = commands.spawn(graph).id();
 
     commands.spawn((
-        FsmStateMachine::with(graph_id, state_a, 10),
+        FsmStateMachine::with(
+            graph_id,
+            state_a,
+            #[cfg(feature = "history")]
+            10,
+        ),
         Name::new("MySimpleFsm"),
     ));
 }

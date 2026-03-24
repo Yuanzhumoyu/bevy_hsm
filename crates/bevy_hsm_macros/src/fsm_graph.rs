@@ -10,8 +10,11 @@ use syn::{
 };
 
 use crate::{
-    action_id::ActionRegistry, guard_condition::GuardCondition, hsm::ConfigFn, kw,
-    machine_config::StateRef, state_config::StateConfig,
+    action_id::ActionRegistry,
+    guard_condition::GuardCondition,
+    kw,
+    machine_config::{ConfigFn, StateRef},
+    state_config::StateConfig,
 };
 
 pub fn fsm_graph_impl(item: TokenStream) -> TokenStream {
@@ -103,14 +106,13 @@ impl quote::ToTokens for FsmGraph {
 
         let mut name_to_index = HashMap::<Ident, usize>::new();
         for (i, state) in states.iter().enumerate() {
-            if let Some(name) = &state.name {
-                if name_to_index.insert(name.clone(), i).is_some() {
-                    tokens.extend(
-                        syn::Error::new_spanned(name, "Duplicate state name found.")
-                            .to_compile_error(),
-                    );
-                    return;
-                }
+            if let Some(name) = &state.name
+                && name_to_index.insert(name.clone(), i).is_some()
+            {
+                tokens.extend(
+                    syn::Error::new_spanned(name, "Duplicate state name found.").to_compile_error(),
+                );
+                return;
             }
         }
 
@@ -270,6 +272,7 @@ impl State {
                     .to_compile_error(),
             );
         }
+        #[cfg(feature = "hybrid")]
         if self.config.fsm_blueprint.is_some() {
             errs.push(
                 syn::Error::new(self.span, "fsm_blueprint is not supported for FSM states.")
@@ -448,7 +451,7 @@ impl Parse for TransitionCondition {
                     &input,
                 )?))
             } else {
-                return Err(lookahead.error());
+                Err(lookahead.error())
             }
         } else {
             Ok(TransitionCondition::Unconditional)

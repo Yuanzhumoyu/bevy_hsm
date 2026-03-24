@@ -4,7 +4,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, token};
 
-use crate::{action_id::ActionRegistry, hsm::ConfigFn, state_config::StateConfig};
+use crate::{action_id::ActionRegistry, machine_config::ConfigFn, state_config::StateConfig};
 
 pub fn hsm_tree_impl(item: TokenStream) -> TokenStream {
     let HsmTreeImpl { tree, config_fn } = syn::parse_macro_input!(item as HsmTreeImpl);
@@ -203,6 +203,7 @@ impl quote::ToTokens for StateNodeImpl {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum HsmStateContent {
     State(StateNode),
     Component(Expr),
@@ -213,19 +214,19 @@ enum HsmStateContent {
 impl Parse for HsmStateContent {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let fork = input.fork();
-        if let Ok(attrs) = fork.call(syn::Attribute::parse_outer) {
-            if attrs.iter().any(|a| a.path().is_ident("state")) {
-                return Ok(match input.peek(token::Paren) {
-                    true => {
-                        let content_stream;
-                        syn::parenthesized!(content_stream in input);
-                        HsmStateContent::States(
-                            content_stream.parse_terminated(StateNode::parse, Token![,])?,
-                        )
-                    }
-                    false => HsmStateContent::State(input.parse()?),
-                });
-            }
+        if let Ok(attrs) = fork.call(syn::Attribute::parse_outer)
+            && attrs.iter().any(|a| a.path().is_ident("state"))
+        {
+            return Ok(match input.peek(token::Paren) {
+                true => {
+                    let content_stream;
+                    syn::parenthesized!(content_stream in input);
+                    HsmStateContent::States(
+                        content_stream.parse_terminated(StateNode::parse, Token![,])?,
+                    )
+                }
+                false => HsmStateContent::State(input.parse()?),
+            });
         }
         match input.peek(token::Paren) {
             true => {

@@ -246,7 +246,11 @@ mod tests {
 
         let state_machine_id = world.spawn_empty().id();
         world.entity_mut(state_machine_id).insert((
-            HsmStateMachine::with(HsmStateId::new(state_machine_id, id1), 10),
+            HsmStateMachine::with(
+                HsmStateId::new(state_machine_id, id1),
+                #[cfg(feature = "history")]
+                10,
+            ),
             StateLifecycle::default(),
             state_tree,
         ));
@@ -299,7 +303,7 @@ mod tests {
 
         let id1 = world
             .spawn((
-                FsmState::default(),
+                FsmState,
                 Name::new("StateA"),
                 state_data,
                 ComponentA,
@@ -308,15 +312,21 @@ mod tests {
             ))
             .id();
 
-        let id2 = world.spawn((FsmState::default(), Name::new("StateB"))).id();
+        let id2 = world.spawn((FsmState, Name::new("StateB"))).id();
 
         let mut graph = FsmGraph::new(id1);
         graph.with_add(id1, id2).with_add(id2, id1);
 
         let state_machine_id = world.spawn_empty().id();
-        world
-            .entity_mut(state_machine_id)
-            .insert((FsmStateMachine::with(state_machine_id, id1, 10), graph));
+        world.entity_mut(state_machine_id).insert((
+            FsmStateMachine::with(
+                state_machine_id,
+                id1,
+                #[cfg(feature = "history")]
+                10,
+            ),
+            graph,
+        ));
 
         world.flush();
         let state_machine = world.entity(state_machine_id);

@@ -81,7 +81,11 @@ fn setup(mut commands: Commands) {
 
     commands.entity(state_machine).insert((
         state_tree,
-        HsmStateMachine::with(HsmStateId::new(state_machine, red), 10),
+        HsmStateMachine::with(
+            HsmStateId::new(state_machine, red),
+            #[cfg(feature = "history")]
+            10,
+        ),
         Name::new("Blinking Light Paused"),
         StateLifecycle::default(),
         LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),

@@ -6,28 +6,37 @@ license = "MIT OR Apache-2.0"
 description = "A hierarchical and finite state machine library for the Bevy game engine."
 repository = "https://github.com/Yuanzhumoyu/bevy_hsm"
 keywords = ["bevy", "hsm", "fsm", "state-machine", "ecs"]
-include = ["/src"]
-resolver = "2"
+include = ["/src", "/crates", "/examples", "/tests"]
 readme = "README.md"
+
+[workspace]
+members = [".", "crates/bevy_hsm_macros"]
+resolver = "2"
 
 [features]
 default = ["hybrid", "history", "state_data"]
-hybrid = ["hsm", "fsm"]
-state_data = []
-history = []
-fsm = []
-hsm = []
+hybrid = ["hsm", "fsm", "bevy_hsm_macros/hybrid"]
+state_data = ["bevy_hsm_macros/state_data"]
+history = ["bevy_hsm_macros/history"]
+fsm = [
+  "dep:dyn-clone",
+  "dep:dyn-eq",
+  "dep:dyn-hash",
+  "dep:bimap",
+  "bevy_hsm_macros/fsm",
+]
+hsm = ["bevy_hsm_macros/hsm"]
 
 [dependencies]
-bevy_hsm_macros = { path = "crates/bevy_hsm_macros" }
+bevy_hsm_macros = { version = "0.1.0", path = "crates/bevy_hsm_macros", optional = true }
 bevy = { version = "~0.18.1", default-features = false, features = [
   "bevy_log",
 ] }
 smallvec = "1.15.1"
-dyn-clone = "1.0.20"
-dyn-eq = "0.1.3"
-dyn-hash = "1.0.0"
-bimap = "0.6.3"
+dyn-clone = { version = "1.0.20", optional = true }
+dyn-eq = { version = "0.1.3", optional = true }
+dyn-hash = { version = "1.0.0", optional = true }
+bimap = { version = "0.6.3", optional = true }
 
 [dev-dependencies]
 bevy = { version = "~0.18.1", default-features = false, features = [
@@ -42,41 +51,49 @@ type_complexity = "allow"
 [[example]]
 name = "switch_state"
 path = "examples/switch_state.rs"
+required-features = ["hsm", "history"]
 
 [[example]]
 name = "flashing_light"
 path = "examples/flashing_light.rs"
+required-features = ["hsm", "history"]
 
 [[example]]
 name = "more_states"
 path = "examples/more_states.rs"
+required-features = ["hybrid", "history"]
 
 [[example]]
 name = "simple_fsm"
 path = "examples/simple_fsm.rs"
+required-features = ["fsm", "history"]
 
 [[example]]
 name = "macros_hsm"
 path = "examples/macros/hsm.rs"
+required-features = ["hsm", "history", "state_data"]
 
 [[example]]
 name = "macros_fsm"
 path = "examples/macros/fsm.rs"
+required-features = ["fsm", "state_data"]
 
 [[example]]
 name = "forced_transition"
 path = "examples/forced_transition.rs"
+required-features = ["hybrid"]
 
 [[example]]
 name = "vending_machine"
 path = "examples/vending_machine.rs"
+required-features = ["fsm", "history"]
 
 [[example]]
 name = "calculator"
 path = "examples/calculator.rs"
-
+required-features = ["hybrid", "history"]
 
 [[test]]
 name = "action_system"
 path = "tests/action_system.rs"
-required-features = ["hybrid"]
+required-features = ["hybrid", "history"]

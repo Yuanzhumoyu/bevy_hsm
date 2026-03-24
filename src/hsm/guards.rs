@@ -102,7 +102,7 @@ impl ExitGuard {
         Self(GuardCondition::Id(name.into()))
     }
 
-    pub fn parse(s: impl AsRef<str>) -> Result<Self> {
+    pub fn parse(s: impl AsRef<str>) -> bevy::prelude::Result<Self> {
         Ok(Self(GuardCondition::parse(s)?))
     }
 

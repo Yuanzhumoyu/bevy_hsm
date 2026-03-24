@@ -5,22 +5,28 @@ use std::fmt;
 #[derive(Debug)]
 pub enum StateMachineError {
     /// A required `StateTree` component was not found on an entity.
+    #[cfg(feature = "hsm")]
     StateTreeNotFound(Entity),
     /// A required `HsmStateMachine` component was not found on an entity.
+    #[cfg(feature = "hsm")]
     HsmStateMachineMissing(Entity),
     /// A required `HsmState` component was not found on a state entity.
+    #[cfg(feature = "hsm")]
     HsmStateMissing(Entity),
     /// A required `StateLifecycle` component was not found on a state entity.
+    #[cfg(feature = "hsm")]
     StateLifecycleMissing(Entity),
     /// A registered system could not be found by its name.
     SystemNotFound { system_name: String, state: Entity },
     /// An error occurred while running a state's action system (OnEnter, OnUpdate, OnExit).
+    #[cfg(feature = "hsm")]
     SystemRunFailed {
         system_name: String,
         state: Entity,
         source: bevy::ecs::system::RunSystemError,
     },
     /// An error occurred while running a transition's guard system.
+    #[cfg(feature = "hsm")]
     GuardRunFailed {
         state_machine: Entity,
         from_state: Entity,
@@ -28,16 +34,22 @@ pub enum StateMachineError {
         source: bevy::ecs::system::RunSystemError,
     },
     /// A super state was not found for a given state within its `StateTree`.
+    #[cfg(feature = "hsm")]
     SuperStateNotFound { state_tree: Entity, state: Entity },
     /// A sub state was not found for a given state within its `StateTree`.
+    #[cfg(feature = "hsm")]
     SubStateNotFound { state_tree: Entity, state: Entity },
     /// A required `FsmStateMachine` component was not found on an entity.
+    #[cfg(feature = "fsm")]
     FsmStateMachineMissing(Entity),
     /// A required `FsmGraph` component was not found on an entity.
+    #[cfg(feature = "fsm")]
     GraphMissing(Entity),
     /// A state was not found within the `FsmGraph`.
+    #[cfg(feature = "fsm")]
     StateNotInGraph { graph: Entity, state: Entity },
     /// An attempt was made to transition to a target that is not a valid state in the graph.
+    #[cfg(feature = "fsm")]
     InvalidTransitionTarget {
         graph: Entity,
         from_state: Entity,
@@ -48,6 +60,7 @@ pub enum StateMachineError {
 impl fmt::Display for StateMachineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(feature = "hsm")]
             StateMachineError::StateTreeNotFound(tree_entity) => {
                 write!(
                     f,
@@ -55,6 +68,7 @@ impl fmt::Display for StateMachineError {
                     tree_entity
                 )
             }
+            #[cfg(feature = "hsm")]
             StateMachineError::HsmStateMachineMissing(entity) => {
                 write!(
                     f,
@@ -62,9 +76,11 @@ impl fmt::Display for StateMachineError {
                     entity
                 )
             }
+            #[cfg(feature = "hsm")]
             StateMachineError::HsmStateMissing(entity) => {
                 write!(f, "HsmState component not found on entity {:?}", entity)
             }
+            #[cfg(feature = "hsm")]
             StateMachineError::StateLifecycleMissing(entity) => {
                 write!(
                     f,
@@ -77,6 +93,7 @@ impl fmt::Display for StateMachineError {
                 "System '{}' not found for state {:?}",
                 system_name, state
             ),
+            #[cfg(feature = "hsm")]
             StateMachineError::SystemRunFailed {
                 system_name,
                 state,
@@ -86,6 +103,7 @@ impl fmt::Display for StateMachineError {
                 "Failed to run system '{}' for state {:?}. Source: {:?}",
                 system_name, state, source
             ),
+            #[cfg(feature = "hsm")]
             StateMachineError::GuardRunFailed {
                 state_machine,
                 from_state,
@@ -106,6 +124,7 @@ impl fmt::Display for StateMachineError {
                     )
                 }
             }
+            #[cfg(feature = "hsm")]
             StateMachineError::SuperStateNotFound { state_tree, state } => {
                 write!(
                     f,
@@ -113,6 +132,7 @@ impl fmt::Display for StateMachineError {
                     state, state_tree
                 )
             }
+            #[cfg(feature = "hsm")]
             StateMachineError::SubStateNotFound { state_tree, state } => {
                 write!(
                     f,
@@ -120,6 +140,7 @@ impl fmt::Display for StateMachineError {
                     state, state_tree
                 )
             }
+            #[cfg(feature = "fsm")]
             StateMachineError::FsmStateMachineMissing(entity) => {
                 write!(
                     f,
@@ -127,6 +148,7 @@ impl fmt::Display for StateMachineError {
                     entity
                 )
             }
+            #[cfg(feature = "fsm")]
             StateMachineError::GraphMissing(graph_entity) => {
                 write!(
                     f,
@@ -134,9 +156,11 @@ impl fmt::Display for StateMachineError {
                     graph_entity
                 )
             }
+            #[cfg(feature = "fsm")]
             StateMachineError::StateNotInGraph { graph, state } => {
                 write!(f, "State {:?} not found in FsmGraph {:?}", state, graph)
             }
+            #[cfg(feature = "fsm")]
             StateMachineError::InvalidTransitionTarget {
                 graph,
                 from_state,

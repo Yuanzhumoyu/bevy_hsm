@@ -110,7 +110,7 @@ fn on_equals(_context: In<ActionContext>, mut calculator: ResMut<Calculator>) {
             ..
         } = calculator.as_mut();
         number_stack.push(val);
-        history_display.push_str(&current_number);
+        history_display.push_str(current_number);
         current_number.clear();
     }
 
@@ -252,7 +252,7 @@ fn on_enter_operator(
             history_display.clear();
             *just_calculated = false;
         }
-        history_display.push_str(&current_number);
+        history_display.push_str(current_number);
         calculator.current_number.clear();
     } else if calculator.just_calculated {
         let Calculator {
@@ -262,7 +262,7 @@ fn on_enter_operator(
             ..
         } = calculator.as_mut();
         history_display.clear();
-        history_display.push_str(&current_display);
+        history_display.push_str(current_display);
         *just_calculated = false;
     }
 
@@ -303,24 +303,23 @@ fn on_left_parenthesis(
 
     if let Some(prev) = fsm.history.get_at(1)
         && prev == fsm_states.operand
+        && !calculator.current_number.is_empty()
     {
-        if !calculator.current_number.is_empty() {
-            let Calculator {
-                number_stack,
-                operator_stack,
-                history_display,
-                current_number,
-                ..
-            } = calculator.as_mut();
+        let Calculator {
+            number_stack,
+            operator_stack,
+            history_display,
+            current_number,
+            ..
+        } = calculator.as_mut();
 
-            let val = current_number.parse::<f64>().unwrap_or(0.0);
-            number_stack.push(val);
-            history_display.push_str(&current_number);
-            current_number.clear();
+        let val = current_number.parse::<f64>().unwrap_or(0.0);
+        number_stack.push(val);
+        history_display.push_str(current_number);
+        current_number.clear();
 
-            operator_stack.push('*');
-            history_display.push_str(" * ");
-        }
+        operator_stack.push('*');
+        history_display.push_str(" * ");
     }
 
     calculator.operator_stack.push('(');
@@ -344,7 +343,7 @@ fn on_right_parenthesis(In(_context): In<ActionContext>, mut calculator: ResMut<
         } = calculator.as_mut();
         let val = current_number.parse::<f64>().unwrap_or(0.0);
         number_stack.push(val);
-        history_display.push_str(&current_number);
+        history_display.push_str(current_number);
         current_number.clear();
     }
 
@@ -442,7 +441,7 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
 }
 
 fn setup_ui(mut commands: Commands) {
-    commands.spawn(Camera2d::default());
+    commands.spawn(Camera2d);
 
     // 创建显示区域
     commands.spawn((

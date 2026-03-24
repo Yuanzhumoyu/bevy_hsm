@@ -6,10 +6,7 @@ use crate::kw;
 
 pub fn guard_condition_impl(item: TokenStream) -> TokenStream {
     let constant_value = parse_macro_input!(item as GuardCondition);
-    quote::quote! {
-        #constant_value
-    }
-    .into()
+    quote::quote! {#constant_value}.into()
 }
 
 #[derive(Clone, Debug)]

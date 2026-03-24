@@ -10,9 +10,8 @@ use syn::{
 
 use crate::{
     fsm_graph::FsmGraph,
-    hsm::ConfigFn,
     kw,
-    machine_config::{StateMachineConfig, StateMachineConfigImpl},
+    machine_config::{ConfigFn, StateMachineConfig, StateMachineConfigImpl},
 };
 
 // 宏入口
@@ -47,8 +46,7 @@ impl Parse for Fsm {
                 input.parse::<Token![:]>()?;
                 let content;
                 braced!(content in input);
-                let components = content.parse_terminated(Expr::parse, Token![,])?;
-                components
+                content.parse_terminated(Expr::parse, Token![,])?
             }
             false => Punctuated::new(),
         };

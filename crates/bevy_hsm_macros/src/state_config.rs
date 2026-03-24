@@ -1,7 +1,6 @@
-use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, spanned::Spanned};
 
-use crate::{action_id::ActionId, guard_condition::GuardCondition, hsm::ConfigFn, kw};
+use crate::{action_id::ActionId, guard_condition::GuardCondition, kw, machine_config::ConfigFn};
 
 #[derive(Debug, Default)]
 pub(crate) struct StateConfig {
@@ -12,20 +11,35 @@ pub(crate) struct StateConfig {
     on_exit: Option<ActionId>,
     pub(crate) strategy: Option<Ident>,
     pub(crate) behavior: Option<Ident>,
+    #[cfg(feature = "hybrid")]
     pub(crate) fsm_blueprint: Option<Expr>,
     pub(crate) minimal: bool,
+    #[cfg(feature = "state_data")]
     pub(crate) state_datas: Punctuated<Expr, Token![,]>,
 }
 
 impl StateConfig {
+    #[cfg(feature = "fsm")]
     pub fn is_fsm_any(&self) -> bool {
-        self.on_update.is_some()
-            || self.on_enter.is_some()
-            || self.on_exit.is_some()
-            || !self.state_datas.is_empty()
+        #[cfg(feature = "state_data")]
+        if !self.state_datas.is_empty() {
+            return true;
+        }
+
+        self.on_update.is_some() || self.on_enter.is_some() || self.on_exit.is_some()
     }
 
+    #[cfg(feature = "hsm")]
     pub fn is_hsm_any(&self) -> bool {
+        #[cfg(feature = "hybrid")]
+        if self.fsm_blueprint.is_some() {
+            return true;
+        }
+        #[cfg(feature = "state_data")]
+        if !self.state_datas.is_empty() {
+            return true;
+        }
+
         self.guard_enter.is_some()
             || self.guard_exit.is_some()
             || self.on_update.is_some()
@@ -33,13 +47,21 @@ impl StateConfig {
             || self.on_exit.is_some()
             || self.strategy.is_some()
             || self.behavior.is_some()
-            || !self.state_datas.is_empty()
-            || self.fsm_blueprint.is_some()
     }
 
+    #[cfg(feature = "hsm")]
+    pub fn is_hsm_state_any(&self) -> bool {
+        #[cfg(feature = "hybrid")]
+        if self.fsm_blueprint.is_some() {
+            return false;
+        }
+        self.strategy.is_none() && self.behavior.is_none()
+    }
+
+    #[cfg(feature = "hsm")]
     pub(super) fn hsm_state_token_stream(&self) -> proc_macro2::TokenStream {
-        if self.strategy.is_none() && self.behavior.is_none() && self.fsm_blueprint.is_none() {
-            return quote! {HsmState::default(),};
+        if self.is_hsm_state_any() {
+            return quote::quote! {HsmState::default(),};
         }
 
         let hsm_state_strategy_field = match &self.strategy {
@@ -50,11 +72,21 @@ impl StateConfig {
             Some(behavior) => quote::quote! { behavior: ExitTransitionBehavior::#behavior },
             None => quote::quote! { behavior: ExitTransitionBehavior::default() },
         };
+
+        #[cfg(feature = "hybrid")]
         let hsm_state_fsm_blueprint_field = match &self.fsm_blueprint {
             Some(fsm_blueprint) => quote::quote! { fsm_config: Some(#fsm_blueprint) },
             None => quote::quote! { fsm_config: None },
         };
-        quote::quote! {HsmState {#hsm_state_strategy_field, #hsm_state_behavior_field, #hsm_state_fsm_blueprint_field,},}
+
+        #[cfg(feature = "hybrid")]
+        {
+            quote::quote! {HsmState {#hsm_state_strategy_field, #hsm_state_behavior_field, #hsm_state_fsm_blueprint_field,},}
+        }
+        #[cfg(not(feature = "hybrid"))]
+        {
+            quote::quote! {HsmState {#hsm_state_strategy_field, #hsm_state_behavior_field,},}
+        }
     }
 
     pub(crate) fn to_actions(&self, actions: &mut Vec<(LitStr, ConfigFn)>) {
@@ -142,6 +174,7 @@ impl StateConfig {
                             }
                             config.behavior = Some(behavior);
                         }
+                        #[cfg(feature = "hybrid")]
                         StateAttrType::FsmBlueprint(fsm_blueprint) => {
                             if config.fsm_blueprint.is_some() {
                                 return Err(syn::Error::new(
@@ -173,6 +206,13 @@ impl StateConfig {
                         "state_data attribute must have at least one component",
                     ));
                 }
+                #[cfg(not(feature = "state_data"))]
+                return Err(syn::Error::new(
+                    components.span(),
+                    "Looking forward to setting up project 'state_data' feature",
+                ));
+
+                #[cfg(feature = "state_data")]
                 config.state_datas.extend(components);
             }
         }
@@ -189,6 +229,7 @@ impl quote::ToTokens for StateConfig {
             on_update,
             on_enter,
             on_exit,
+            #[cfg(feature = "state_data")]
             state_datas,
             ..
         } = self;
@@ -207,6 +248,7 @@ impl quote::ToTokens for StateConfig {
         if let Some(on_exit) = on_exit {
             tokens.extend(quote::quote! {OnExitSystem::new(#on_exit),});
         }
+        #[cfg(feature = "state_data")]
         if !state_datas.is_empty() {
             tokens.extend(quote::quote! {StateDataBundle::new((#state_datas)),});
         }
@@ -221,6 +263,7 @@ enum StateAttrType {
     OnExit(ActionId),
     Strategy(Ident),
     Behavior(Ident),
+    #[cfg(feature = "hybrid")]
     FsmBlueprint(Expr),
     Minimal,
 }
@@ -266,12 +309,14 @@ impl Parse for StateAttrType {
             Ok(StateAttrType::Behavior(parse_attr::<kw::behavior, Ident>(
                 &input,
             )?))
-        } else if lookahead.peek(kw::fsm_blueprint) {
-            Ok(StateAttrType::FsmBlueprint(parse_attr::<
-                kw::fsm_blueprint,
-                Expr,
-            >(&input)?))
         } else {
+            #[cfg(feature = "hybrid")]
+            if lookahead.peek(kw::fsm_blueprint) {
+                return Ok(StateAttrType::FsmBlueprint(parse_attr::<
+                    kw::fsm_blueprint,
+                    Expr,
+                >(&input)?));
+            }
             Err(lookahead.error())
         }
     }

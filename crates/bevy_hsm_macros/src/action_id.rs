@@ -2,7 +2,7 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{LitStr, Token, parse::Parse, spanned::Spanned};
 
-use crate::hsm::ConfigFn;
+use crate::machine_config::ConfigFn;
 
 #[derive(Debug)]
 pub enum ActionId {

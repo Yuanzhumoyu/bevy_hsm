@@ -36,9 +36,9 @@ impl Terminated {
                 break 'fsm;
             };
 
+            let curr_state = fsm_state_machine.curr_state_id();
             'on_exit: {
-                let Some(on_exit) = world.get::<OnExitSystem>(fsm_state_machine.curr_state_id())
-                else {
+                let Some(on_exit) = world.get::<OnExitSystem>(curr_state) else {
                     break 'on_exit;
                 };
                 let Some(id) = world
@@ -48,8 +48,7 @@ impl Terminated {
                 else {
                     break 'on_exit;
                 };
-                let context =
-                    ActionContext::new(service_target, entity, fsm_state_machine.curr_state_id());
+                let context = ActionContext::new(service_target, entity, curr_state);
                 unsafe {
                     let _ = world
                         .as_unsafe_world_cell()
@@ -59,7 +58,7 @@ impl Terminated {
             }
 
             #[cfg(feature = "state_data")]
-            crate::state_data::StateData::remove_components(&mut world, entity, service_target);
+            crate::state_data::StateData::remove_components(&mut world, curr_state, service_target);
 
             let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
                 break 'fsm;
@@ -85,7 +84,7 @@ impl Terminated {
             };
 
             #[cfg(feature = "state_data")]
-            crate::state_data::StateData::clone_components(&mut world, entity, service_target);
+            crate::state_data::StateData::clone_components(&mut world, init_state, service_target);
 
             'on_enter: {
                 let Some(on_enter) = world.get::<OnEnterSystem>(init_state) else {

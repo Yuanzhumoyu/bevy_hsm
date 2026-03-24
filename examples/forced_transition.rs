@@ -55,7 +55,7 @@ fn player_input_system(
     let get_state_id = |name: &str| -> Option<Entity> {
         query_state
             .iter()
-            .find_map(|(id, named)| (named.as_str() == name).then(|| id))
+            .find_map(|(id, named)| (named.as_str() == name).then_some(id))
     };
 
     [
@@ -70,7 +70,7 @@ fn player_input_system(
             println!("Switching to {}", state_name);
             commands.trigger(HsmTrigger::chain(
                 hsm.entity(),
-                get_state_id(*state_name).unwrap(),
+                get_state_id(state_name).unwrap(),
             ));
         }
     });

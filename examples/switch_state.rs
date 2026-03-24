@@ -100,7 +100,11 @@ fn startup(mut commands: Commands) {
         .with_child(start_id, id);
 
     commands.entity(state_machine).insert((
-        HsmStateMachine::with(HsmStateId::new(state_machine, start_id), 10),
+        HsmStateMachine::with(
+            HsmStateId::new(state_machine, start_id),
+            #[cfg(feature = "history")]
+            10,
+        ),
         Name::new("Switch Counter"),
         StateLifecycle::default(),
         Switch::Close,
