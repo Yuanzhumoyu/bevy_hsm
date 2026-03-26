@@ -380,10 +380,10 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
     let fsm_graph_id = commands
         .spawn(fsm_graph! {
             states: {
-                #[state(on_enter=on_enter_operand)]: Operand,
-                #[state(on_enter=on_enter_operator)]: Operator,
-                #[state(on_enter=on_left_parenthesis)]: LeftParenthesis,
-                #[state(on_enter=on_right_parenthesis)]: RightParenthesis,
+                #[state(after_enter=on_enter_operand)]: Operand,
+                #[state(after_enter=on_enter_operator)]: Operator,
+                #[state(after_enter=on_left_parenthesis)]: LeftParenthesis,
+                #[state(after_enter=on_right_parenthesis)]: RightParenthesis,
             }
             transitions: {
                 // From Operand state
@@ -417,12 +417,12 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
         .id();
 
     commands.spawn(hsm! {
-        #[state(on_enter="debug_on_enter", fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
+        #[state(after_enter="debug_on_enter", fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
         :ProcessingInput(
-            #[state(on_enter=on_clear, on_update="Update:hsm_exit_commands")]: Clear,
-            #[state(on_enter=on_equals, on_update="Update:hsm_exit_commands")]: Equals,
-            #[state(on_enter=on_backspace, on_update="Update:hsm_exit_commands")]: Backspace,
-            #[state(on_enter=on_toggle_sign, on_update="Update:hsm_exit_commands")]: ToggleSign,
+            #[state(after_enter=on_clear, on_update="Update:hsm_exit_commands")]: Clear,
+            #[state(after_enter=on_equals, on_update="Update:hsm_exit_commands")]: Equals,
+            #[state(after_enter=on_backspace, on_update="Update:hsm_exit_commands")]: Backspace,
+            #[state(after_enter=on_toggle_sign, on_update="Update:hsm_exit_commands")]: ToggleSign,
         ),
         StateLifecycle::default(),
         :|mut entity_commands:EntityCommands, ids:&[Entity]| {

@@ -284,13 +284,14 @@ mod tests {
         use crate::{
             fsm::{FsmState, event::*, graph::FsmGraph, state_machine::FsmStateMachine},
             guards::GuardRegistry,
-            prelude::{ActionDispatch, ActionRegistry},
+            prelude::{ActionDispatch, ActionRegistry, TransitionRegistry},
         };
 
         let mut app = App::new();
         app.init_resource::<ActionRegistry>();
         app.init_resource::<ActionDispatch>();
         app.init_resource::<GuardRegistry>();
+        app.init_resource::<TransitionRegistry>();
 
         app.add_observer(FsmStateMachine::handle_fsm_trigger);
 

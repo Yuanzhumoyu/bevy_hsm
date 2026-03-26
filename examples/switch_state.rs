@@ -73,8 +73,8 @@ fn startup(mut commands: Commands) {
                 StateTransitionStrategy::Parallel,
                 ExitTransitionBehavior::Rebirth,
             ),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -82,11 +82,11 @@ fn startup(mut commands: Commands) {
         .spawn((
             Name::new("Counter"),
             HsmState::default(),
-            EnterGuard::new("is_open"),
-            ExitGuard::new("is_close"),
-            OnEnterSystem::new("debug_on_enter"),
+            GuardEnter::new("is_open"),
+            GuardExit::new("is_close"),
+            AfterEnterSystem::new("debug_on_enter"),
             OnUpdateSystem::new("Update:计数"),
-            OnExitSystem::new("debug_on_exit"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 

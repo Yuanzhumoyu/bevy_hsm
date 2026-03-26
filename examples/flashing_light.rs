@@ -53,8 +53,8 @@ fn setup(mut commands: Commands) {
                 ExitTransitionBehavior::Rebirth,
             ),
             OnUpdateSystem::new("Update:debug_light"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -63,10 +63,10 @@ fn setup(mut commands: Commands) {
             Name::new("yellow"),
             HsmState::default(),
             OnUpdateSystem::new("Update:debug_light"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
-            EnterGuard::new("light_timer"),
-            ExitGuard::new("light_timer"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
+            GuardEnter::new("light_timer"),
+            GuardExit::new("light_timer"),
         ))
         .id();
 

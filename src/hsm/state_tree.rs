@@ -94,8 +94,11 @@ impl StateTree {
         self
     }
 
+    /// 添加子状态
+    ///
+    /// Add a child state
     pub fn with_child(&mut self, from: Entity, to: Entity) -> &mut Self {
-        if self.has_link(to, from) {
+        if self.contains(to) || self.has_link(to, from) {
             return self;
         }
 
@@ -106,10 +109,13 @@ impl StateTree {
         self
     }
 
+    /// 批量添加子状态
+    ///
+    /// Add child states in batch
     pub fn with_children(&mut self, from: Entity, to: &[Entity]) -> &mut Self {
         let to = to
             .iter()
-            .filter(|to| !self.has_link(from, **to))
+            .filter(|to| !(self.contains(**to) || self.has_link(from, **to)))
             .copied()
             .collect::<Vec<_>>();
 
@@ -122,6 +128,9 @@ impl StateTree {
         self
     }
 
+    /// 移除一个状态及其所有子状态，并返回一个新的状态树
+    ///
+    /// Remove a state and all its sub-states, and return a new state tree
     pub fn remove(&mut self, from: Entity, to: Entity) -> Option<Self> {
         if let Some(node) = self.tree.get_mut(&from) {
             node.sub_states.retain(|&s| s != to);
@@ -154,18 +163,30 @@ impl StateTree {
         new_tree.tree.insert(target, target_node);
     }
 
+    /// 获取一个状态的所有子状态
+    ///
+    /// Get all sub-states of a state
     pub fn get(&self, state: Entity) -> Option<&[Entity]> {
         self.tree.get(&state).map(|v| v.get_sub_states())
     }
 
+    /// 获取根状态
+    ///
+    /// Get the root state
     pub fn get_root(&self) -> Entity {
         self.root
     }
 
+    /// 检查状态树是否包含某个状态
+    ///
+    /// Check if the state tree contains a state
     pub fn contains(&self, state: Entity) -> bool {
         self.tree.contains_key(&state)
     }
 
+    /// 检查两个状态之间是否存在直接的父子关系
+    ///
+    /// Check if there is a direct parent-child relationship between two states
     pub fn has_link(&self, from: Entity, to: Entity) -> bool {
         if let Some(v) = self.get(from) {
             return v.contains(&to);
@@ -173,11 +194,17 @@ impl StateTree {
         false
     }
 
+    /// 获取状态树中的状态数量
+    ///
+    /// Get the number of states in the state tree
     #[inline]
     pub fn len(&self) -> usize {
         self.tree.len()
     }
 
+    /// 检查状态树是否为空
+    ///
+    /// Check if the state tree is empty
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.tree.is_empty()
@@ -196,14 +223,23 @@ impl StateTree {
         )
     }
 
+    /// 获取一个状态的所有子状态
+    ///
+    /// Get all sub-states of a state
     pub fn get_sub_states(&self, state: Entity) -> Option<&[Entity]> {
         self.tree.get(&state).map(|node| node.get_sub_states())
     }
 
+    /// 获取一个状态的父状态
+    ///
+    /// Get the super-state of a state
     pub fn get_super_state(&self, state: Entity) -> Option<Entity> {
         self.tree.get(&state).and_then(|node| node.super_state)
     }
 
+    /// 根据遍历策略迭代一个状态的所有子状态
+    ///
+    /// Iterate over all sub-states of a state according to the traversal strategy
     pub fn traversal_iter(&self, world: &World, state: Entity) -> Vec<Entity> {
         match self.tree.get(&state) {
             Some(StateTreeNode {
@@ -218,6 +254,9 @@ impl StateTree {
         }
     }
 
+    /// 根据遍历策略和过滤条件迭代一个状态的所有子状态
+    ///
+    /// Iterate over all sub-states of a state according to the traversal strategy and filter conditions
     pub fn traversal_iter_with(
         &self,
         world: &World,
@@ -294,14 +333,20 @@ impl StateTree {
     }
 }
 
+/// 状态树节点
+///
+/// State tree node
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct StateTreeNode {
-    pub super_state: Option<Entity>,
-    pub traversal: Option<TraversalStrategy>,
-    pub sub_states: Vec<Entity>,
+    super_state: Option<Entity>,
+    traversal: Option<TraversalStrategy>,
+    sub_states: Vec<Entity>,
 }
 
 impl StateTreeNode {
+    /// 创建一个新的状态树节点
+    ///
+    /// Create a new state tree node
     pub fn new(super_state: Option<Entity>) -> Self {
         Self {
             super_state,
@@ -310,14 +355,23 @@ impl StateTreeNode {
         }
     }
 
+    /// 设置遍历策略
+    ///
+    /// Set the traversal strategy
     pub fn set_traversal(&mut self, traversal: TraversalStrategy) {
         self.traversal = Some(traversal);
     }
 
+    /// 获取所有子状态
+    ///
+    /// Get all sub-states
     pub const fn get_sub_states(&self) -> &[Entity] {
         self.sub_states.as_slice()
     }
 
+    /// 添加一个子状态
+    ///
+    /// Add a sub-state
     pub fn push(&mut self, state: Entity) {
         for (i, e) in self.sub_states.iter().enumerate() {
             if *e == state {
@@ -329,6 +383,9 @@ impl StateTreeNode {
     }
 }
 
+/// 状态机状态的唯一标识符
+///
+/// Unique identifier for the state of the state machine
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HsmStateId {
     tree: Entity,
@@ -336,14 +393,23 @@ pub struct HsmStateId {
 }
 
 impl HsmStateId {
+    /// 创建一个新的状态ID
+    ///
+    /// Create a new state ID
     pub fn new(tree: Entity, state: Entity) -> Self {
         Self { tree, state }
     }
 
+    /// 获取状态树的实体
+    ///
+    /// Get the entity of the state tree
     pub const fn tree(&self) -> Entity {
         self.tree
     }
 
+    /// 获取状态的实体
+    ///
+    /// Get the entity of the state
     pub const fn state(&self) -> Entity {
         self.state
     }
@@ -355,6 +421,9 @@ impl Display for HsmStateId {
     }
 }
 
+/// 状态树的迭代器
+///
+/// Iterator for the state tree
 pub struct StateTreeIterator<'a>(
     bevy::platform::collections::hash_map::Keys<'a, Entity, StateTreeNode>,
 );

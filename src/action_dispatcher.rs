@@ -29,8 +29,8 @@ use crate::{
 ///         * Filter Condition:
 ///             * `OnUpdate`: 继续执行该状态
 ///             - `OnUpdate`: Continue executing this state
-///             * `OnExit`  : 停止执行该状态
-///             - `OnExit`  : Stop executing this state
+///             * `BeforeExit`  : 停止执行该状态
+///             - `BeforeExit`  : Stop executing this state
 pub trait IntoActionSystem<M> {
     fn into_system(self) -> impl IntoSystem<In<Vec<ActionContext>>, Option<Vec<ActionContext>>, M>;
 }
@@ -238,6 +238,9 @@ impl StateActionBuffer {
         self.interceptor.insert(context);
     }
 
+    /// 移除一个过滤器
+    ///
+    /// Remove a filter
     pub fn remove_filter(&mut self, context: ActionContext) {
         self.filter.remove(&context);
     }
@@ -301,10 +304,9 @@ impl Extend<ActionContext> for StateActionBuffer {
     }
 }
 
-/// 状态机系统运行模式
-///
-/// State machine system run mode
-fn action_system_run_mode<T: ScheduleLabel>(
+/// 创建一个处理动作系统运行逻辑的闭包。
+/// 这个闭包会接收来自前一个系统的 `ActionContext`，并将其添加到对应的 `StateActionBuffer` 中。
+fn create_action_system_runner<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(In<Option<Vec<ActionContext>>>, ResMut<ScheduleActionBuffers<T>>) {
     move |state_contexts: In<Option<Vec<ActionContext>>>,
@@ -321,10 +323,9 @@ fn action_system_run_mode<T: ScheduleLabel>(
     }
 }
 
-/// 运行动作系统的条件
-///
-/// Run action system condition
-fn run_action_system_condition<T: ScheduleLabel>(
+/// 创建一个用于判断动作系统是否应该运行的条件闭包。
+/// 只有当对应的 `StateActionBuffer` 的 `next` 缓冲区不为空时，系统才会运行。
+fn create_run_condition_for_action_system<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(Option<Res<ScheduleActionBuffers<T>>>) -> bool {
     move |action_system_buffer: Option<Res<ScheduleActionBuffers<T>>>| {
@@ -336,10 +337,9 @@ fn run_action_system_condition<T: ScheduleLabel>(
     }
 }
 
-/// 更新状态机系统缓存
-///
-/// Update state machine system cache
-fn update_buffer<T: ScheduleLabel>(
+/// 创建一个更新 `StateActionBuffer` 并返回当前动作的闭包。
+/// 这个闭包是动作系统管道的第一个阶段，它负责准备好当前帧需要处理的 `ActionContext`。
+fn create_buffer_updater_and_get_actions<T: ScheduleLabel>(
     action_name: Arc<String>,
 ) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) -> Vec<ActionContext> {
     move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| -> Vec<ActionContext> {
@@ -427,11 +427,13 @@ impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFunction
         action_name: Arc<String>,
         system: impl IntoActionSystem<M>,
     ) {
-        let action_system = update_buffer::<T>(action_name.clone())
+        let action_system = create_buffer_updater_and_get_actions::<T>(action_name.clone())
             .pipe(system.into_system())
-            .pipe(action_system_run_mode::<T>(action_name.clone()));
+            .pipe(create_action_system_runner::<T>(action_name.clone()));
 
-        let system = action_system.run_if(run_action_system_condition::<T>(action_name.clone()));
+        let system = action_system.run_if(create_run_condition_for_action_system::<T>(
+            action_name.clone(),
+        ));
 
         schedules.add_systems(self, system);
     }

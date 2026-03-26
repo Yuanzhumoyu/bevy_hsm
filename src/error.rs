@@ -18,7 +18,7 @@ pub enum StateMachineError {
     StateLifecycleMissing(Entity),
     /// A registered system could not be found by its name.
     SystemNotFound { system_name: String, state: Entity },
-    /// An error occurred while running a state's action system (OnEnter, OnUpdate, OnExit).
+    /// An error occurred while running a state's action system (AfterEnter, OnUpdate, BeforeExit).
     #[cfg(feature = "hsm")]
     SystemRunFailed {
         system_name: String,

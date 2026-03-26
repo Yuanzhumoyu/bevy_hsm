@@ -6,7 +6,7 @@ use bevy::{
 };
 
 use crate::{
-    context::{ActionContext, GuardContext},
+    context::{ActionContext, GuardContext, TransitionContext, TransitionRelationship},
     error::StateMachineError,
     guards::CompiledGuard,
     hsm::{
@@ -18,7 +18,7 @@ use crate::{
         },
     },
     markers::{Paused, Terminated},
-    prelude::{EnterGuardCache, ExitGuardCache, ServiceTarget, StateActionBuffer, StateTree},
+    prelude::{GuardEnterCache, GuardExitCache, ServiceTarget, StateActionBuffer, StateTree},
     state_actions::*,
 };
 
@@ -73,30 +73,40 @@ pub struct HsmStateMachine {
 }
 
 impl HsmStateMachine {
+    /// 创建一个新的状态机
+    ///
+    /// Create a new state machine
     pub fn new(
         init_state: HsmStateId,
         curr_state: HsmStateId,
         #[cfg(feature = "history")] history_len: usize,
     ) -> Self {
+        let mut transition_queue = VecDeque::new();
+        transition_queue.push_front(Transition::Start);
         Self {
             init_state,
             curr_state,
-            transition_queue: VecDeque::new(),
+            transition_queue,
             #[cfg(feature = "history")]
             history: StateHistory::new(history_len),
         }
     }
 
+    /// 使用初始状态创建一个新的状态机，当前状态也为初始状态
+    ///
+    /// Create a new state machine with an initial state, the current state is also the initial state
     pub fn with(init_state: HsmStateId, #[cfg(feature = "history")] history_len: usize) -> Self {
-        Self {
+        Self::new(
             init_state,
-            curr_state: init_state,
-            transition_queue: VecDeque::new(),
+            init_state,
             #[cfg(feature = "history")]
-            history: StateHistory::new(history_len),
-        }
+            history_len,
+        )
     }
 
+    /// 获取初始状态
+    ///
+    /// Get the initial state
     pub const fn init_state(&self) -> HsmStateId {
         self.init_state
     }
@@ -108,11 +118,14 @@ impl HsmStateMachine {
         self.curr_state
     }
 
-    /// 获取下一个状态的ID
+    /// 获取下一个状态转换
     ///
-    /// Get the ID of the next state
-    pub fn next_transition(&self) -> Option<&Transition> {
-        self.transition_queue.front()
+    /// Get the next state transition
+    pub fn next_transition(&self) -> Transition {
+        self.transition_queue
+            .front()
+            .copied()
+            .unwrap_or(Transition::End)
     }
 
     /// 设置初始状态
@@ -141,7 +154,7 @@ impl HsmStateMachine {
     ///
     /// Add next state
     pub fn push_next_state(&mut self, next_state: Transition) {
-        self.transition_queue.push_front(next_state);
+        self.transition_queue.push_back(next_state);
     }
 
     /// 批量添加下一个状态
@@ -154,33 +167,52 @@ impl HsmStateMachine {
         self.transition_queue.extend(iter);
     }
 
+    /// 将一个状态转换插入到队列的前面
+    ///
+    /// Insert a state transition at the front of the queue
+    pub fn push_prev_state(&mut self, prev_state: Transition) -> Option<Transition> {
+        let old_prev_state = if !self.transition_queue.is_empty() {
+            self.transition_queue.pop_front()
+        } else {
+            None
+        };
+        self.transition_queue.push_front(prev_state);
+        old_prev_state
+    }
+
     /// 获取下一个状态的ID
     ///
     /// Get the ID of the next state
     pub fn next_state_id(&self) -> Option<HsmStateId> {
-        self.transition_queue.front().and_then(|next| match next {
-            Transition::Next((state_id, _)) => Some(*state_id),
-            Transition::None => None,
-        })
+        self.transition_queue
+            .front()
+            .and_then(|next| next.get_state_id())
     }
 
     /// 获取下一个状态的OnState
     ///
     /// Get the OnState of the next state
     pub fn next_state_lifecycle(&self) -> Option<StateLifecycle> {
-        self.transition_queue.front().and_then(|next| match next {
-            Transition::Next((_, on_state)) => Some(*on_state),
-            Transition::None => None,
-        })
+        self.transition_queue
+            .front()
+            .and_then(|next| next.get_lifecyle())
     }
 
     /// 弹出下一个状态
     ///
     /// Pop next state
-    pub fn pop_next_state(&mut self) -> Transition {
-        self.transition_queue
-            .pop_front()
-            .unwrap_or(Transition::None)
+    pub fn pop_next_state(&mut self) -> Option<Transition> {
+        if self.transition_queue.len() <= 1 {
+            return None;
+        }
+        self.transition_queue.remove(1)
+    }
+
+    /// 弹出队列最前面的状态转换
+    ///
+    /// Pop the state transition at the front of the queue
+    pub fn pop_prev_state(&mut self) -> Option<Transition> {
+        self.transition_queue.pop_front()
     }
 
     /// 获取状态历史记录
@@ -227,7 +259,7 @@ impl HsmStateMachine {
     pub fn is_transitioning(&self) -> bool {
         self.transition_queue
             .front()
-            .is_some_and(|n| *n != Transition::None)
+            .is_some_and(|n| *n != Transition::Start && *n != Transition::End)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -238,8 +270,8 @@ impl HsmStateMachine {
         query_state_tree: Query<&StateTree>,
         mut query: Query<&mut HsmStateMachine, Without<Paused>>,
         query_service_target: Query<&ServiceTarget, With<HsmStateMachine>>,
-        enter_guard_cache: Res<EnterGuardCache>,
-        exit_guard_cache: Res<ExitGuardCache>,
+        enter_guard_cache: Res<GuardEnterCache>,
+        exit_guard_cache: Res<GuardExitCache>,
     ) {
         let HsmTrigger {
             state_machine,
@@ -459,8 +491,8 @@ impl HsmStateMachine {
 
         self.push_next_states(next_state_table);
 
-        if let Transition::Next((state_id, lifecycle)) = self.pop_next_state() {
-            self.set_curr_state(state_id);
+        if let Some((state_id, lifecycle)) = self.pop_next_state().and_then(|t| t.to()) {
+            self.push_next_state(Transition::with_lifecycle(state_id, lifecycle));
             commands.entity(state_machine_id).insert(lifecycle);
         }
     }
@@ -503,7 +535,7 @@ impl HsmStateMachine {
 
         exit_path.pop(); // remove LCA
         if !exit_path.is_empty() {
-            next_state_table.push(Transition::Next((curr_state_id, StateLifecycle::Exit)));
+            next_state_table.push(Transition::Exit(curr_state_id));
         }
 
         let mut exit_iter = exit_path.iter().skip(1).copied().peekable();
@@ -518,16 +550,16 @@ impl HsmStateMachine {
             let state_id = HsmStateId::new(curr_state_id.tree(), *super_state_id);
             match (strategy, behavior) {
                 (Nested | Parallel, Resurrection) => {
-                    next_state_table.push(Transition::Next((state_id, StateLifecycle::Update)));
+                    next_state_table.push(Transition::Update(state_id));
                     exit_iter.next();
                 }
                 (Nested | Parallel, Rebirth) => {
-                    next_state_table.push(Transition::Next((state_id, StateLifecycle::Enter)));
+                    next_state_table.push(Transition::Enter(state_id));
                     exit_iter.next();
                 }
                 (Nested, Death) => 'nd: {
                     if state_tree.get_root() == state_id.state() {
-                        next_state_table.push(Transition::Next((state_id, StateLifecycle::Exit)));
+                        next_state_table.push(Transition::Exit(state_id));
                         exit_iter.next();
                         break 'nd;
                     }
@@ -541,14 +573,13 @@ impl HsmStateMachine {
                         };
                         let state_id = HsmStateId::new(state_id.tree(), super_state_id);
                         if state_tree.get_root() == super_state_id {
-                            next_state_table.push(Transition::Next((state_id, behavior.into())));
+                            next_state_table.push(Transition::with_behavior(state_id, behavior));
                             exit_iter.next();
                             break;
                         }
 
                         if strategy == Nested && behavior == Death {
-                            next_state_table
-                                .push(Transition::Next((state_id, StateLifecycle::Exit)));
+                            next_state_table.push(Transition::Exit(state_id));
                             exit_iter.next();
                         } else {
                             break;
@@ -577,9 +608,9 @@ impl HsmStateMachine {
                         exit_iter.next();
                     }
                     next_state_table.push(match new_behavior {
-                        Rebirth => Transition::Next((state_id, StateLifecycle::Enter)),
-                        Resurrection => Transition::Next((state_id, StateLifecycle::Update)),
-                        Death => Transition::None,
+                        Rebirth => Transition::Enter(state_id),
+                        Resurrection => Transition::Update(state_id),
+                        Death => Transition::End,
                     });
                 }
             }
@@ -603,9 +634,9 @@ impl HsmStateMachine {
             let next_state_id = HsmStateId::new(state_tree_id, sub_state_id);
             if curr_state.strategy == Parallel && i != 0 {
                 let curr_state_id = HsmStateId::new(state_tree_id, curr_state_id);
-                next_state_table.push(Transition::Next((curr_state_id, StateLifecycle::Exit)));
+                next_state_table.push(Transition::Exit(curr_state_id));
             }
-            next_state_table.push(Transition::Next((next_state_id, StateLifecycle::Enter)));
+            next_state_table.push(Transition::Enter(next_state_id));
         }
     }
 }
@@ -635,21 +666,111 @@ impl Debug for HsmStateMachine {
 /// # 状态转换\State Transition
 /// * 状态转换的枚举，包含下一个状态的ID和OnState
 /// - The enum of state transitions, including the ID of the next state and OnState
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Transition {
-    /// 下一个状态的ID和OnState
-    ///
-    /// The ID of the next state and OnState
-    Next((HsmStateId, StateLifecycle)),
-    /// 无下一个状态
-    ///
-    /// No next state
-    None,
+    Enter(HsmStateId),
+    Update(HsmStateId),
+    Exit(HsmStateId),
+    Start,
+    End,
 }
 
-struct TransitionContext {
+impl Transition {
+    pub const fn to(self) -> Option<(HsmStateId, StateLifecycle)> {
+        match self {
+            Transition::Enter(id) => Some((id, StateLifecycle::Enter)),
+            Transition::Update(id) => Some((id, StateLifecycle::Update)),
+            Transition::Exit(id) => Some((id, StateLifecycle::Exit)),
+            Transition::Start | Transition::End => None,
+        }
+    }
+
+    pub fn to_transition(self, next: Self) -> Option<TransitionRelationship> {
+        use Transition::*;
+        match (self, next) {
+            // Represents the initial entry into the state machine.
+            (Start, Enter(to)) | (Start, Update(to)) | (Start, Exit(to)) => {
+                Some(TransitionRelationship::Final(to.state()))
+            }
+
+            // Represents the final exit from the state machine.
+            (Enter(from), End) | (Update(from), End) | (Exit(from), End) => {
+                Some(TransitionRelationship::Initial(from.state()))
+            }
+
+            // Represents a standard transition between two different states.
+            (Enter(from), Enter(to))
+            | (Enter(from), Update(to))
+            | (Enter(from), Exit(to))
+            | (Update(from), Enter(to))
+            | (Update(from), Update(to))
+            | (Update(from), Exit(to))
+            | (Exit(from), Enter(to))
+            | (Exit(from), Update(to))
+            | (Exit(from), Exit(to)) => {
+                Some(TransitionRelationship::Transition(from.state(), to.state()))
+            }
+            // All other combinations are considered invalid transitions.
+            _ => {
+                error!("Invalid state transition pair: {:?} -> {:?}", self, next);
+                None
+            }
+        }
+    }
+
+    pub const fn with_behavior(
+        state_id: HsmStateId,
+        behavior: crate::prelude::ExitTransitionBehavior,
+    ) -> Self {
+        use crate::prelude::ExitTransitionBehavior;
+        match behavior {
+            ExitTransitionBehavior::Rebirth => Self::Enter(state_id),
+            ExitTransitionBehavior::Resurrection => Self::Update(state_id),
+            ExitTransitionBehavior::Death => Self::Exit(state_id),
+        }
+    }
+
+    pub const fn with_lifecycle(state_id: HsmStateId, lifecycle: StateLifecycle) -> Self {
+        match lifecycle {
+            StateLifecycle::Enter => Self::Enter(state_id),
+            StateLifecycle::Update => Self::Update(state_id),
+            StateLifecycle::Exit => Self::Exit(state_id),
+        }
+    }
+
+    pub const fn get_state_id(&self) -> Option<HsmStateId> {
+        match self {
+            Self::Enter(id) | Self::Update(id) | Self::Exit(id) => Some(*id),
+            Self::Start | Self::End => None,
+        }
+    }
+
+    pub const fn get_lifecyle(&self) -> Option<StateLifecycle> {
+        match self {
+            Transition::Enter(_) => Some(StateLifecycle::Enter),
+            Transition::Update(_) => Some(StateLifecycle::Update),
+            Transition::Exit(_) => Some(StateLifecycle::Exit),
+            Transition::Start | Transition::End => None,
+        }
+    }
+}
+
+impl Debug for Transition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Enter(id) => write!(f, "Enter({})", id),
+            Self::Update(id) => write!(f, "Update({})", id),
+            Self::Exit(id) => write!(f, "Exit({})", id),
+            Self::Start => write!(f, "Start"),
+            Self::End => write!(f, "End"),
+        }
+    }
+}
+
+struct TransitionInfo {
     state_context: ActionContext,
     state_machine_id: Entity,
+    relationship: TransitionRelationship,
     curr_state_id: HsmStateId,
     hsm_state: StateLifecycle,
 }
@@ -676,6 +797,32 @@ impl StateLifecycle {
         state_context: ActionContext,
     ) {
         let Some(action_system_id) = ActionRegistry::get_action_id::<T>(world, state_id) else {
+            return;
+        };
+        if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
+            .run_system_with(action_system_id, state_context)
+        {
+            let Some(system_name) = world.get::<T>(state_id) else {
+                return;
+            };
+            error!(
+                "{}",
+                StateMachineError::SystemRunFailed {
+                    system_name: system_name.to_string(),
+                    state: state_id,
+                    source: e.into()
+                }
+            );
+        }
+    }
+
+    fn run_transition_lifecycle_system<T: Component + std::ops::Deref<Target = String>>(
+        world: &mut DeferredWorld,
+        state_id: Entity,
+        state_context: TransitionContext,
+    ) {
+        let Some(action_system_id) = TransitionRegistry::get_transition_id::<T>(world, state_id)
+        else {
             return;
         };
         if let Err(e) = unsafe { world.as_unsafe_world_cell().world_mut() }
@@ -741,7 +888,7 @@ impl StateLifecycle {
     fn prepare_transition(
         world: &mut DeferredWorld,
         hook_context: HookContext,
-    ) -> Option<TransitionContext> {
+    ) -> Option<TransitionInfo> {
         let state_machine_id = hook_context.entity;
         #[cfg(feature = "history")]
         let (mut entitys, mut commands) = world.entities_and_commands();
@@ -796,7 +943,7 @@ impl StateLifecycle {
             }
         };
 
-        let Some(hsm_state) = entity_mut.get::<StateLifecycle>().copied() else {
+        let Some(lifecycle) = entity_mut.get::<StateLifecycle>().copied() else {
             warn!(
                 "{}",
                 StateMachineError::StateLifecycleMissing(state_machine_id)
@@ -809,16 +956,7 @@ impl StateLifecycle {
             None => state_machine_id,
         };
 
-        #[cfg(feature = "history")]
         let Some(mut state_machine) = entity_mut.get_mut::<HsmStateMachine>() else {
-            warn!(
-                "{}",
-                StateMachineError::HsmStateMachineMissing(state_machine_id)
-            );
-            return None;
-        };
-        #[cfg(not(feature = "history"))]
-        let Some(state_machine) = entity_mut.get::<HsmStateMachine>() else {
             warn!(
                 "{}",
                 StateMachineError::HsmStateMachineMissing(state_machine_id)
@@ -827,24 +965,29 @@ impl StateLifecycle {
         };
 
         let curr_state_id = state_machine.curr_state_id();
+        let curr = Transition::with_lifecycle(curr_state_id, lifecycle);
+        let prev = state_machine.push_prev_state(curr).unwrap();
+        let relationship = prev.to_transition(curr)?;
 
         #[cfg(feature = "history")]
-        state_machine.push_history(HistoricalNode::new(curr_state_id, hsm_state.into()));
+        state_machine.push_history(HistoricalNode::new(curr_state_id, lifecycle.into()));
 
         let state_context =
             ActionContext::new(service_target, state_machine_id, curr_state_id.state());
 
-        Some(TransitionContext {
+        Some(TransitionInfo {
             state_machine_id,
+            relationship,
             curr_state_id,
             state_context,
-            hsm_state,
+            hsm_state: lifecycle,
         })
     }
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let Some(TransitionContext {
+        let Some(TransitionInfo {
             state_machine_id,
+            relationship,
             curr_state_id,
             state_context,
             hsm_state,
@@ -855,6 +998,16 @@ impl StateLifecycle {
 
         match hsm_state {
             StateLifecycle::Enter => {
+                Self::run_transition_lifecycle_system::<BeforeEnterSystem>(
+                    &mut world,
+                    curr_state_id.state(),
+                    TransitionContext::with(
+                        state_context.service_target,
+                        state_machine_id,
+                        relationship,
+                    ),
+                );
+
                 #[cfg(feature = "state_data")]
                 StateData::clone_components(
                     &mut world,
@@ -863,7 +1016,7 @@ impl StateLifecycle {
                 );
 
                 // 运行进入系统
-                Self::run_lifecycle_system::<OnEnterSystem>(
+                Self::run_lifecycle_system::<AfterEnterSystem>(
                     &mut world,
                     curr_state_id.state(),
                     state_context,
@@ -880,7 +1033,7 @@ impl StateLifecycle {
                 Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id);
 
                 let curr_state = world.entity(curr_state_id.state());
-                if curr_state.contains::<OnEnterSystem>() || curr_state.contains::<OnExitSystem>() {
+                if curr_state.contains::<AfterEnterSystem>() || curr_state.contains::<BeforeExitSystem>() {
                     let mut check_on_transition_states =
                         world.resource_mut::<CheckOnTransitionStates>();
                     check_on_transition_states.insert(state_machine_id);
@@ -913,7 +1066,7 @@ impl StateLifecycle {
                 );
 
                 // 运行退出系统
-                Self::run_lifecycle_system::<OnExitSystem>(
+                Self::run_lifecycle_system::<BeforeExitSystem>(
                     &mut world,
                     curr_state_id.state(),
                     state_context,
@@ -927,6 +1080,16 @@ impl StateLifecycle {
                 );
 
                 world.commands().queue(move |world: &mut World| {
+                    Self::run_transition_lifecycle_system::<AfterExitSystem>(
+                        &mut world.into(),
+                        curr_state_id.state(),
+                        TransitionContext::with(
+                            state_context.service_target,
+                            state_machine_id,
+                            relationship,
+                        ),
+                    );
+
                     let Some(mut state_machine) =
                         world.get_mut::<HsmStateMachine>(state_machine_id)
                     else {
@@ -936,11 +1099,13 @@ impl StateLifecycle {
                         );
                         return;
                     };
-                    let Transition::Next((curr_state, on_state)) = state_machine.pop_next_state()
+                    let Some((curr_state, on_state)) =
+                        state_machine.pop_next_state().and_then(|t| t.to())
                     else {
                         world.entity_mut(state_machine_id).insert(Terminated);
                         return;
                     };
+
                     state_machine.set_curr_state(curr_state);
                     world.entity_mut(state_machine_id).insert(on_state);
                 });
@@ -956,8 +1121,8 @@ impl StateLifecycle {
                 return;
             };
             let mut entity_commands = commands.entity(state_machine_id);
-            while let Some(Transition::Next((curr_state, on_state))) =
-                state_machine.transition_queue.pop_front()
+            while let Some((curr_state, on_state)) =
+                state_machine.pop_next_state().and_then(|t| t.to())
             {
                 entity_commands.queue(move |mut entity_mut: EntityWorldMut<'_>| {
                     let Some(mut state_machine) = entity_mut.get_mut::<HsmStateMachine>() else {

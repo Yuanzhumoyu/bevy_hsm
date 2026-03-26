@@ -50,7 +50,7 @@ fn setup(
         ComponentB,
         StateLifecycle::default(),
         #[state_data(ComponentA,ComponentB)]
-        #[state(on_enter="on_enter_name", on_exit="on_exit_name")]:state
+        #[state(after_enter="on_enter_name", before_exit="on_exit_name")]:state
         (
             ComponentC,
             #[state] ComponentA,

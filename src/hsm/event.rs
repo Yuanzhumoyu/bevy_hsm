@@ -77,7 +77,7 @@ impl HsmTrigger {
 
     /// 创建一个带条件的向上级状态转换的触发器
     pub const fn guarded_super(state_machine: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::ToSuper)
+        Self::new(state_machine, HsmTriggerType::GuardedSuper)
     }
 
     /// 创建一个带条件的向子状态转换的触发器

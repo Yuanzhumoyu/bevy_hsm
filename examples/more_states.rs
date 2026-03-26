@@ -1,10 +1,16 @@
 use bevy::prelude::*;
-use bevy_hsm::prelude::*;
+use bevy_hsm::{prelude::*, system_registry};
 
 fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
     move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
         let state_name = query.get(context.state()).unwrap();
         println!("[{}]{}: {}", context.state(), state_name, info);
+    }
+}
+
+fn debug_on_transition(info: &str) -> impl Fn(In<TransitionContext>) {
+    move |context: In<TransitionContext>| {
+        println!("{:?}{}", context.relationship(), info);
     }
 }
 
@@ -20,6 +26,7 @@ fn register_condition(
     mut commands: Commands,
     mut guard_registry: ResMut<GuardRegistry>,
     mut action_registry: ResMut<ActionRegistry>,
+    mut transition_registry: ResMut<TransitionRegistry>,
 ) {
     let id = commands.register_system(is_up);
     guard_registry.insert("is_up", id);
@@ -30,6 +37,10 @@ fn register_condition(
     action_registry.insert("debug_on_enter", id);
     let id = commands.register_system(debug_on_state("退出状态"));
     action_registry.insert("debug_on_exit", id);
+    system_registry!(<commands,transition_registry>[
+        "debug_before_enter"=>debug_on_transition("进入状态之前"),
+        "debug_after_exit"=>debug_on_transition("退出状态之后")
+    ]);
 }
 
 fn setup(mut commands: Commands) {
@@ -37,8 +48,10 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("OFF"),
             HsmState::default(),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            BeforeEnterSystem::new("debug_before_enter"),
+            AfterExitSystem::new("debug_after_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -46,10 +59,12 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON1"),
             HsmState::default(),
-            EnterGuard::new("is_up"),
-            ExitGuard::new("is_down"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            GuardEnter::new("is_up"),
+            GuardExit::new("is_down"),
+            BeforeEnterSystem::new("debug_before_enter"),
+            AfterExitSystem::new("debug_after_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -57,10 +72,12 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON2"),
             HsmState::default(),
-            EnterGuard::new("is_up"),
-            ExitGuard::new("is_down"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            GuardEnter::new("is_up"),
+            GuardExit::new("is_down"),
+            BeforeEnterSystem::new("debug_before_enter"),
+            AfterExitSystem::new("debug_after_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -68,10 +85,12 @@ fn setup(mut commands: Commands) {
         .spawn((
             Name::new("ON3"),
             HsmState::default(),
-            EnterGuard::new("is_up"),
-            ExitGuard::new("is_down"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            GuardEnter::new("is_up"),
+            GuardExit::new("is_down"),
+            BeforeEnterSystem::new("debug_before_enter"),
+            AfterExitSystem::new("debug_after_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 

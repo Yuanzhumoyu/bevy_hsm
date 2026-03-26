@@ -13,7 +13,7 @@
 //! ## 主要功能
 //!
 //! - **双模式支持**: 同时支持有限状态机 (`FSM`) 和分层状态机 (`HSM`)。
-//! - **生命周期动作**: 为每个状态定义 `OnEnter`, `OnUpdate`, `OnExit` 动作，它们都是 Bevy 系统。
+//! - **生命周期动作**: 为每个状态定义 `AfterEnter`, `OnUpdate`, `BeforeExit` 动作，它们都是 Bevy 系统。
 //! - **转换守卫 (Guards)**: 使用 Bevy 系统作为守卫条件，以编程方式决定是否允许状态转换。
 //! - **状态数据 (`StateData`)**: 自动在进入/退出状态时为实体添加/移除指定的组件。
 //! - **历史状态 (History)**: HSM 支持历史状态，可以轻松返回到之前的活动子状态。
@@ -39,7 +39,7 @@
 //! ## Features
 //!
 //! - **Dual-Mode Support**: Supports both Finite State Machines (`FSM`) and Hierarchical State Machines (`HSM`).
-//! - **Lifecycle Actions**: Define `OnEnter`, `OnUpdate`, and `OnExit` actions for each state, all of which are Bevy systems.
+//! - **Lifecycle Actions**: Define `AfterEnter`, `OnUpdate`, and `BeforeExit` actions for each state, all of which are Bevy systems.
 //! - **Transition Guards**: Use Bevy systems as guard conditions to programmatically decide whether a state transition is allowed.
 //! - **State Data**: Automatically add or remove specified components from an entity upon entering/exiting a state.
 //! - **History States**: HSMs support history states, making it easy to return to a previous active sub-state.
@@ -68,6 +68,7 @@ use bevy::prelude::*;
 
 use crate::action_dispatcher::ActionDispatch;
 use crate::guards::GuardRegistry;
+use crate::prelude::TransitionRegistry;
 use crate::state_actions::ActionRegistry;
 
 /// Bevy 插件，用于初始化状态机所需的所有资源和系统。
@@ -109,20 +110,21 @@ impl StateMachinePlugin {
 
 impl Plugin for StateMachinePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActionRegistry>();
         app.init_resource::<ActionDispatch>();
+        app.init_resource::<ActionRegistry>();
         app.init_resource::<GuardRegistry>();
+        app.init_resource::<TransitionRegistry>();
 
         #[cfg(feature = "hsm")]
         {
             use crate::hsm::{
-                guards::{EnterGuardCache, ExitGuardCache},
+                guards::{GuardEnterCache, GuardExitCache},
                 transition_strategy::CheckOnTransitionStates,
             };
 
             app.init_resource::<CheckOnTransitionStates>();
-            app.init_resource::<EnterGuardCache>();
-            app.init_resource::<ExitGuardCache>();
+            app.init_resource::<GuardEnterCache>();
+            app.init_resource::<GuardExitCache>();
 
             (self.transition_system)(app);
 
@@ -145,9 +147,40 @@ impl Default for StateMachinePlugin {
     }
 }
 
+/// A macro to simplify the registration of multiple systems into a registry.
+///
+/// This macro is a convenient way to register multiple Bevy systems (like actions or guards)
+/// into their respective registries (`ActionRegistry`, `GuardRegistry`) at once.
+/// It takes a source for system registration (usually `Commands`),
+/// the registry resource, and a list of name-system pairs.
+///
+/// # Arguments
+///
+/// * `$source`: The identifier for the system registration source, typically `commands` of type `Commands`.
+/// * `$system_registry`: The identifier for the registry resource, e.g., `action_registry` of type `ResMut<ActionRegistry>`.
+/// * `[$($system_name:expr => $system:expr),*]`: A comma-separated list of pairs, where:
+///     * `$system_name`: A string literal representing the name to associate with the system.
+///     * `$system`: The system (e.g., a function identifier) to be registered.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use bevy::prelude::*;
+/// use bevy_hsm::prelude::*;
+///
+/// fn my_action(context: In<ActionContext>) { /* ... */ }
+/// fn another_action(context: In<ActionContext>) { /* ... */ }
+///
+/// fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
+///     system_registry!(<commands, action_registry>[
+///         "action1" => my_action,
+///         "action2" => another_action,
+///     ]);
+/// }
+/// ```
 #[macro_export]
 macro_rules! system_registry {
-    (<$source:ident, $system_registry:ident>[$($system_name:expr => $system:expr),*]) => {
+    (<$source:ident, $system_registry:ident>[$($system_name:expr => $system:expr),*$(,)?]) => {
         $system_registry.extend([$(($system_name, $source.register_system($system))),*].into_iter());
     };
 }

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_hsm::{StateMachinePlugin, prelude::*};
+use bevy_hsm::{StateMachinePlugin, prelude::*, system_registry};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct ToggleEvent;
@@ -16,6 +16,12 @@ fn log_on_exit(In(context): In<ActionContext>, query: Query<&Name>) {
     }
 }
 
+fn log_on_transition(info: &str) -> impl Fn(In<TransitionContext>) {
+    move |context: In<TransitionContext>| {
+        info!("{:?}{}", context.relationship(), info);
+    }
+}
+
 fn log_on_update(
     In(contexts): In<Vec<ActionContext>>,
     query: Query<&Name>,
@@ -27,19 +33,29 @@ fn log_on_update(
     Some(contexts)
 }
 
-fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
+fn setup_fsm(
+    mut commands: Commands,
+    mut action_registry: ResMut<ActionRegistry>,
+    mut transition_registry: ResMut<TransitionRegistry>,
+) {
     let system_id = commands.register_system(log_on_enter);
     action_registry.insert("log_on_enter", system_id);
     let system_id = commands.register_system(log_on_exit);
     action_registry.insert("log_on_exit", system_id);
+    system_registry!(<commands,transition_registry>[
+        "log_before_enter"=>log_on_transition("before enter"),
+        "log_after_exit"=>log_on_transition("after exit"),
+    ]);
 
     let state_a = commands
         .spawn((
             FsmState,
             Name::new("State A"),
-            OnEnterSystem::new("log_on_enter"),
+            BeforeEnterSystem::new("log_before_enter"),
+            AfterExitSystem::new("log_after_exit"),
+            AfterEnterSystem::new("log_on_enter"),
             OnUpdateSystem::new("Update:log_on_update"),
-            OnExitSystem::new("log_on_exit"),
+            BeforeExitSystem::new("log_on_exit"),
         ))
         .id();
 
@@ -47,8 +63,10 @@ fn setup_fsm(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>
         .spawn((
             FsmState,
             Name::new("State B"),
-            OnEnterSystem::new("log_on_enter"),
-            OnExitSystem::new("log_on_exit"),
+            BeforeEnterSystem::new("log_before_enter"),
+            AfterExitSystem::new("log_after_exit"),
+            AfterEnterSystem::new("log_on_enter"),
+            BeforeExitSystem::new("log_on_exit"),
         ))
         .id();
 

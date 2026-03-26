@@ -38,12 +38,12 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     commands.spawn(fsm!(
         states:{
             #[state_data(ComponentA,ComponentB)]
-            #[state(on_enter="on_enter_name", on_exit="on_exit_name")]:state(
+            #[state(after_enter="on_enter_name", before_exit="on_exit_name")]:state(
                 ComponentC,
                 ComponentD,
             ),
-            #[state(on_enter="on_enter_name", on_exit="on_exit_name")]ComponentA,
-            #[state(on_enter="on_enter_name", on_exit="on_exit_name")]
+            #[state(after_enter="on_enter_name", before_exit="on_exit_name")]ComponentA,
+            #[state(after_enter="on_enter_name", before_exit="on_exit_name")]
             #[state_data(ComponentC)]
             (ComponentA,ComponentB),
             #[state(minimal)]:MinimalState

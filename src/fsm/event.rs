@@ -48,7 +48,7 @@ use dyn_hash::{DynHash, hash_trait_object};
 /// commands.trigger(FsmTrigger::with_event(sm_entity, MyEvent));
 ///
 /// // To trigger a transition that needs to be checked by a guard:
-/// commands.trigger(FsmTrigger::with_condition(sm_entity, idle));
+/// commands.trigger(FsmTrigger::with_guarded(sm_entity, idle));
 /// # }
 /// ```
 #[derive(EntityEvent, Clone)]
@@ -73,10 +73,10 @@ impl FsmTrigger {
         }
     }
 
-    pub fn with_condition(state_machine: Entity, target: Entity) -> Self {
+    pub fn with_guarded(state_machine: Entity, target: Entity) -> Self {
         Self {
             state_machine,
-            typed: FsmTriggerType::transition(target),
+            typed: FsmTriggerType::guarded(target),
         }
     }
 
@@ -101,7 +101,7 @@ pub enum FsmTriggerType {
     /// 直接跳转下一个状态
     Next(Entity),
     /// 根据条件跳转状态
-    Transition(Entity),
+    Guarded(Entity),
     /// 根据事件跳转状态
     Event(Box<dyn StateEvent>),
 }
@@ -111,8 +111,8 @@ impl FsmTriggerType {
         Self::Next(target)
     }
 
-    pub const fn transition(target: Entity) -> Self {
-        Self::Transition(target)
+    pub const fn guarded(target: Entity) -> Self {
+        Self::Guarded(target)
     }
 
     pub fn event(event: impl StateEvent + 'static) -> Self {
@@ -124,7 +124,7 @@ impl Debug for FsmTriggerType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Next(target) => f.debug_tuple("Next").field(target).finish(),
-            Self::Transition(target) => f.debug_tuple("Transition").field(target).finish(),
+            Self::Guarded(target) => f.debug_tuple("Guarded").field(target).finish(),
             Self::Event(event) => f.debug_tuple("Event").field(event).finish(),
         }
     }

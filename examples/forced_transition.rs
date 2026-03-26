@@ -31,14 +31,14 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     }
 
     commands.spawn(hsm! {
-       #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit")]:Root(
-            #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit",behavior = Death)]:Movement(
-                #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit")]:Idle,
-                #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit")]:Walking,
+       #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit")]:Root(
+            #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit",behavior = Death)]:Movement(
+                #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit")]:Idle,
+                #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit")]:Walking,
             ),
-            #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit",behavior = Death)]:Combat(
-                #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit")]:Aiming,
-                #[state(on_enter = "debug_on_enter",on_exit = "debug_on_exit")]:Attacking,
+            #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit",behavior = Death)]:Combat(
+                #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit")]:Aiming,
+                #[state(after_enter = "debug_on_enter",before_exit = "debug_on_exit")]:Attacking,
             )
        )
        StateLifecycle::default()

@@ -117,8 +117,8 @@ fn setup(
 
     commands.spawn(fsm! {
         states: {
-            #[state(on_enter = "on_enter_idle")]: idle,
-            #[state(on_enter = "on_enter_dispensing")]: dispensing,
+            #[state(after_enter = "on_enter_idle")]: idle,
+            #[state(after_enter = "on_enter_dispensing")]: dispensing,
         },
         transitions: {
             idle => dispensing :guard("has_enough_money"),
@@ -162,7 +162,7 @@ fn handle_input(
             buyer: player_entity,
             item_price: 10,
         });
-        commands.trigger(FsmTrigger::with_condition(
+        commands.trigger(FsmTrigger::with_guarded(
             vending_machine_entity,
             vending_machine_states.dispensing,
         ))

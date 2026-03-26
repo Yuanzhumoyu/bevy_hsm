@@ -65,7 +65,7 @@ impl GuardRegistry {
     /// Get a condition
     pub fn get<Q>(&self, name: &Q) -> Option<GuardId>
     where
-        Q: Hash + Equivalent<String>,
+        Q: Hash + Equivalent<String> + ?Sized,
     {
         self.0.get(name).cloned()
     }
@@ -87,11 +87,17 @@ impl GuardRegistry {
         self.0.remove(name)
     }
 
+    /// 获取已注册守卫的数量
+    ///
+    /// Get the number of registered guards
     #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// 检查守卫注册表是否为空
+    ///
+    /// Check if the guard registry is empty
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -104,11 +110,17 @@ impl<S: Into<String>> Extend<(S, GuardId)> for GuardRegistry {
     }
 }
 
-///# 组合守卫/Combined guard
+/// # 编译后的组合守卫
 ///
-/// 用于组合多个守卫，支持And、Or、Not操作。
+/// * 用于在运行时执行的已编译的守卫条件。
+///   `CompiledGuard` 是从 `GuardCondition` 编译而来的，它将守卫的逻辑（如 `And`, `Or`, `Not`）
+///   与实际的 `SystemId` 结合起来，以便在状态转换时高效地执行。
 ///
-/// Used to combine multiple guards, supporting And, Or, Not operations.
+/// # Compiled Combined Guard
+///
+/// * A compiled guard condition for execution at runtime.
+///   `CompiledGuard` is compiled from `GuardCondition` and combines guard logic (like `And`, `Or`, `Not`)
+///   with the actual `SystemId` for efficient execution during state transitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledGuard {
     And(SmallVec<[Box<CompiledGuard>; 2]>),
@@ -118,10 +130,16 @@ pub enum CompiledGuard {
 }
 
 impl CompiledGuard {
+    /// 从一个 `GuardId` 创建一个新的 `CompiledGuard`。
+    ///
+    /// Creates a new `CompiledGuard` from a `GuardId`.
     pub fn new(id: GuardId) -> Self {
         Self::Id(id)
     }
 
+    /// 添加一个 `AND` 条件。
+    ///
+    /// Adds an `AND` condition.
     pub fn add_and(self, condition: CompiledGuard) -> Self {
         if let Self::And(mut condition_ids) = self {
             condition_ids.push(Box::new(condition));
@@ -131,6 +149,9 @@ impl CompiledGuard {
         }
     }
 
+    /// 添加一个 `OR` 条件。
+    ///
+    /// Adds an `OR` condition.
     pub fn add_or(self, condition: CompiledGuard) -> Self {
         if let Self::Or(mut condition_ids) = self {
             condition_ids.push(Box::new(condition));
@@ -140,6 +161,9 @@ impl CompiledGuard {
         }
     }
 
+    /// 添加一个 `NOT` 条件。
+    ///
+    /// Adds a `NOT` condition.
     pub fn add_not(self) -> Self {
         match self {
             Self::Not(condition) => *condition,
@@ -147,6 +171,9 @@ impl CompiledGuard {
         }
     }
 
+    /// 在给定的 `World` 中运行守卫条件。
+    ///
+    /// Runs the guard condition in the given `World`.
     pub fn run(
         &self,
         world: &mut World,
@@ -254,6 +281,9 @@ impl GuardCondition {
         condition.add_not()
     }
 
+    /// 添加一个 `AND` 条件。
+    ///
+    /// Adds an `AND` condition.
     pub fn add_and(self, condition: GuardCondition) -> Self {
         let mut conditions = SmallVec::new();
         match self {
@@ -267,6 +297,9 @@ impl GuardCondition {
         Self::And(conditions)
     }
 
+    /// 添加一个 `OR` 条件。
+    ///
+    /// Adds an `OR` condition.
     pub fn add_or(self, condition: GuardCondition) -> Self {
         let mut conditions = SmallVec::new();
         match self {
@@ -280,6 +313,9 @@ impl GuardCondition {
         Self::Or(conditions)
     }
 
+    /// 添加一个 `NOT` 条件。
+    ///
+    /// Adds a `NOT` condition.
     pub fn add_not(self) -> Self {
         match self {
             Self::Not(condition) => *condition,
@@ -349,13 +385,16 @@ use std::str::Chars;
 
 use crate::context::GuardContext;
 
-// 词法分析器
+/// 用于解析守卫条件的词法分析器。
+///
+/// `Lexer` 将输入的字符串分解为一系列的 `Token`，为 `Parser` 提供基础。
 struct Lexer<'a> {
     chars: Chars<'a>,
     current_char: Option<char>,
 }
 
 impl<'a> Lexer<'a> {
+    /// 创建一个新的 `Lexer`。
     fn new(input: &'a str) -> Self {
         let mut chars = input.chars();
         let current_char = chars.next();
@@ -365,14 +404,17 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// 查看下一个字符而不消耗它。
     pub fn peek(&self) -> Option<char> {
         self.current_char
     }
 
+    /// 向前移动一个字符。
     fn advance(&mut self) {
         self.current_char = self.chars.next();
     }
 
+    /// 跳过空白字符。
     fn skip_whitespace(&mut self) {
         while let Some(c) = self.current_char {
             if c.is_whitespace() {
@@ -383,6 +425,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// 获取下一个 `Token`。
     fn next_token(&mut self) -> Option<Token> {
         self.skip_whitespace();
 
@@ -423,6 +466,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// 表示解析器可以识别的词法单元。
 #[derive(Debug, Clone)]
 enum Token {
     Identifier(String),
@@ -431,13 +475,16 @@ enum Token {
     Comma,
 }
 
-// 语法分析器
+/// 用于解析守卫条件的语法分析器。
+///
+/// `Parser` 从 `Lexer` 获取 `Token`，并根据预定义的语法规则构建 `GuardCondition`。
 struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Option<Token>,
 }
 
 impl<'a> Parser<'a> {
+    /// 创建一个新的 `Parser`。
     fn new(input: &'a str) -> Self {
         let mut lexer = Lexer::new(input);
         let current_token = lexer.next_token();
@@ -447,10 +494,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 向前移动一个 `Token`。
     fn advance(&mut self) {
         self.current_token = self.lexer.next_token();
     }
 
+    /// 期望并消耗一个标识符 `Token`。
     fn expect_identifier(&mut self) -> Result<String, String> {
         match self.current_token.take() {
             Some(Token::Identifier(id)) => {
@@ -461,6 +510,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 解析一个组合条件。
     fn parse_combination_condition(&mut self) -> Result<GuardCondition, String> {
         match &self.current_token {
             Some(Token::Identifier(id)) if id == "not" => self.parse_not_condition(),
@@ -483,6 +533,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 解析一个 `NOT` 条件。
     fn parse_not_condition(&mut self) -> Result<GuardCondition, String> {
         // 期望 "not("
         self.expect_identifier()?; // "not"
@@ -501,6 +552,7 @@ impl<'a> Parser<'a> {
         Ok(GuardCondition::Not(Box::new(inner_condition)))
     }
 
+    /// 解析一个 `AND` 条件。
     fn parse_and_condition(&mut self) -> Result<GuardCondition, String> {
         // 期望 "and("
         self.expect_identifier()?; // "and"
@@ -529,6 +581,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// 解析一个 `OR` 条件。
     fn parse_or_condition(&mut self) -> Result<GuardCondition, String> {
         // 期望 "or("
         self.expect_identifier()?; // "or"

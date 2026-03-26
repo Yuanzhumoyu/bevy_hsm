@@ -11,17 +11,17 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
 ## Features
 
 - **Hybrid Model**: Supports both HSM and FSM within a unified framework.
-- **State Lifecycles**: Supports `OnEnter`, `OnUpdate`, and `OnExit` lifecycle stages for states, which can be associated with independent Bevy systems.
+- **State Lifecycles**: Supports `Enter`, `Update`, and `Exit` lifecycle stages for states, which can be associated with independent Bevy systems.
 - **Hierarchical Structure**: Supports state nesting (parent and child states) for logic reuse and composition.
 - **Flexible Transition Triggers**:
-  - **HSM**: Automatically triggers transitions through composable **condition systems** (`EnterGuard`, `ExitGuard`), or precisely controls them by sending **events** (`HsmTrigger`).
+  - **HSM**: Automatically triggers transitions through composable **condition systems** (`GuardEnter`, `GuardExit`), or precisely controls them by sending **events** (`HsmTrigger`).
   - **FSM**: Precisely controls transitions by sending **events** (`FsmTrigger`).
 - **Advanced Transition Control (HSM)**:
   - **Transition Strategy(`StateTransitionStrategy`)**: Configurable behavior for parent-child state transitions.
     - `Nested`: The parent state remains active while the child state executes its lifecycle within the parent.
     - `Parallel` The parent state exits before the child state enters, separating their lifecycles.
   - **Return Behavior(`ExitTransitionBehavior`)**: Configurable behavior for the parent state after a child state returns.
-    - `Rebirth`: Triggers the parent state's OnEnter.
+    - `Rebirth`: Triggers the parent state's AfterEnter.
     - `Resurrection`: Returns to the parent state's OnUpdate.
     - `Death`: Causes the parent state to exit as well, propagating the exit behavior up the hierarchy.
 - **Bevy-Idiomatic**: The entire architecture follows Bevy's ECS paradigm, driven by components, events, and systems for seamless integration with the engine.
@@ -48,29 +48,71 @@ fn main() {
 
 ### Common Concepts
 
-- `OnEnterSystem` / `OnUpdateSystem` / `OnExitSystem`: Systems that execute when a state is entered, updated, and exited, respectively.
-- `GuardRegistry`: A resource for registering and managing all condition systems.
+- `BeforeEnterSystem` / `AfterEnterSystem` / `OnUpdateSystem` / `BeforeExitSystem` / `AfterExitSystem`: Systems that execute before entering, after entering, during update, before exiting, and after exiting a state, respectively.
+- `ActionRegistry` / `GuardRegistry` / `TransitionRegistry`: Resources for registering and managing all action, guard, and transition systems, respectively.
+- `ActionContext` / `GuardContext` / `TransitionContext`: These are specialized system parameters used to provide contextual information about states and transitions in action, guard, and transition systems. For example, `ActionContext` provides the entity of the current state, while `GuardContext` provides the source and target states of the transition.
 - `Paused`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
 - `Terminated`: A marker component indicating that the state machine has finished its execution.
 
 ### Hierarchical State Machine (HSM) - State-Driven
 
-The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles.
+The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles. It supports two driving modes:
 
-- `HsmStateMachine`: The core component of the HSM, managing the current state, transition queue, and history.
-- `StateLifecycle`: **The state-driven engine of the HSM**. This special component's value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook.
-- `HsmTrigger`: **The event-driven engine of the HSM**. This is a Bevy event; sending it triggers an HSM state transition, providing an imperative way of control.
+- **State-Driven (Automatic)**: Via the `StateLifecycle` component. This is a special component whose value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook. This mode is typically used for automatic transitions triggered by the state's own conditions.
+- **Event-Driven (Manual)**: By sending an `HsmTrigger` event. This is a Bevy event that, when sent, forces an HSM state transition, providing imperative and precise control.
 - `StateTree`: Defines the parent-child hierarchical relationships between states.
-- `EnterGuard` / `ExitGuard`: Components attached to state entities to specify the conditions for entering or exiting that state.
+- `GuardEnter` / `GuardExit`: Components attached to state entities to specify the conditions for entering or exiting that state.
+
+#### HSM Advanced Features
+
+##### Transition Strategy (StateTransitionStrategy)
+
+By setting the `strategy` in the `#[state]` attribute, you can control the behavior of child states when entering or exiting a parent state.
+
+- **`Nested`** (Default): The parent state remains active, and the entry and exit of the child state occur within the parent state's lifecycle.
+- **`Parallel`**: During a transition, the parent state will exit first, then the child state completes its lifecycle, after which the parent state may re-enter according to the `ExitTransitionBehavior`.
+
+##### State Behavior (ExitTransitionBehavior)
+
+With the `behavior` attribute, you can define how a parent state behaves after one of its child states exits.
+
+- **`Rebirth`**: After exiting a child state, the parent state will re-execute its `Enter` phase.
+- **`Resurrection`** (Default): After exiting a child state, the parent state will directly resume its `Update` phase.
+- **`Death`**: After exiting a child state, the parent state itself will also exit, propagating the exit behavior upwards.
+
+##### History State
+
+HSMs support a history state feature. By setting `history_capacity` in the `init` section of the `hsm!` macro, the state machine can "remember" the most recently visited child state. When a parent state is re-entered, it can directly resume to the last active child state instead of its initial child state, which is very useful for implementing features like "back" navigation.
+
+#### Plugin Configuration
+
+##### Custom Scheduling
+
+By default, the state machine systems run in the `Last` schedule. If you need finer control, you can specify that the state machine systems run in your custom schedule using `StateMachinePlugin::with_schedule(MySchedule)`.
+
+```rust,ignore
+use bevy::prelude::*;
+use bevy_hsm::prelude::*;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct MyUpdate;
+
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_plugins(StateMachinePlugin::with_schedule(MyUpdate))
+        .run();
+}
+```
 
 ### Finite State Machine (FSM) - Event-Driven
 
 The FSM is driven by external events, making it ideal for responsive, direct state switching.
 
+- `FsmState`: A marker component used to identify an entity as an FSM state.
 - `FsmStateMachine`: The core component of the FSM, managing the current state and graph.
-- `FsmTrigger`: **The engine of the FSM**. This is a Bevy event; sending it triggers an FSM state transition.
+- `FsmTrigger`: **The engine of the FSM**. This is a Bevy event used to drive FSM state transitions. You can use it to trigger unconditional transitions or to wrap a custom event (like an enum or struct) to trigger a specific event-driven transition.
 - `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
-- `StateEvent`: A trait that allows you to use any custom type (struct, enum, integer, etc.) as a specific event to trigger FSM transitions.
 
 ## Macro Syntax (EBNF)
 
@@ -83,12 +125,13 @@ hsm ::= [ machine_config, ',', ], state_node, { ',', component }, [ ',', config_
 machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
 machine_config_param ::= 'history_capacity', '=', integer_literal
                        | ( 'init_state' | 'curr_state' ), '=', state_ref;
-state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
+state_node ::= state_attribute, [ ':', state_name ], [ '(', { state_content }, ')' ];
 state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
 state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
                   | '#[state_data(', component, { ',', component }, ')]';
 state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
-                        | ( 'on_update' | 'on_enter' | 'on_exit' ), '=', action_id
+                        | ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
+                        | 'on_update', '=', lit_str
                         | 'strategy', '=', ( 'Nested' | 'Parallel' )
                         | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
                         | 'fsm_blueprint', '=', rust_expression
@@ -105,15 +148,15 @@ identifier ::= (* A Rust identifier, e.g., MyState, StateA *) ;
 lit_str ::= (* A Rust string literal, e.g., "my_system" *) ;
 rust_expression ::= (* Any valid Rust expression *) ;
 expr_closure ::= (* A Rust closure expression *,e.g., |entity_commands: EntityCommands, states: &[Entity]| { ... } *) ;
-fn_identifier ::= (* A Rust function identifier, e.g., my_function *, parameter type fn (EntityCommands, &[Entity]){ ... } *) ;
+fn_identifier ::= (* A Rust function identifier, e.g., my_function *, signature must be `fn(EntityCommands, &[Entity])` *) ;
 expr_call ::= (* Any valid Rust function call expression, e.g., my_function(a, b) *) ;
 ```
 
 **Key Points**:
-  
+
 - The core of the `hsm!` macro is a single `state_node`, representing the root of the state tree.
 - After the root state, you can append any number of Bevy `component`s, which will be added to the same entity as the state machine.
-- A `state_node` can be configured with `#[state(...)]` attributes to set guards, lifecycle hooks (`on_update`, etc.), and hierarchical behavior (`strategy`, `behavior`).
+- The `state_node` can be configured with the `#[state(...)]` attribute. In addition to common lifecycle hooks (like `on_update`, `after_enter`), it supports HSM-exclusive attributes, including guards for automatic transitions (`guard_enter`, `guard_exit`) and properties for controlling hierarchical behavior like `strategy` and `behavior`.
 - The `#[state_data(...)]` attribute is used to attach components that exist only when that state is active.
 - States can be nested. Child states and components are defined within the `()` of the parent state.
 
@@ -125,7 +168,7 @@ The `fsm!` macro is used to build a flat Finite State Machine. It defines a set 
 fsm ::= [ machine_config, ',', ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
 fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}', ',',
               'transitions', ':', '{', transition, { ',', transition }, '}';
-state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
+state_definition ::= state_attribute, [ ':', state_name ], [ '(', { component }, ')' ];
 transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
 transition_condition ::= 'event', '(', rust_expression ')' (* Event *)
                        | 'guard', '(', guard_expression ')'; (* Conditional Guard *)
@@ -135,10 +178,10 @@ state_ref ::= identifier | integer_literal; (* State name or index *)
 
 **Key Points**:
 
-- The `fsm!` macro consists of two parts: the `fsm_graph` and an optional `components` block.
+- The `fsm!` macro consists of three parts: the `fsm_graph`, an optional `components` block, and an optional `config_fn`.
 - The `fsm_graph` is required and contains both a `states` and a `transitions` block.
-- The `states<...>` syntax allows you to specify the initial state by name or index (`state_ref`). If omitted, the first state in the list is the initial state.
 - The syntax for `state_definition` is similar to `state_node` in `hsm!`, but it cannot contain nested states.
+- `state_definition` also supports `#[state(...)]` and `#[state_data(...)]` attributes. However, please note that because FSMs have a flat, event-driven structure, parameters in `#[state(...)]` related to HSM's automatic transitions and hierarchy (like `guard_enter`, `guard_exit`, `strategy`, `behavior`) are invalid here.
 - A `transition` defines the rules for moving between states. It can be unconditional or conditional (via an event or a guard).
   - The arrows define the direction of the transition. There are three valid patterns:
     - A => B: A unidirectional transition from A to B.
@@ -206,19 +249,19 @@ guard_id ::= lit_str | ( '#', identifier );
 
 ## Cargo Features
 
-This crate provides several conditional compilation features:
+This crate provides the following Cargo features:
 
-- **`history`**: Enables state history tracking for both `FsmStateMachine` and `HsmStateMachine`. This allows you to see the sequence of states that have been active.
-- **`state_data`**: Enables the `StateData` feature. This allows you to attach components as "state-local data" to a state. When the state machine enters that state, these components are automatically cloned to the state machine entity and are removed upon exit.
-- **`hybrid`**: Enables hybrid state machine functionality, supporting both HSM and FSM.
-- **`hsm`**: Enables HSM functionality.
-- **`fsm`**: Enables FSM functionality.
+- **`hsm`** (enabled by default): Enables Hierarchical State Machine (HSM) functionality.
+- **`fsm`** (enabled by default): Enables Finite State Machine (FSM) functionality.
+- **`hybrid`**: A convenience feature that enables both `hsm` and `fsm`.
+- **`history`**: Enables history tracking for state machines, allowing you to trace the sequence of state transitions.
+- **`state_data`**: Enables the `StateData` feature, allowing you to attach components as "state-local data" to a state.
 
-To enable features, add them to your `Cargo.toml` file:
+By default, `hybrid`, `history`, and `state_data` are all enabled. If you want to configure them yourself, you can do so like this:
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.18", features = ["history", "hybrid"] }
+bevy_hsm = { version = "0.18", default-features = false, features = ["history", "hybrid"] }
 ```
 
 ## Epilogue

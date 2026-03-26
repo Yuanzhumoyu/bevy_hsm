@@ -11,7 +11,7 @@ use crate::{
         state_tree::StateTree,
     },
     markers::*,
-    prelude::{EnterGuard, EnterGuardCache, ExitGuard, ExitGuardCache, HsmStateId, ServiceTarget},
+    prelude::{GuardEnter, GuardEnterCache, GuardExit, GuardExitCache, HsmStateId, ServiceTarget},
 };
 
 /// 状态转换策略，用于控制状态转换行为
@@ -23,10 +23,10 @@ pub enum StateTransitionStrategy {
     ///
     /// Sub state nested transition: The parent state remains active, and the sub state enters and exits occur within the parent state
     /// ```toml
-    ///    super_state: on_enter
-    ///    sub_state: on_enter
-    ///    sub_state: on_exit
-    ///    super_state: on_exit
+    ///    super_state: after_enter
+    ///    sub_state: after_enter
+    ///    sub_state: before_exit
+    ///    super_state: before_exit
     /// ```
     #[default]
     Nested,
@@ -34,10 +34,10 @@ pub enum StateTransitionStrategy {
     ///
     /// Level-to-level transition: The parent state exits first, followed by the entry and exit of the child state, and finally, the parent state may be re-entered
     /// ```toml
-    ///    super_state: on_enter
-    ///    super_state: on_exit
-    ///    sub_state: on_enter
-    ///    sub_state: on_exit
+    ///    super_state: after_enter
+    ///    super_state: before_exit
+    ///    sub_state: after_enter
+    ///    sub_state: before_exit
     /// ```
     Parallel,
 }
@@ -60,13 +60,13 @@ impl StateTransitionStrategy {
 pub enum ExitTransitionBehavior {
     /// # 重生\Rebirth
     ///
-    /// 从sub_state退出后，重新进入super_state的on_enter阶段
+    /// 从sub_state退出后，重新进入super_state的enter阶段
     ///
-    /// From sub_state exit, re-enter the super_state's on_enter phase
+    /// From sub_state exit, re-enter the super_state's after_enter phase
     Rebirth,
     /// # 复活\Resurrection
     ///
-    /// 从sub_state退出后，进入super_state的on_update阶段
+    /// 从sub_state退出后，进入super_state的update阶段
     ///
     /// From sub_state exit, enter the super_state's on_update phase
     #[default]
@@ -106,6 +106,7 @@ pub trait StateTraversalStrategy: Send + Sync + 'static {
     /// 给定一个子状态实体列表，按照期望的遍历顺序返回它们。
     fn traverse(&self, world: &World, children: &[Entity]) -> Vec<Entity>;
 
+    /// 返回遍历策略的名称。
     fn name(&self) -> &'static str {
         type_name::<Self>()
     }
@@ -181,11 +182,11 @@ fn build_exit_transition_plan(
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
             ExitTransitionBehavior::Resurrection,
-        ) => Ok(vec![Transition::Next((state_id, StateLifecycle::Update))]),
+        ) => Ok(vec![Transition::Update(state_id)]),
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
             ExitTransitionBehavior::Rebirth,
-        ) => Ok(vec![Transition::Next((state_id, StateLifecycle::Enter))]),
+        ) => Ok(vec![Transition::Enter(state_id)]),
         (StateTransitionStrategy::Nested, ExitTransitionBehavior::Death) => {
             let Some(state_tree) = world.get::<StateTree>(state_id.tree()) else {
                 return Err(format!(
@@ -194,7 +195,7 @@ fn build_exit_transition_plan(
                 ));
             };
 
-            let mut transition_queue = vec![Transition::Next((state_id, StateLifecycle::Exit))];
+            let mut transition_queue = vec![Transition::Exit(state_id)];
 
             if state_tree.get_root() == state_id.state() {
                 return Ok(transition_queue);
@@ -212,7 +213,7 @@ fn build_exit_transition_plan(
                 };
                 let state_id = HsmStateId::new(state_id.tree(), state);
                 if state_tree.get_root() == state_id.state() {
-                    transition_queue.push(Transition::Next((state_id, behavior.into())));
+                    transition_queue.push(Transition::with_behavior(state_id, behavior));
                     return Ok(transition_queue);
                 }
                 match !(strategy == StateTransitionStrategy::Nested
@@ -225,7 +226,7 @@ fn build_exit_transition_plan(
                         return Ok(transition_queue);
                     }
                     false => {
-                        transition_queue.push(Transition::Next((state_id, StateLifecycle::Exit)));
+                        transition_queue.push(Transition::Exit(state_id));
                     }
                 }
             }
@@ -256,13 +257,9 @@ fn build_exit_transition_plan(
                 behavior = new_behavior;
             }
             match behavior {
-                ExitTransitionBehavior::Rebirth => {
-                    Ok(vec![Transition::Next((state_id, StateLifecycle::Enter))])
-                }
-                ExitTransitionBehavior::Resurrection => {
-                    Ok(vec![Transition::Next((state_id, StateLifecycle::Update))])
-                }
-                ExitTransitionBehavior::Death => Ok(vec![Transition::None]),
+                ExitTransitionBehavior::Rebirth => Ok(vec![Transition::Enter(state_id)]),
+                ExitTransitionBehavior::Resurrection => Ok(vec![Transition::Update(state_id)]),
+                ExitTransitionBehavior::Death => Ok(vec![Transition::End]),
             }
         }
     }
@@ -274,6 +271,12 @@ fn build_exit_transition_plan(
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub(crate) struct CheckOnTransitionStates(HashSet<Entity>);
 
+/// 在指定的调度中安装状态转换系统。
+///
+/// # Arguments
+///
+/// * `app` - Bevy 应用实例。
+/// * `schedule` - 要安装系统的调度标签。
 pub(crate) fn install_transition_systems<T: ScheduleLabel>(app: &mut App, schedule: T) {
     app.add_systems(
         schedule,
@@ -315,22 +318,20 @@ fn handle_enter_transitions(
                         warn!("{}", StateMachineError::HsmStateMissing(e.id()));
                         return false;
                     }
-                    e.contains::<EnterGuard>()
+                    e.contains::<GuardEnter>()
                 });
             let Some(enter_state_id) = world.resource_scope(
-                |world: &mut World, condition_buffer: Mut<EnterGuardCache>| {
+                |world: &mut World, condition_buffer: Mut<GuardEnterCache>| {
                     for sub_state_id in sub_state_iter {
                         let Some(condition_id) = condition_buffer.get(&sub_state_id) else {
                             continue;
                         };
 
+                        let service_target = get_service_target(world, state_machine_id);
                         match condition_id.run(
                             world,
                             GuardContext::new(
-                                match world.get::<ServiceTarget>(state_machine_id) {
-                                    Some(service_target) => service_target.0,
-                                    None => state_machine_id,
-                                },
+                                service_target,
                                 state_machine_id,
                                 curr_state_id.state(),
                                 sub_state_id,
@@ -393,7 +394,7 @@ pub(super) fn handle_enter_transition(
             }
             StateTransitionStrategy::Parallel => {
                 state_machine.set_curr_state(curr_state_id);
-                state_machine.push_next_state(Transition::Next((state_id, StateLifecycle::Enter)));
+                state_machine.push_next_state(Transition::Enter(state_id));
                 StateLifecycle::Exit
             }
         };
@@ -407,7 +408,7 @@ fn handle_exit_transitions(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
     query_state_machines: Query<(Entity, &HsmStateMachine), Without<Paused>>,
-    query_on_exit_conditions: Query<Has<ExitGuard>, With<HsmState>>,
+    query_on_exit_conditions: Query<Has<GuardExit>, With<HsmState>>,
     query_state_trees: Query<&StateTree>,
 ) {
     // 条件为空的状态
@@ -437,21 +438,21 @@ fn handle_exit_transitions(
         };
         commands.queue(move |world: &mut World| -> Result<()> {
             match world.resource_scope(
-                |world: &mut World, exit_guard_cache: Mut<ExitGuardCache>| match exit_guard_cache
+                |world: &mut World, exit_guard_cache: Mut<GuardExitCache>| match exit_guard_cache
                     .get(&curr_state_id.state())
                 {
-                    Some(guard) => guard.run(
-                        world,
-                        GuardContext::new(
-                            match world.get::<ServiceTarget>(state_machine_id) {
-                                Some(service_target) => service_target.0,
-                                None => state_machine_id,
-                            },
-                            state_machine_id,
-                            curr_state_id.state(),
-                            super_state_id,
-                        ),
-                    ),
+                    Some(guard) => {
+                        let service_target = get_service_target(world, state_machine_id);
+                        guard.run(
+                            world,
+                            GuardContext::new(
+                                service_target,
+                                state_machine_id,
+                                curr_state_id.state(),
+                                super_state_id,
+                            ),
+                        )
+                    }
                     None => Ok(false),
                 },
             ) {
@@ -512,6 +513,12 @@ pub(super) fn handle_exit_transition(
         service_target.insert(StateLifecycle::Exit);
         Ok(())
     }
+}
+
+fn get_service_target(world: &World, state_machine_id: Entity) -> Entity {
+    world
+        .get::<ServiceTarget>(state_machine_id)
+        .map_or(state_machine_id, |st| st.0)
 }
 
 #[cfg(test)]
@@ -623,8 +630,8 @@ mod tests {
             .insert((
                 Name::new("OFF"),
                 HsmState::with(states[0].0, states[0].1),
-                OnEnterSystem::new("log_on_enter"),
-                OnExitSystem::new("log_on_exit"),
+                AfterEnterSystem::new("log_on_enter"),
+                BeforeExitSystem::new("log_on_exit"),
             ))
             .id();
         let mut state_tree = StateTree::new(curr_state_id);
@@ -634,10 +641,10 @@ mod tests {
                 .spawn((
                     Name::new(format!("ON{}", i)),
                     HsmState::with(*strategy, *behavior),
-                    OnEnterSystem::new("log_on_enter"),
-                    OnExitSystem::new("log_on_exit"),
-                    EnterGuard::new("is_condition_true"),
-                    ExitGuard::new("is_condition_false"),
+                    AfterEnterSystem::new("log_on_enter"),
+                    BeforeExitSystem::new("log_on_exit"),
+                    GuardEnter::new("is_condition_true"),
+                    GuardExit::new("is_condition_false"),
                 ))
                 .id();
             state_tree.with_child(curr_state_id, new_state_id);

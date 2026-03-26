@@ -134,15 +134,27 @@ impl FsmStateMachine {
             None => entity,
         };
 
+        if let Some(id) =
+            TransitionRegistry::get_transition_id::<BeforeEnterSystem>(&world, curr_state)
+        {
+            let context = TransitionContext::with_initial(service_target, entity, curr_state);
+            unsafe {
+                let _ = world
+                    .as_unsafe_world_cell()
+                    .world_mut()
+                    .run_system_with(id, context);
+            };
+        }
+
         #[cfg(feature = "state_data")]
         StateData::clone_components(&mut world, curr_state, service_target);
 
         let context = ActionContext::new(service_target, entity, curr_state);
 
-        'on_enter: {
-            let Some(id) = ActionRegistry::get_action_id::<OnEnterSystem>(&world, curr_state)
+        'after_enter: {
+            let Some(id) = ActionRegistry::get_action_id::<AfterEnterSystem>(&world, curr_state)
             else {
-                break 'on_enter;
+                break 'after_enter;
             };
 
             unsafe {
@@ -176,9 +188,9 @@ impl FsmStateMachine {
 
         let context = ActionContext::new(service_target, entity, curr_state);
 
-        'on_exit: {
-            let Some(id) = ActionRegistry::get_action_id::<OnExitSystem>(&world, curr_state) else {
-                break 'on_exit;
+        'before_exit: {
+            let Some(id) = ActionRegistry::get_action_id::<BeforeExitSystem>(&world, curr_state) else {
+                break 'before_exit;
             };
 
             unsafe {
@@ -191,6 +203,18 @@ impl FsmStateMachine {
 
         #[cfg(feature = "state_data")]
         StateData::remove_components(&mut world, curr_state, service_target);
+
+        if let Some(id) =
+            TransitionRegistry::get_transition_id::<AfterExitSystem>(&world, curr_state)
+        {
+            let context = TransitionContext::with_final(service_target, entity, curr_state);
+            unsafe {
+                let _ = world
+                    .as_unsafe_world_cell()
+                    .world_mut()
+                    .run_system_with(id, context);
+            };
+        }
 
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),
@@ -243,7 +267,7 @@ impl FsmStateMachine {
         };
 
         match typed {
-            FsmTriggerType::Transition(target) => {
+            FsmTriggerType::Guarded(target) => {
                 Self::handle_guarded_transition(
                     &mut commands,
                     &action_systems,
@@ -323,7 +347,14 @@ impl FsmStateMachine {
             commands.queue(state_data.remove_state_data_command(service_target));
         }
 
+        let transition_context =
+            TransitionContext::with_transition(service_target, state_machine_id, from, to);
+
+        action_systems.run_after_exit_transition(from, transition_context, commands);
+
         self.set_curr_state(to);
+
+        action_systems.run_berfore_enter_transition(to, transition_context, commands);
 
         #[cfg(feature = "state_data")]
         if let Ok(state_data) = query_state_data.get(to).cloned() {
@@ -381,14 +412,18 @@ impl FsmStateMachine {
 
         let on_exit_system_id = action_systems.get_exit_action_id(from).map(|id| {
             (
-                *id,
+                id,
                 ActionContext::new(service_target, state_machine_id, from),
             )
         });
 
+        let after_exit_system_id = action_systems.get_after_exit_transition_id(from);
+
+        let before_enter_system_id = action_systems.get_before_enter_transition_id(target);
+
         let on_enter_system_id = action_systems.get_enter_action_id(target).map(|id| {
             (
-                *id,
+                id,
                 ActionContext::new(service_target, state_machine_id, target),
             )
         });
@@ -422,10 +457,31 @@ impl FsmStateMachine {
                                 .apply(world);
                         }
                     }
+
+                    if let Some(id) = after_exit_system_id {
+                        let context = TransitionContext::with_transition(
+                            service_target,
+                            state_machine_id,
+                            from,
+                            target,
+                        );
+                        let _ = world.run_system_with(id, context);
+                    }
+
                     if let Some(mut state_machine) =
                         world.get_mut::<FsmStateMachine>(state_machine_id)
                     {
                         state_machine.set_curr_state(target);
+                    }
+
+                    if let Some(id) = before_enter_system_id {
+                        let context = TransitionContext::with_transition(
+                            service_target,
+                            state_machine_id,
+                            from,
+                            target,
+                        );
+                        let _ = world.run_system_with(id, context);
                     }
 
                     if let Some((id, context)) = on_enter_system_id {
@@ -459,9 +515,12 @@ impl FsmStateMachine {
 pub(crate) struct ActionSystems<'w, 's> {
     action_dispatch: Res<'w, ActionDispatch>,
     action_registry: Res<'w, ActionRegistry>,
-    query_on_exit_system: Query<'w, 's, &'static OnExitSystem, With<FsmState>>,
-    query_on_enter_system: Query<'w, 's, &'static OnEnterSystem, With<FsmState>>,
+    transition_registry: Res<'w, TransitionRegistry>,
+    query_on_exit_system: Query<'w, 's, &'static BeforeExitSystem, With<FsmState>>,
+    query_on_enter_system: Query<'w, 's, &'static AfterEnterSystem, With<FsmState>>,
     query_on_update_system: Query<'w, 's, &'static OnUpdateSystem, With<FsmState>>,
+    query_after_exit_system: Query<'w, 's, &'static AfterExitSystem, With<FsmState>>,
+    query_before_enter_system: Query<'w, 's, &'static BeforeEnterSystem, With<FsmState>>,
     query_service_target: Query<'w, 's, &'static ServiceTarget, With<FsmStateMachine>>,
 }
 
@@ -480,18 +539,54 @@ impl<'w, 's> ActionSystems<'w, 's> {
             .and_then(|update| self.action_dispatch.get(update.as_str()))
     }
 
-    pub fn get_enter_action_id(&self, state: Entity) -> Option<&ActionId> {
+    pub fn get_enter_action_id(&self, state: Entity) -> Option<ActionId> {
         self.query_on_enter_system
             .get(state)
             .ok()
             .and_then(|enter| self.action_registry.get(enter.as_str()))
     }
 
-    pub fn get_exit_action_id(&self, state: Entity) -> Option<&ActionId> {
+    pub fn get_exit_action_id(&self, state: Entity) -> Option<ActionId> {
         self.query_on_exit_system
             .get(state)
             .ok()
             .and_then(|exit| self.action_registry.get(exit.as_str()))
+    }
+
+    pub fn get_before_enter_transition_id(&self, state: Entity) -> Option<TransitionId> {
+        self.query_before_enter_system
+            .get(state)
+            .ok()
+            .and_then(|enter| self.transition_registry.get(enter.as_str()))
+    }
+
+    pub fn get_after_exit_transition_id(&self, state: Entity) -> Option<TransitionId> {
+        self.query_after_exit_system
+            .get(state)
+            .ok()
+            .and_then(|exit| self.transition_registry.get(exit.as_str()))
+    }
+
+    pub fn run_berfore_enter_transition(
+        &self,
+        state: Entity,
+        context: TransitionContext,
+        commands: &mut Commands,
+    ) {
+        let Ok(enter) = self.query_before_enter_system.get(state) else {
+            return;
+        };
+        if let Some(id) = self.transition_registry.get(enter.as_str()) {
+            commands.run_system_with(id, context);
+            return;
+        }
+        warn!(
+            "{}",
+            StateMachineError::SystemNotFound {
+                system_name: enter.to_string(),
+                state
+            }
+        )
     }
 
     #[inline]
@@ -499,20 +594,17 @@ impl<'w, 's> ActionSystems<'w, 's> {
         let Ok(enter) = self.query_on_enter_system.get(state) else {
             return;
         };
-        match self.action_registry.get(enter.as_str()).cloned() {
-            Some(id) => {
-                commands.run_system_with(id, context);
+        if let Some(id) = self.action_registry.get(enter.as_str()) {
+            commands.run_system_with(id, context);
+            return;
+        };
+        warn!(
+            "{}",
+            StateMachineError::SystemNotFound {
+                system_name: enter.to_string(),
+                state
             }
-            None => {
-                warn!(
-                    "{}",
-                    StateMachineError::SystemNotFound {
-                        system_name: enter.to_string(),
-                        state
-                    }
-                )
-            }
-        }
+        )
     }
 
     #[inline]
@@ -520,20 +612,40 @@ impl<'w, 's> ActionSystems<'w, 's> {
         let Ok(exit) = self.query_on_exit_system.get(state) else {
             return;
         };
-        match self.action_registry.get(exit.as_str()).cloned() {
-            Some(id) => {
-                commands.run_system_with(id, context);
-            }
-            None => {
-                warn!(
-                    "{}",
-                    StateMachineError::SystemNotFound {
-                        system_name: exit.to_string(),
-                        state
-                    }
-                )
-            }
+
+        if let Some(id) = self.action_registry.get(exit.as_str()) {
+            commands.run_system_with(id, context);
+            return;
         }
+        warn!(
+            "{}",
+            StateMachineError::SystemNotFound {
+                system_name: exit.to_string(),
+                state
+            }
+        )
+    }
+
+    pub fn run_after_exit_transition(
+        &self,
+        state: Entity,
+        context: TransitionContext,
+        commands: &mut Commands,
+    ) {
+        let Ok(exit) = self.query_after_exit_system.get(state) else {
+            return;
+        };
+        if let Some(id) = self.transition_registry.get(exit.as_str()) {
+            commands.run_system_with(id, context);
+            return;
+        }
+        warn!(
+            "{}",
+            StateMachineError::SystemNotFound {
+                system_name: exit.to_string(),
+                state
+            }
+        )
     }
 }
 

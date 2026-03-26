@@ -59,8 +59,8 @@ fn setup(mut commands: Commands) {
             Name::new("Start"),
             HsmState::default(),
             OnUpdateSystem::new("Update:debug_hello_world"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
         ))
         .id();
 
@@ -69,10 +69,10 @@ fn setup(mut commands: Commands) {
             Name::new("Counter"),
             HsmState::default(),
             OnUpdateSystem::new("Update:debug_hello_world"),
-            OnEnterSystem::new("debug_on_enter"),
-            OnExitSystem::new("debug_on_exit"),
-            EnterGuard::new("is_open"),
-            ExitGuard::new("is_close"),
+            AfterEnterSystem::new("debug_on_enter"),
+            BeforeExitSystem::new("debug_on_exit"),
+            GuardEnter::new("is_open"),
+            GuardExit::new("is_close"),
         ))
         .id();
 

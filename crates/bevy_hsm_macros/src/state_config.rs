@@ -1,14 +1,21 @@
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, spanned::Spanned};
 
-use crate::{action_id::ActionId, guard_condition::GuardCondition, kw, machine_config::ConfigFn};
+use crate::{
+    action_id::ActionId,
+    guard_condition::GuardCondition,
+    kw::{self},
+    machine_config::ConfigFn,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct StateConfig {
     pub(crate) guard_enter: Option<GuardCondition>,
     pub(crate) guard_exit: Option<GuardCondition>,
+    before_enter: Option<ActionId>,
+    after_exit: Option<ActionId>,
     on_update: Option<LitStr>,
-    on_enter: Option<ActionId>,
-    on_exit: Option<ActionId>,
+    after_enter: Option<ActionId>,
+    before_exit: Option<ActionId>,
     pub(crate) strategy: Option<Ident>,
     pub(crate) behavior: Option<Ident>,
     #[cfg(feature = "hybrid")]
@@ -26,7 +33,11 @@ impl StateConfig {
             return true;
         }
 
-        self.on_update.is_some() || self.on_enter.is_some() || self.on_exit.is_some()
+        self.before_enter.is_some()
+            || self.after_exit.is_some()
+            || self.on_update.is_some()
+            || self.after_enter.is_some()
+            || self.before_exit.is_some()
     }
 
     #[cfg(feature = "hsm")]
@@ -42,9 +53,11 @@ impl StateConfig {
 
         self.guard_enter.is_some()
             || self.guard_exit.is_some()
+            || self.before_enter.is_some()
+            || self.after_exit.is_some()
             || self.on_update.is_some()
-            || self.on_enter.is_some()
-            || self.on_exit.is_some()
+            || self.after_enter.is_some()
+            || self.before_exit.is_some()
             || self.strategy.is_some()
             || self.behavior.is_some()
     }
@@ -90,12 +103,12 @@ impl StateConfig {
     }
 
     pub(crate) fn to_actions(&self, actions: &mut Vec<(LitStr, ConfigFn)>) {
-        if let Some(enter) = &self.on_enter
+        if let Some(enter) = &self.after_enter
             && let Some(action) = enter.to_action()
         {
             actions.push(action);
         }
-        if let Some(exit) = &self.on_exit
+        if let Some(exit) = &self.before_exit
             && let Some(action) = exit.to_action()
         {
             actions.push(action);
@@ -114,7 +127,7 @@ impl StateConfig {
 
                 for state_attr in parsed_attrs {
                     match state_attr {
-                        StateAttrType::EnterGuard(guard) => {
+                        StateAttrType::GuardEnter(guard) => {
                             if config.guard_enter.is_some() {
                                 return Err(syn::Error::new(
                                     guard.span(),
@@ -123,7 +136,7 @@ impl StateConfig {
                             }
                             config.guard_enter = Some(guard);
                         }
-                        StateAttrType::ExitGuard(guard) => {
+                        StateAttrType::GuardExit(guard) => {
                             if config.guard_exit.is_some() {
                                 return Err(syn::Error::new(
                                     guard.span(),
@@ -131,6 +144,21 @@ impl StateConfig {
                                 ));
                             }
                             config.guard_exit = Some(guard);
+                        }
+                        StateAttrType::BeforeEnter(enter) => {
+                            if config.after_enter.is_some() {
+                                return Err(syn::Error::new(
+                                    enter.span(),
+                                    "after_enter already exists",
+                                ));
+                            }
+                            config.before_enter = Some(enter);
+                        }
+                        StateAttrType::AfterExit(exit) => {
+                            if config.before_exit.is_some() {
+                                return Err(syn::Error::new(exit.span(), "before_exit already exists"));
+                            }
+                            config.after_exit = Some(exit);
                         }
                         StateAttrType::OnUpdate(update) => {
                             if config.on_update.is_some() {
@@ -141,20 +169,20 @@ impl StateConfig {
                             }
                             config.on_update = Some(update);
                         }
-                        StateAttrType::OnEnter(enter) => {
-                            if config.on_enter.is_some() {
+                        StateAttrType::AfterEnter(enter) => {
+                            if config.after_enter.is_some() {
                                 return Err(syn::Error::new(
                                     enter.span(),
-                                    "on_enter already exists",
+                                    "after_enter already exists",
                                 ));
                             }
-                            config.on_enter = Some(enter);
+                            config.after_enter = Some(enter);
                         }
-                        StateAttrType::OnExit(exit) => {
-                            if config.on_exit.is_some() {
-                                return Err(syn::Error::new(exit.span(), "on_exit already exists"));
+                        StateAttrType::BeforeExit(exit) => {
+                            if config.before_exit.is_some() {
+                                return Err(syn::Error::new(exit.span(), "before_exit already exists"));
                             }
-                            config.on_exit = Some(exit);
+                            config.before_exit = Some(exit);
                         }
                         StateAttrType::Strategy(strategy) => {
                             if config.strategy.is_some() {
@@ -226,27 +254,35 @@ impl quote::ToTokens for StateConfig {
         let Self {
             guard_enter,
             guard_exit,
+            before_enter,
+            after_exit,
             on_update,
-            on_enter,
-            on_exit,
+            after_enter,
+            before_exit,
             #[cfg(feature = "state_data")]
             state_datas,
             ..
         } = self;
         if let Some(guard_enter) = guard_enter {
-            tokens.extend(quote::quote! {EnterGuard(#guard_enter),});
+            tokens.extend(quote::quote! {GuardEnter(#guard_enter),});
         }
         if let Some(guard_exit) = guard_exit {
-            tokens.extend(quote::quote! {ExitGuard(#guard_exit),});
+            tokens.extend(quote::quote! {GuardExit(#guard_exit),});
+        }
+        if let Some(before_enter) = before_enter {
+            tokens.extend(quote::quote! {BeforeEnterSystem::new(#before_enter),});
+        }
+        if let Some(after_exit) = after_exit {
+            tokens.extend(quote::quote! {AfterExitSystem::new(#after_exit),});
         }
         if let Some(on_update) = on_update {
             tokens.extend(quote::quote! {OnUpdateSystem::new(#on_update),});
         }
-        if let Some(on_enter) = on_enter {
-            tokens.extend(quote::quote! {OnEnterSystem::new(#on_enter),});
+        if let Some(after_enter) = after_enter {
+            tokens.extend(quote::quote! {AfterEnterSystem::new(#after_enter),});
         }
-        if let Some(on_exit) = on_exit {
-            tokens.extend(quote::quote! {OnExitSystem::new(#on_exit),});
+        if let Some(before_exit) = before_exit {
+            tokens.extend(quote::quote! {BeforeExitSystem::new(#before_exit),});
         }
         #[cfg(feature = "state_data")]
         if !state_datas.is_empty() {
@@ -256,11 +292,13 @@ impl quote::ToTokens for StateConfig {
 }
 
 enum StateAttrType {
-    EnterGuard(GuardCondition),
-    ExitGuard(GuardCondition),
+    GuardEnter(GuardCondition),
+    GuardExit(GuardCondition),
+    BeforeEnter(ActionId),
+    AfterExit(ActionId),
     OnUpdate(LitStr),
-    OnEnter(ActionId),
-    OnExit(ActionId),
+    AfterEnter(ActionId),
+    BeforeExit(ActionId),
     Strategy(Ident),
     Behavior(Ident),
     #[cfg(feature = "hybrid")]
@@ -280,27 +318,37 @@ impl Parse for StateAttrType {
             input.parse::<kw::minimal>()?;
             Ok(StateAttrType::Minimal)
         } else if lookahead.peek(kw::guard_enter) {
-            Ok(StateAttrType::EnterGuard(parse_attr::<
+            Ok(StateAttrType::GuardEnter(parse_attr::<
                 kw::guard_enter,
                 GuardCondition,
             >(&input)?))
         } else if lookahead.peek(kw::guard_exit) {
-            Ok(StateAttrType::ExitGuard(parse_attr::<
+            Ok(StateAttrType::GuardExit(parse_attr::<
                 kw::guard_exit,
                 GuardCondition,
+            >(&input)?))
+        } else if lookahead.peek(kw::before_enter) {
+            Ok(StateAttrType::BeforeEnter(parse_attr::<
+                kw::before_enter,
+                ActionId,
+            >(&input)?))
+        } else if lookahead.peek(kw::after_exit) {
+            Ok(StateAttrType::AfterExit(parse_attr::<
+                kw::after_exit,
+                ActionId,
             >(&input)?))
         } else if lookahead.peek(kw::on_update) {
             Ok(StateAttrType::OnUpdate(
                 parse_attr::<kw::on_update, LitStr>(&input)?,
             ))
-        } else if lookahead.peek(kw::on_enter) {
-            Ok(StateAttrType::OnEnter(
-                parse_attr::<kw::on_enter, ActionId>(&input)?,
-            ))
-        } else if lookahead.peek(kw::on_exit) {
-            Ok(StateAttrType::OnExit(parse_attr::<kw::on_exit, ActionId>(
+        } else if lookahead.peek(kw::before_exit) {
+            Ok(StateAttrType::BeforeExit(parse_attr::<kw::before_exit, ActionId>(
                 &input,
             )?))
+        } else if lookahead.peek(kw::after_enter) {
+            Ok(StateAttrType::AfterEnter(
+                parse_attr::<kw::after_enter, ActionId>(&input)?,
+            ))
         } else if lookahead.peek(kw::strategy) {
             Ok(StateAttrType::Strategy(parse_attr::<kw::strategy, Ident>(
                 &input,

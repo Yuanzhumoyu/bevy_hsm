@@ -1,5 +1,3 @@
-extern crate proc_macro;
-
 #[cfg(any(feature = "fsm", feature = "hsm"))]
 mod action_id;
 #[cfg(feature = "fsm")]
@@ -75,12 +73,13 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 /// machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
 /// machine_config_param ::= 'history_capacity', '=', integer_literal
 ///                        | ( 'init_state' | 'curr_state' ), '=', state_ref;
-/// state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
+/// state_node ::= state_attribute, [ ':', state_name ], [ '(', { state_content }, ')' ];
 /// state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
 /// state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
 ///                   | '#[state_data(', component, { ',', component }, ')]';
 /// state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
-///                         | ( 'on_update' | 'on_enter' | 'on_exit' ), '=', action_id
+///                         | ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
+///                         | 'on_update', '=', lit_str
 ///                         | 'strategy', '=', ( 'Nested' | 'Parallel' )
 ///                         | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
 ///                         | 'fsm_blueprint', '=', rust_expression
@@ -122,8 +121,8 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 ///     ]);
 ///
 ///     commands.spawn(hsm!(
-///         #[state(on_enter=on_enter:on_enter_a, on_exit=on_exit_a)]: A(
-///             #[state(on_enter="on_enter_b", on_exit="on_exit_b")]: B
+///         #[state(after_enter=after_enter:on_enter_a, before_exit=on_exit_a)]: A(
+///             #[state(after_enter="on_enter_b", before_exit="on_exit_b")]: B
 ///         ),
 ///         Name::new("MyHSM")
 ///     ));
@@ -182,7 +181,7 @@ pub fn hsm_tree(item: TokenStream) -> TokenStream {
 /// fsm ::= [ machine_config, ',', ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
 /// fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}',
 ///               'transitions', ':', '{', transition, { ',', transition }, '}';
-/// state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
+/// state_definition ::= state_attribute, [ ':', state_name ], [ '(', { component }, ')' ];
 /// transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
 /// transition_condition ::= 'event', '(', rust_expression ')' (* Event *)
 ///                        | 'guard', '(', guard_expression ')'; (* Guard condition *)

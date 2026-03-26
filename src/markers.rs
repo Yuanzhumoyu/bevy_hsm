@@ -37,16 +37,12 @@ impl Terminated {
             };
 
             let curr_state = fsm_state_machine.curr_state_id();
-            'on_exit: {
-                let Some(on_exit) = world.get::<OnExitSystem>(curr_state) else {
-                    break 'on_exit;
+            'before_exit: {
+                let Some(before_exit) = world.get::<BeforeExitSystem>(curr_state) else {
+                    break 'before_exit;
                 };
-                let Some(id) = world
-                    .resource::<ActionRegistry>()
-                    .get(on_exit.as_str())
-                    .cloned()
-                else {
-                    break 'on_exit;
+                let Some(id) = world.resource::<ActionRegistry>().get(before_exit.as_str()) else {
+                    break 'before_exit;
                 };
                 let context = ActionContext::new(service_target, entity, curr_state);
                 unsafe {
@@ -86,16 +82,12 @@ impl Terminated {
             #[cfg(feature = "state_data")]
             crate::state_data::StateData::clone_components(&mut world, init_state, service_target);
 
-            'on_enter: {
-                let Some(on_enter) = world.get::<OnEnterSystem>(init_state) else {
-                    break 'on_enter;
+            'after_enter: {
+                let Some(after_enter) = world.get::<AfterEnterSystem>(init_state) else {
+                    break 'after_enter;
                 };
-                let Some(id) = world
-                    .resource::<ActionRegistry>()
-                    .get(on_enter.as_str())
-                    .cloned()
-                else {
-                    break 'on_enter;
+                let Some(id) = world.resource::<ActionRegistry>().get(after_enter.as_str()) else {
+                    break 'after_enter;
                 };
                 let context = ActionContext::new(service_target, entity, init_state);
                 unsafe {
@@ -128,8 +120,8 @@ impl Terminated {
 /// # 状态机组件\State Machine Component
 /// * 用于静止拥有该组件的状态机
 /// - Used for state machines that statically possess this component
-/// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的OnEnter、OnExit、OnUpdate系统
-/// - If it exists, the OnEnter, OnExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
+/// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的OnEnter、BeforeExit、OnUpdate系统
+/// - If it exists, the AfterEnter, BeforeExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(any(feature = "hsm",feature = "fsm"), component(on_insert = Self::on_insert, on_remove = Self::on_remove))]
 pub struct Paused;

@@ -11,18 +11,18 @@
 ## 功能特性
 
 - **混合模型**: 在一个统一的框架内同时支持 HSM 和 FSM。
-- **状态生命周期**: 支持状态的 `OnEnter`、`OnUpdate` 和 `OnExit` 三个生命周期，并可关联独立的 Bevy 系统。
+- **状态生命周期**: 支持状态的 `Enter`、`Update` 和 `Exit` 三个生命周期，并可关联独立的 Bevy 系统。
 - **层级结构**: 支持状态的嵌套（父状态和子状态），实现逻辑的复用与组合。
 - **灵活的转换触发器**:
-  - **HSM**: 支持通过可组合的**条件系统** (`EnterGuard`, `ExitGuard`) 自动转换，或通过发送**事件** (`HsmTrigger`) 进行精确控制。
+  - **HSM**: 支持通过可组合的**条件系统** (`GuardEnter`, `GuardExit`) 自动转换，或通过发送**事件** (`HsmTrigger`) 进行精确控制。
   - **FSM**: 通过发送**事件** (`FsmTrigger`) 来精确控制转换。
 - **高级转换控制 (HSM)**:
   - **转换策略(`StateTransitionStrategy`)**: 可配置父子状态转换时的行为。
     - `Nested`: 嵌套模式。进入子状态时，父状态保持激活，子状态的生命周期在父状态内部执行。
     - `Parallel`:  平行模式。进入子状态前，父状态会先退出，两者生命周期是分离的。
   - **返回行为(`ExitTransitionBehavior`)**: 可配置子状态返回后，父状态的行为。
-    - `Rebirth`: 重生。重新触发父状态的OnEnter。
-    - `Resurrection`: 复活。返回到父状态的OnUpdate。
+    - `Rebirth`: 重生。重新触发父状态的Enter。
+    - `Resurrection`: 复活。返回到父状态的Update。
     - `Death`: 死亡。父状态也随之退出，并继续向上层传递退出行为。
 - **Bevy 范式**: 整体架构遵循 Bevy 的 ECS 设计哲学，由组件、事件和系统驱动，与引擎无缝集成。
 - **状态历史**: 内置状态转换历史记录功能，方便调试。
@@ -48,29 +48,71 @@ fn main() {
 
 ### 通用概念
 
-- `OnEnterSystem` / `OnUpdateSystem` / `OnExitSystem`: 分别在状态进入、更新和退出时执行的系统。
-- `GuardRegistry`: 用于注册和管理所有条件系统的资源。
+- `BeforeEnterSystem` / `AfterEnterSystem` / `OnUpdateSystem` / `BeforeExitSystem` / `AfterExitSystem`: 分别在状态进入前、进入后、更新、退出前和退出后执行的系统。
+- `ActionRegistry` / `GuardRegistry` / `TransitionRegistry`: 分别用于注册和管理所有动作、守卫和转换系统的资源。
+- `ActionContext` / `GuardContext` / `TransitionContext`: 这些是专门的系统参数，用于在动作、守卫和转换系统中提供关于状态和转换的上下文信息。例如，`ActionContext` 提供了当前状态的实体，而 `GuardContext` 提供了转换的来源和目标状态。
 - `Paused`: 一个标记组件，用于临时“暂停”一个状态机，使其不响应任何转换。
 - `Terminated`: 一个标记组件，表示状态机已运行结束。
 
 ### 层级状态机 (HSM) - 状态驱动
 
-HSM 的运行由其内部状态驱动，非常适合管理复杂的、有生命周期的行为。
+HSM 的运行由其内部状态驱动，非常适合管理复杂的、有生命周期的行为。它支持两种驱动模式：
 
-- `HsmStateMachine`: HSM 的核心组件，管理当前状态、转换队列和历史记录。
-- `StateLifecycle`: **HSM 的状态驱动引擎**。这是一个特殊的组件，它的值 (`Enter`, `Update`, `Exit`) 决定了状态机当前所处的生命周期阶段，并通过 `on_insert` 钩子驱动所有逻辑。
-- `HsmTrigger`: **HSM 的事件驱动引擎**。这是一个 Bevy 事件，发送此事件会触发 HSM 的状态转换，提供了命令式的控制方式。
+- **状态驱动 (自动)**: 通过 `StateLifecycle` 组件。这是一个特殊的组件，它的值 (`Enter`, `Update`, `Exit`) 决定了状态机当前所处的生命周期阶段，并通过 `on_insert` 钩子驱动所有逻辑。这种模式通常用于由状态自身条件触发的自动转换。
+- **事件驱动 (手动)**: 通过发送 `HsmTrigger` 事件。这是一个 Bevy 事件，发送此事件会强制触发 HSM 的状态转换，提供了命令式的、精确的控制方式。
 - `StateTree`: 定义状态之间的父子层级关系。
-- `EnterGuard` / `ExitGuard`: 附加在状态实体上的组件，用于指定进入或退出该状态的条件。
+- `GuardEnter` / `GuardExit`: 附加在状态实体上的组件，用于指定进入或退出该状态的条件。
+
+#### HSM 高级功能
+
+##### 转换策略 (Transition Strategy)
+
+通过 `strategy` 属性，可以控制当进入或退出一个父状态时，其子状态的行为。
+
+- **`Nested`** (嵌套, 默认): 父状态保持激活，子状态的进入和退出发生在父状态的生命周期内部。
+- **`Parallel`** (平行): 转换时，父状态会先退出，然后子状态完成其生命周期，之后父状态可能会根据 `ExitTransitionBehavior` 重新进入。
+
+##### 状态行为 (State Behavior)
+
+通过 `behavior` 属性，可以定义当一个状态被重新进入时的行为。
+
+- **`Rebirth`** (重生): 从子状态退出后，父状态会重新执行其 `Enter` 阶段。
+- **`Resurrection`** (复活, 默认): 从子状态退出后，父状态会直接进入其 `Update` 阶段。
+- **`Death`** (死亡): 从子状态退出后，父状态自身也会退出，并将退出行为继续向上传递。
+
+##### 历史状态 (History State)
+
+HSM 支持历史状态功能。通过在 `hsm!` 宏的 `init` 部分设置 `history_capacity`，状态机可以“记住”最近访问过的子状态。当一个父状态被重新进入时，它可以直接恢复到上次离开时的那个子状态，而不是其初始子状态，这对于实现类似“返回”的功能非常有用。
+
+#### 插件配置
+
+##### 自定义调度 (Custom Scheduling)
+
+默认情况下，状态机系统在 `Last` 调度阶段运行。如果需要更精细的控制，你可以通过 `StateMachinePlugin::with_schedule(MySchedule)` 来指定状态机系统在你的自定义调度阶段运行。
+
+```rust,ignore
+use bevy::prelude::*;
+use bevy_hsm::prelude::*;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct MyUpdate;
+
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_plugins(StateMachinePlugin::with_schedule(MyUpdate))
+        .run();
+}
+```
 
 ### 有限状态机 (FSM) - 事件驱动
 
 FSM 的运行由外部事件驱动，非常适合响应式的、直接的状态切换。
 
+- `FsmState`: 一个标记组件，用于将一个实体标识为 FSM 的状态。
 - `FsmStateMachine`: FSM 的核心组件，管理当前状态和图。
-- `FsmTrigger`: **FSM 的引擎**。这是一个 Bevy 事件，发送此事件会触发 FSM 的状态转换。
+- `FsmTrigger`: **FSM 的事件引擎**。这是一个 Bevy 事件，用于驱动 FSM 进行状态转换。您可以通过它来触发无条件转换，或包装一个自定义事件（如枚举或结构体）来触发一个特定的事件驱动转换。
 - `FsmGraph`: 定义一个 FSM 中所有有效的转换路径。一个转换必须在图中被定义才能执行。
-- `StateEvent`: 一个 Trait，允许你使用自定义的任何类型（结构体、枚举、整数等）作为触发 FSM 转换的特定事件。
 
 ## 宏语法 (EBNF)
 
@@ -83,12 +125,13 @@ hsm ::= [ machine_config, ',', ], state_node, { ',', component }, [ ',', config_
 machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
 machine_config_param ::= 'history_capacity', '=', integer_literal
                        | ( 'init_state' | 'curr_state' ), '=', state_ref;
-state_node ::= { state_attribute }, [ ':', state_name ], [ '(', { state_content }, ')' ];
+state_node ::= state_attribute, [ ':', state_name ], [ '(', { state_content }, ')' ];
 state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
 state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']' 
                   | '#[state_data(', component, { ',', component }, ')]';
 state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
-                        | ( 'on_update' | 'on_enter' | 'on_exit' ), '=', action_id
+                        | ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
+                        | 'on_update', '=', lit_str
                         | 'strategy', '=', ( 'Nested' | 'Parallel' )
                         | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
                         | 'fsm_blueprint', '=', rust_expression
@@ -104,8 +147,8 @@ action_name ::= identifier;
 identifier ::= (* Rust 标识符, e.g., MyState, StateA *) ;
 lit_str ::= (* Rust 字符串字面量, e.g., "my_system" *) ;
 rust_expression ::= (* 任何有效的 Rust 表达式 *) ;
-expr_closure ::= (* Rust 闭包, e.g., |entity_commands: EntityCommands, states: &[Entity]| { ... } *) ;
-fn_identifier ::= (* Rust 函数标识符, e.g., my_function *, 参数类型为 `fn(EntityCommands, &[Entity]){ ... }` *) ;
+expr_closure ::= (* Rust 闭包, e.g., 签名需为 `|EntityCommands, &[Entity]|{...}` *) ;
+fn_identifier ::= (* Rust 函数标识符, e.g., my_function *, 签名需为 `fn(EntityCommands, &[Entity])` *) ;
 expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a, b) *) ;
 ```
 
@@ -113,7 +156,7 @@ expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a
 
 - `hsm!` 宏的核心是一个 `state_node`，它代表状态树的根。
 - 在根状态之后，您可以附加任意数量的 Bevy `component`，它们会和状态机一起被添加到同一个实体上。
-- `state_node` 可以通过 `#[state(...)]` 属性进行配置，例如设置 `guard`、生命周期钩子（`on_update` 等）和层级行为（`strategy`, `behavior`）。
+- `state_node` 可以通过 `#[state(...)]` 属性进行配置。除了通用的生命周期钩子（如 `on_update`, `after_enter`）外，它还支持 HSM 独有的属性，包括用于自动转换的守卫（`guard_enter`, `guard_exit`）和用于控制层级行为的 `strategy`、`behavior` 等。
 - `#[state_data(...)]` 属性用于附加只在该状态激活时才存在的组件。
 - 状态可以嵌套。子状态和子组件都定义在父状态的 `()` 内部。
 
@@ -125,7 +168,7 @@ expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a
 fsm ::= [ machine_config, ',' ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
 fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}', ',',
               'transitions', ':', '{', transition, { ',', transition }, '}';
-state_definition ::= { state_attribute }, [ ':', state_name ], [ '(', { component }, ')' ];
+state_definition ::= state_attribute, [ ':', state_name ], [ '(', { component }, ')' ];
 transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
 transition_condition ::= 'event', '(', rust_expression ')' (* 事件 *)
                        | 'guard', '(', guard_expression ')'; (* 条件守卫 *)
@@ -138,8 +181,8 @@ state_ref ::= identifier | integer_literal; (* 状态名称或索引 *)
 
 - `fsm!` 宏由三个部分组成：`fsm_graph` 一个可选的 `components` 块和一个可选的 `config_fn`。
 - `fsm_graph` 是必需的，它包含 `states` 和 `transitions` 两个块。
-- `states<...>` 语法允许您通过名称或索引（`state_ref`）来指定初始状态。如果省略，则列表中的第一个状态为初始状态。
 - `state_definition` 的语法与 `hsm!` 中的 `state_node` 类似，但它不能嵌套其他状态。
+- `state_definition` 同样支持 `#[state(...)]` 和 `#[state_data(...)]` 属性。但请注意，由于 FSM 是扁平且由事件驱动的结构，`#[state(...)]` 中与 HSM 自动转换和层级相关的参数（如 `guard_enter`, `guard_exit`, `strategy`, `behavior`）在此处是无效的。
 - `transition` 定义了状态之间的转换规则，可以是有条件的（通过事件或 `guard`）或无条件的。
   - 箭头定义了转换的方向。存在三种有效的模式：
     - A => B: 表示从 A 到 B 的单向转换。
@@ -207,18 +250,18 @@ guard_id ::= lit_str | ( '#', identifier );
 
 ## Cargo 特性
 
-本 crate 提供了一个条件编译特性：
+本 crate 提供了以下 Cargo 特性：
 
-- **`history`**: 为 `FsmStateMachine` 和 `HsmStateMachine` 启用状态历史记录功能。这让您可以查看已激活的状态序列。
-- **`state_data`**: 启用 `StateData` 功能。允许您将组件作为“状态本地数据”附加到状态上，当状态机进入该状态时，这些组件会被自动克隆到状态机实体上；离开时则被移除。
-- **`hybrid`**: 启用混合状态机功能, 同时支持 HSM 和 FSM。
-- **`hsm`**: 启用 HSM 的功能。
-- **`fsm`**: 启用 FSM 的功能。
-要启用此特性，请将其添加到您的 `Cargo.toml` 文件中：
+- **`hsm`** (默认启用): 启用层级状态机（HSM）功能。
+- **`fsm`** (默认启用): 启用有限状态机（FSM）功能。
+- **`hybrid`**: 一个便捷特性，同时启用 `hsm` 和 `fsm`。
+- **`history`**: 为状态机启用历史记录功能，允许您追踪状态转换序列。
+- **`state_data`**: 启用 `StateData` 功能，允许您将组件作为“状态本地数据”附加到状态上。
+默认情况下，`hybrid` , `history`和 `state_data` 都已启用。如果您想自己配置，可以这样做：
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.18", features = ["history", "hybrid"] }
+bevy_hsm = { version = "0.18", default-features = false, features = ["history", "hybrid"] }
 ```
 
 ## 结语
