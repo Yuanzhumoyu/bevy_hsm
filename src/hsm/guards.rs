@@ -7,6 +7,7 @@ use bevy::{
 use crate::{
     guards::{CompiledGuard, GuardRegistry},
     hsm::HsmState,
+    labels::SystemLabel,
     prelude::GuardCondition,
 };
 
@@ -27,7 +28,7 @@ use crate::{
 pub struct GuardEnter(pub GuardCondition);
 
 impl GuardEnter {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<SystemLabel>) -> Self {
         Self(GuardCondition::Id(name.into()))
     }
 
@@ -98,7 +99,7 @@ impl FromWorld for GuardEnterCache {
 pub struct GuardExit(pub GuardCondition);
 
 impl GuardExit {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<SystemLabel>) -> Self {
         Self(GuardCondition::Id(name.into()))
     }
 

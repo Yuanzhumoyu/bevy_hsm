@@ -213,7 +213,10 @@ mod tests {
     #[test]
     #[cfg(feature = "hsm")]
     fn test_hsm_state_machine_state_data() {
-        use crate::hsm::{HsmState, event::*, state_machine::*, state_tree::*};
+        use crate::{
+            hsm::{HsmState, event::*, state_machine::*, state_tree::*},
+            prelude::StateLifecycle,
+        };
 
         let mut app = App::new();
         app.add_plugins(StateMachinePlugin::default());

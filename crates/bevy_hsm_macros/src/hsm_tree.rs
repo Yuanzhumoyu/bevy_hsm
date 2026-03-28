@@ -4,7 +4,11 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, token};
 
-use crate::{action_id::ActionRegistry, machine_config::ConfigFn, state_config::StateConfig};
+use crate::{
+    action_id::{ActionRegistry, TransitionRegistry},
+    machine_config::ConfigFn,
+    state_config::StateConfig,
+};
 
 pub fn hsm_tree_impl(item: TokenStream) -> TokenStream {
     let HsmTreeImpl { tree, config_fn } = syn::parse_macro_input!(item as HsmTreeImpl);
@@ -42,6 +46,7 @@ impl Parse for HsmTreeImpl {
 #[derive(Debug)]
 pub(crate) struct HsmTree {
     pub(crate) states: Vec<StateNodeImpl>,
+    transition_registry: TransitionRegistry,
     action_registry: ActionRegistry,
     transitions: TransitionImpl,
 }
@@ -50,6 +55,7 @@ impl From<StateNode> for HsmTree {
     fn from(value: StateNode) -> Self {
         let mut states = Vec::new();
         let mut action_registry = Vec::new();
+        let mut transition_registry = Vec::new();
         let mut transitions = Vec::new();
         let mut state_buffer = vec![value];
         let mut state_buffer2 = Vec::new();
@@ -66,6 +72,7 @@ impl From<StateNode> for HsmTree {
                 start += state_children.len();
                 state_buffer2.extend(state_children);
                 config.to_actions(&mut action_registry);
+                config.to_transitions(&mut transition_registry);
                 states.push(StateNodeImpl {
                     name,
                     config,
@@ -78,6 +85,7 @@ impl From<StateNode> for HsmTree {
             states,
             transitions: TransitionImpl(transitions),
             action_registry: ActionRegistry(action_registry),
+            transition_registry: TransitionRegistry(transition_registry),
         }
     }
 }
@@ -88,9 +96,11 @@ impl quote::ToTokens for HsmTree {
             states,
             transitions,
             action_registry,
+            transition_registry,
         } = self;
         tokens.extend(quote::quote! {
             #action_registry
+            #transition_registry
             let ids = [#(commands.spawn((#states)).id()),*];
             let mut state_tree = StateTree::new(ids[0]);
             #transitions

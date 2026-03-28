@@ -120,3 +120,28 @@ impl quote::ToTokens for ActionRegistry {
         });
     }
 }
+
+#[derive(Debug)]
+pub struct TransitionRegistry(pub Vec<(LitStr, ConfigFn)>);
+
+impl quote::ToTokens for TransitionRegistry {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        if self.0.is_empty() {
+            return;
+        }
+        let iter = self.0.iter().map(|(name, c)| match c {
+            ConfigFn::Closure(expr_closure) => {
+                quote! {(#name, commands.register_system(#expr_closure))}
+            }
+            ConfigFn::FnName(ident) => quote! {(#name, commands.register_system(#ident))},
+            ConfigFn::Call(expr_call) => quote! {(#name, commands.register_system(#expr_call))},
+        });
+        tokens.extend(quote! {
+            let transition_ids = [#(#iter),*];
+            commands.queue(move|world:&mut World|{
+                let mut transition_registry = world.resource_mut::<TransitionRegistry>();
+                transition_registry.extend(transition_ids.into_iter());
+            });
+        });
+    }
+}

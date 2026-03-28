@@ -162,7 +162,7 @@ fn handle_input(
             buyer: player_entity,
             item_price: 10,
         });
-        commands.trigger(FsmTrigger::with_guarded(
+        commands.trigger(FsmTrigger::with_guard(
             vending_machine_entity,
             vending_machine_states.dispensing,
         ))

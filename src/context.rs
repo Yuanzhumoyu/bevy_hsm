@@ -1,6 +1,12 @@
 use std::fmt::Debug;
 
-use bevy::{ecs::system::SystemId, prelude::*};
+use bevy::{
+    ecs::{
+        system::{RegisteredSystemError, SystemId},
+        world::DeferredWorld,
+    },
+    prelude::*,
+};
 
 /// A system ID for a transition, which takes a `TransitionContext` as input.
 ///
@@ -94,6 +100,17 @@ impl ActionContext {
     /// 返回与此动作关联的状态实体。
     pub const fn state(&self) -> Entity {
         self.relationship
+    }
+
+    pub(crate) fn run_system(
+        self,
+        world: &mut DeferredWorld,
+        id: ActionId,
+    ) -> Result<(), RegisteredSystemError<In<Self>, ()>> {
+        // TODO: This is a hack to get around the fact that we can't get a mutable reference to the world
+        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
+        world.flush();
+        world.run_system_with(id, self)
     }
 }
 
@@ -215,6 +232,17 @@ impl TransitionContext {
             TransitionRelationship::Transition(from, to) => (Some(from), Some(to)),
             TransitionRelationship::Final(from) => (Some(from), None),
         }
+    }
+
+    pub(crate) fn run_system(
+        self,
+        world: &mut DeferredWorld,
+        id: TransitionId,
+    ) -> Result<(), RegisteredSystemError<In<Self>, ()>> {
+        // TODO: This is a hack to get around the fact that we can't get a mutable reference to the world
+        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
+        world.flush();
+        world.run_system_with(id, self)
     }
 }
 

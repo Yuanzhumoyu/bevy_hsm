@@ -94,7 +94,7 @@ impl OutgoingTransitions {
         self.on_event.get_by_left(event).copied()
     }
 
-    pub fn get_by_condition(&self, target: Entity) -> Option<&GuardCondition> {
+    pub fn get_by_guard(&self, target: Entity) -> Option<&GuardCondition> {
         self.on_guard.get_by_right(&target)
     }
 
@@ -238,8 +238,8 @@ mod tests {
         assert_eq!(transitions.get_by_event(&MyEvent(2)), None);
         assert_eq!(transitions.get_by_event(&1), Some(state3));
         assert_eq!(transitions.get_by_event(&"event"), Some(state4));
-        assert_eq!(transitions.get_by_condition(state2), Some(&condition));
-        assert_eq!(transitions.get_by_condition(state1), None);
+        assert_eq!(transitions.get_by_guard(state2), Some(&condition));
+        assert_eq!(transitions.get_by_guard(state1), None);
         assert!(transitions.contains(state1));
         assert!(transitions.contains(state2));
     }

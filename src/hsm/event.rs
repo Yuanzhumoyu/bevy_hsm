@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::guards::GuardCondition;
+
 /// # HSM 触发器
 /// * 用于驱动层级状态机（HSM）进行状态转换的核心事件。
 ///
@@ -40,13 +42,13 @@ use bevy::prelude::*;
 /// commands.trigger(HsmTrigger::to_super(sm_entity));
 ///
 /// // To trigger a conditional transition to a sub-state:
-/// commands.trigger(HsmTrigger::guarded_sub(sm_entity, child_b));
+/// commands.trigger(HsmTrigger::guard_sub(sm_entity,GuardCondition::from("sub"), child_b));
 ///
 /// // To trigger a conditional transition to a super-state:
-/// commands.trigger(HsmTrigger::guarded_super(sm_entity));
+/// commands.trigger(HsmTrigger::guard_super(sm_entity,GuardCondition::from("super")));
 /// # }
 /// ```
-#[derive(EntityEvent, Clone, PartialEq, Eq, Hash)]
+#[derive(EntityEvent, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HsmTrigger {
     #[event_target]
     pub(crate) state_machine: Entity,
@@ -76,13 +78,13 @@ impl HsmTrigger {
     }
 
     /// 创建一个带条件的向上级状态转换的触发器
-    pub const fn guarded_super(state_machine: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::GuardedSuper)
+    pub const fn guard_super(state_machine: Entity, guard: GuardCondition) -> Self {
+        Self::new(state_machine, HsmTriggerType::GuardSuper(guard))
     }
 
     /// 创建一个带条件的向子状态转换的触发器
-    pub const fn guarded_sub(state_machine: Entity, target: Entity) -> Self {
-        Self::new(state_machine, HsmTriggerType::GuardedSub(target))
+    pub const fn guard_sub(state_machine: Entity, guard: GuardCondition, target: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::GuardSub(guard, target))
     }
 
     /// 创建一个链式过渡到目标状态的触发器, 该触发器会查询当前状态到目标状态之间的所有子状态，并依次触发子状态的更新
@@ -117,7 +119,7 @@ pub enum HsmTriggerType {
     /// 根据条件跳转父状态
     ///
     /// Jump to parent state based on condition
-    GuardedSuper,
+    GuardSuper(GuardCondition),
     /// 直接跳转下一个状态
     ///
     /// Directly jump to next state
@@ -125,7 +127,7 @@ pub enum HsmTriggerType {
     /// 根据条件跳转状态
     ///
     /// Jump to state based on condition
-    GuardedSub(Entity),
+    GuardSub(GuardCondition, Entity),
     /// 直接跳转指定状态
     ///
     /// Directly jump to specified state

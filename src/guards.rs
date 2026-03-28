@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     fmt::{Debug, Display},
     hash::Hash,
 };
@@ -34,7 +35,7 @@ pub type GuardId = SystemId<In<GuardContext>, bool>;
 /// # }
 /// ```
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
-pub struct GuardRegistry(pub(super) HashMap<String, GuardId>);
+pub struct GuardRegistry(pub(super) HashMap<SystemLabel, GuardId>);
 
 impl GuardRegistry {
     pub fn to_combinator_condition_id(&self, condition: &GuardCondition) -> Option<CompiledGuard> {
@@ -65,7 +66,7 @@ impl GuardRegistry {
     /// Get a condition
     pub fn get<Q>(&self, name: &Q) -> Option<GuardId>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.0.get(name).cloned()
     }
@@ -73,7 +74,11 @@ impl GuardRegistry {
     /// 插入一个条件
     ///
     /// Insert a condition
-    pub fn insert(&mut self, name: impl Into<String>, condition_id: GuardId) -> Option<GuardId> {
+    pub fn insert(
+        &mut self,
+        name: impl Into<SystemLabel>,
+        condition_id: GuardId,
+    ) -> Option<GuardId> {
         self.0.insert(name.into(), condition_id)
     }
 
@@ -82,7 +87,8 @@ impl GuardRegistry {
     /// Remove a condition
     pub fn remove<Q>(&mut self, name: &Q) -> Option<GuardId>
     where
-        Q: Hash + Equivalent<String>,
+        Q: Hash + Equivalent<SystemLabel>,
+        SystemLabel: Borrow<Q>,
     {
         self.0.remove(name)
     }
@@ -104,9 +110,15 @@ impl GuardRegistry {
     }
 }
 
-impl<S: Into<String>> Extend<(S, GuardId)> for GuardRegistry {
+impl<S: Into<SystemLabel>> Extend<(S, GuardId)> for GuardRegistry {
     fn extend<T: IntoIterator<Item = (S, GuardId)>>(&mut self, iter: T) {
         self.0.extend(iter.into_iter().map(|(s, a)| (s.into(), a)));
+    }
+}
+
+impl<S: Into<SystemLabel>, const N: usize> From<[(S, GuardId); N]> for GuardRegistry {
+    fn from(value: [(S, GuardId); N]) -> Self {
+        Self(HashMap::from(value.map(|(s, a)| (s.into(), a))))
     }
 }
 
@@ -197,7 +209,10 @@ impl CompiledGuard {
                 Ok(false)
             }
             CompiledGuard::Not(not) => Ok(!not.run(world, input)?),
-            CompiledGuard::Id(system_id) => world.run_system_with(*system_id, input),
+            CompiledGuard::Id(system_id) => {
+                world.flush();
+                world.run_system_with(*system_id, input)
+            }
         }
     }
 }
@@ -236,11 +251,11 @@ pub enum GuardCondition {
     And(SmallVec<[Box<GuardCondition>; 2]>),
     Or(SmallVec<[Box<GuardCondition>; 2]>),
     Not(Box<GuardCondition>),
-    Id(String),
+    Id(SystemLabel),
 }
 
 impl GuardCondition {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<SystemLabel>) -> Self {
         Self::Id(name.into())
     }
 
@@ -369,21 +384,21 @@ impl Debug for GuardCondition {
     }
 }
 
-impl From<String> for GuardCondition {
-    fn from(value: String) -> Self {
+impl From<SystemLabel> for GuardCondition {
+    fn from(value: SystemLabel) -> Self {
         GuardCondition::Id(value)
     }
 }
 
 impl<'a> From<&'a str> for GuardCondition {
     fn from(value: &'a str) -> Self {
-        GuardCondition::Id(value.into())
+        GuardCondition::Id(SystemLabel::from(value.to_string()))
     }
 }
 
 use std::str::Chars;
 
-use crate::context::GuardContext;
+use crate::{context::GuardContext, labels::SystemLabel};
 
 /// 用于解析守卫条件的词法分析器。
 ///
@@ -527,7 +542,7 @@ impl<'a> Parser<'a> {
 
                 // 否则，这是一个普通的标识符
                 let id = self.expect_identifier()?;
-                Ok(GuardCondition::Id(id))
+                Ok(GuardCondition::Id(SystemLabel::from(id)))
             }
             _ => Err("combination_condition: expect 'not', 'and', 'or' or identifier".to_string()),
         }

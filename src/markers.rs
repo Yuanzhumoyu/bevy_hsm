@@ -41,16 +41,11 @@ impl Terminated {
                 let Some(before_exit) = world.get::<BeforeExitSystem>(curr_state) else {
                     break 'before_exit;
                 };
-                let Some(id) = world.resource::<ActionRegistry>().get(before_exit.as_str()) else {
+                let Some(id) = world.resource::<ActionRegistry>().get(before_exit) else {
                     break 'before_exit;
                 };
                 let context = ActionContext::new(service_target, entity, curr_state);
-                unsafe {
-                    let _ = world
-                        .as_unsafe_world_cell()
-                        .world_mut()
-                        .run_system_with(id, context);
-                };
+                let _ = context.run_system(&mut world, id);
             }
 
             #[cfg(feature = "state_data")]
@@ -63,22 +58,6 @@ impl Terminated {
             let init_state = fsm_state_machine.init_state_id();
             fsm_state_machine.set_curr_state(init_state);
 
-            #[cfg(all(feature = "history", feature = "hybrid"))]
-            'set_fsm_history: {
-                if fsm_state_machine.history.is_empty() {
-                    break 'set_fsm_history;
-                }
-
-                let fsm_history = fsm_state_machine.history.take();
-
-                let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(entity) else {
-                    break 'fsm;
-                };
-                state_machine
-                    .history
-                    .set_last_state_fsm_history(fsm_history);
-            };
-
             #[cfg(feature = "state_data")]
             crate::state_data::StateData::clone_components(&mut world, init_state, service_target);
 
@@ -86,16 +65,11 @@ impl Terminated {
                 let Some(after_enter) = world.get::<AfterEnterSystem>(init_state) else {
                     break 'after_enter;
                 };
-                let Some(id) = world.resource::<ActionRegistry>().get(after_enter.as_str()) else {
+                let Some(id) = world.resource::<ActionRegistry>().get(after_enter) else {
                     break 'after_enter;
                 };
                 let context = ActionContext::new(service_target, entity, init_state);
-                unsafe {
-                    let _ = world
-                        .as_unsafe_world_cell()
-                        .world_mut()
-                        .run_system_with(id, context);
-                };
+                let _ = context.run_system(&mut world, id);
             }
         }
 

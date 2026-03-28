@@ -46,6 +46,7 @@
 //! - **Flexible Transition Strategies**: HSM supports various entry/exit strategies (e.g., `Nested`, `Parallel`) to control the behavior of parent and child states.
 //! - **Powerful Macro Support**: Use macros like `fsm!`, `hsm!`, `fsm_graph!`, and `hsm_tree!` to simplify state machine definitions.
 //! - **Highly Customizable**: Easily configure which schedule the state machine systems run in.
+//!
 pub mod action_dispatcher;
 pub mod context;
 mod error;
@@ -54,6 +55,7 @@ pub mod fsm;
 pub mod guards;
 #[cfg(feature = "hsm")]
 pub mod hsm;
+pub mod labels;
 pub mod markers;
 pub mod state_actions;
 #[cfg(feature = "state_data")]
@@ -196,7 +198,8 @@ pub mod prelude {
 
     #[cfg(feature = "hsm")]
     pub use crate::hsm::{
-        HsmState, event::*, guards::*, state_machine::*, state_tree::*, transition_strategy::*,
+        HsmState, event::*, guards::*, state_lifecycle::*, state_machine::*, state_tree::*,
+        transition_strategy::*,
     };
 
     #[cfg(feature = "hsm")]

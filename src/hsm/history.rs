@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::hsm::{state_machine::StateLifecycle, state_tree::HsmStateId};
+use crate::hsm::{state_lifecycle::StateLifecycle, state_tree::HsmStateId};
 
 /// # 状态历史
 /// * 表示一个层级状态机（HSM）访问过的状态的历史记录。
@@ -39,10 +39,13 @@ impl StateHistory {
     #[cfg(all(feature = "history", feature = "hybrid"))]
     pub fn set_last_state_fsm_history(
         &mut self,
+        state: HsmStateId,
         fsm_history: crate::fsm::history::FsmStateHistory,
     ) {
-        for HistoricalNode { left_cycle, .. } in self.history.iter_mut().rev() {
-            if let HsmStateLifecycleRecord::Update(history) = left_cycle {
+        for HistoricalNode { left_cycle, id } in self.history.iter_mut().rev() {
+            if state == *id
+                && let HsmStateLifecycleRecord::Update(history) = left_cycle
+            {
                 *history = Some(fsm_history);
                 break;
             }

@@ -10,7 +10,7 @@ use syn::{
 };
 
 use crate::{
-    action_id::ActionRegistry,
+    action_id::{ActionRegistry, TransitionRegistry},
     guard_condition::GuardCondition,
     kw,
     machine_config::{ConfigFn, StateRef},
@@ -52,6 +52,7 @@ impl Parse for FsmGraphImpl {
 #[derive(Debug)]
 pub struct FsmGraph {
     action_registry: ActionRegistry,
+    transition_registry: TransitionRegistry,
     pub(crate) states: Punctuated<State, Token![,]>,
     transitions: Punctuated<Transition, Token![,]>,
 }
@@ -77,14 +78,17 @@ impl Parse for FsmGraph {
         let transitions = content.parse_terminated(Transition::parse, Token![,])?;
 
         let mut action_registry = Vec::new();
+        let mut transition_registry = Vec::new();
         for state in states.iter() {
             state.config.to_actions(&mut action_registry);
+            state.config.to_transitions(&mut transition_registry);
         }
 
         Ok(Self {
             states,
             transitions,
             action_registry: ActionRegistry(action_registry),
+            transition_registry: TransitionRegistry(transition_registry),
         })
     }
 }
@@ -94,6 +98,7 @@ impl quote::ToTokens for FsmGraph {
         let FsmGraph {
             states,
             action_registry,
+            transition_registry,
             transitions,
         } = self;
 
@@ -221,6 +226,7 @@ impl quote::ToTokens for FsmGraph {
             #(#resolution_errors);*
             #(#config_errors);*
             #action_registry
+            #transition_registry
             let ids = [#(#spawn_states),*];
             let init_state_id = ids[0];
             let mut graph = FsmGraph::new(init_state_id);

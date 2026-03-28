@@ -97,3 +97,8 @@ required-features = ["hybrid", "history"]
 name = "action_system"
 path = "tests/action_system.rs"
 required-features = ["hybrid", "history"]
+
+[[test]]
+name ="event"
+path = "tests/event.rs"
+required-features = ["fsm","hsm"]

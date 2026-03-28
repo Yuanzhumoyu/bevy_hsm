@@ -26,7 +26,7 @@
 //!               .with_traversal(root_state, TraversalStrategy::default());
 //!     
 //!     // 查询子状态
-//!     if let Some(children) = state_tree.get(root_state) {
+//!     if let Some(children) = state_tree.get_sub_states(root_state) {
 //!         println!("Root state has {} children", children.len());
 //!     }
 //! }
@@ -163,13 +163,6 @@ impl StateTree {
         new_tree.tree.insert(target, target_node);
     }
 
-    /// 获取一个状态的所有子状态
-    ///
-    /// Get all sub-states of a state
-    pub fn get(&self, state: Entity) -> Option<&[Entity]> {
-        self.tree.get(&state).map(|v| v.get_sub_states())
-    }
-
     /// 获取根状态
     ///
     /// Get the root state
@@ -188,7 +181,7 @@ impl StateTree {
     ///
     /// Check if there is a direct parent-child relationship between two states
     pub fn has_link(&self, from: Entity, to: Entity) -> bool {
-        if let Some(v) = self.get(from) {
+        if let Some(v) = self.get_sub_states(from) {
             return v.contains(&to);
         };
         false
@@ -373,11 +366,8 @@ impl StateTreeNode {
     ///
     /// Add a sub-state
     pub fn push(&mut self, state: Entity) {
-        for (i, e) in self.sub_states.iter().enumerate() {
-            if *e == state {
-                self.sub_states.remove(i);
-                break;
-            }
+        if let Some(i) = self.sub_states.iter().position(|s| *s == state) {
+            self.sub_states.remove(i);
         }
         self.sub_states.push(state);
     }
@@ -454,7 +444,7 @@ mod tests {
         tree.with_child(v[0], v[1]);
         tree.with_child(v[0], v[1]);
         tree.with_child(v[0], v[1]);
-        assert_eq!(tree.get(v[0]), Some([v[1]].as_slice()));
+        assert_eq!(tree.get_sub_states(v[0]), Some([v[1]].as_slice()));
 
         // can't add from a state not in the tree
         tree.with_child(v[2], v[1]);

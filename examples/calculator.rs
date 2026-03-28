@@ -64,7 +64,7 @@ struct Output;
 #[derive(Resource, Default)]
 struct StateEntityMap(std::collections::HashMap<&'static str, Entity>);
 
-#[derive(Resource)]
+#[derive(Resource, Debug)]
 struct FsmStates {
     operand: Entity,
     operator: Entity,
@@ -86,13 +86,38 @@ impl Default for FsmStates {
 #[derive(Resource)]
 struct HsmEntity(Entity);
 
+#[derive(Component)]
+struct FsmMark;
+
 // --- 辅助系统和函数 ---
 fn debug_on_state(
     info: &str,
 ) -> impl Fn(In<ActionContext>, Query<&Name, Or<(With<HsmState>, With<FsmState>)>>) {
     move |context: In<ActionContext>, query: Query<&Name, Or<(With<HsmState>, With<FsmState>)>>| {
         let state_name = query.get(context.state()).unwrap();
-        println!("[{}]{}: {}", context.state(), state_name, info);
+        info!("[{}]{}: {}", context.state(), state_name, info);
+    }
+}
+
+fn debug_input_state(
+    info: &str,
+    f: impl Fn(EntityCommands),
+) -> impl Fn(
+    In<ActionContext>,
+    Commands,
+    Query<&Name, With<HsmState>>,
+    Query<&HsmOwnedFsms, With<HsmStateMachine>>,
+) {
+    move |context: In<ActionContext>,
+          mut commands: Commands,
+          query: Query<&Name, With<HsmState>>,
+          fsm_mapping: Query<&HsmOwnedFsms, With<HsmStateMachine>>| {
+        let state_name = query.get(context.state()).unwrap();
+        info!("[{}]{}: {}", context.state(), state_name, info);
+
+        let mapping = fsm_mapping.get(context.state_machine).unwrap();
+        let fsm_id = *mapping.get(&context.state()).unwrap();
+        f(commands.entity(fsm_id))
     }
 }
 
@@ -287,39 +312,48 @@ fn on_enter_operator(
     calculator.history_display.push(' ');
 }
 
-fn on_left_parenthesis(
-    In(_): In<ActionContext>,
+fn on_left_parenthesis_followed_by_number(
+    In(context): In<TransitionContext>,
     mut calculator: ResMut<Calculator>,
-    fsm: Single<&FsmStateMachine>,
     fsm_states: Res<FsmStates>,
 ) {
+    let (Some(prev), Some(ButtonType::Operator('('))) =
+        (context.from_state(), calculator.input_buffer)
+    else {
+        return;
+    };
+
+    if fsm_states.operand != prev {
+        return;
+    }
+
+    if calculator.just_calculated {
+        calculator.clear();
+    }
+    let Calculator {
+        number_stack,
+        operator_stack,
+        history_display,
+        current_number,
+        ..
+    } = calculator.as_mut();
+
+    let val = current_number.parse::<f64>().unwrap_or(0.0);
+    number_stack.push(val);
+    history_display.push_str(current_number);
+    current_number.clear();
+
+    operator_stack.push('*');
+    history_display.push_str(" * ");
+}
+
+fn on_left_parenthesis(In(_): In<ActionContext>, mut calculator: ResMut<Calculator>) {
     let Some(ButtonType::Operator('(')) = calculator.input_buffer else {
         return;
     };
 
     if calculator.just_calculated {
         calculator.clear();
-    }
-
-    if let Some(prev) = fsm.history.get_at(1)
-        && prev == fsm_states.operand
-        && !calculator.current_number.is_empty()
-    {
-        let Calculator {
-            number_stack,
-            operator_stack,
-            history_display,
-            current_number,
-            ..
-        } = calculator.as_mut();
-
-        let val = current_number.parse::<f64>().unwrap_or(0.0);
-        number_stack.push(val);
-        history_display.push_str(current_number);
-        current_number.clear();
-
-        operator_stack.push('*');
-        history_display.push_str(" * ");
     }
 
     calculator.operator_stack.push('(');
@@ -366,6 +400,33 @@ fn on_right_parenthesis(In(_context): In<ActionContext>, mut calculator: ResMut<
     calculator.parenthesis_count -= 1;
 }
 
+fn on_right_parenthesis_followed_by_number(
+    In(context): In<TransitionContext>,
+    mut calculator: ResMut<Calculator>,
+    fsm_states: Res<FsmStates>,
+) {
+    let (Some(from), Some(ButtonType::Digit(_))) = (context.from_state(), calculator.input_buffer)
+    else {
+        return;
+    };
+
+    if fsm_states.right_parenthesis != from {
+        return;
+    }
+
+    if calculator.just_calculated {
+        calculator.clear();
+    }
+    let Calculator {
+        operator_stack,
+        history_display,
+        ..
+    } = calculator.as_mut();
+
+    operator_stack.push('*');
+    history_display.push_str(" * ");
+}
+
 fn register_actions(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     system_registry!(<commands,action_registry>[
         "debug_on_enter" => debug_on_state("Entering state."),
@@ -380,12 +441,17 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
     let fsm_graph_id = commands
         .spawn(fsm_graph! {
             states: {
+                #[state(after_enter="debug_on_enter",before_exit="debug_on_exit")]:Start,
                 #[state(after_enter=on_enter_operand)]: Operand,
                 #[state(after_enter=on_enter_operator)]: Operator,
-                #[state(after_enter=on_left_parenthesis)]: LeftParenthesis,
-                #[state(after_enter=on_right_parenthesis)]: RightParenthesis,
+                #[state(before_enter=on_left_parenthesis_followed_by_number,after_enter=on_left_parenthesis)]: LeftParenthesis,
+                #[state(after_enter=on_right_parenthesis,after_exit=on_right_parenthesis_followed_by_number)]: RightParenthesis,
             }
             transitions: {
+                // From Start state
+                Start => Operand,
+                Start => LeftParenthesis,
+
                 // From Operand state
                 Operand => Operand, // e.g. 1 -> 12
                 Operand => Operator, // e.g. 1 -> 1 +
@@ -402,22 +468,25 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
                 LeftParenthesis => LeftParenthesis, // e.g. ( -> ((
 
                 // From RightParenthesis state
+                RightParenthesis => Operand, // e.g. ) -> )1
                 RightParenthesis => Operator, // e.g. (1) -> (1)+
                 RightParenthesis => RightParenthesis, // e.g. (1)) -> (1)))
             }
             :|mut entity_commands: EntityCommands, states: &[Entity]| {
                 entity_commands.commands_mut().insert_resource(FsmStates {
-                    operand: states[0],
-                    operator: states[1],
-                    left_parenthesis: states[2],
-                    right_parenthesis: states[3],
+                    operand: states[1],
+                    operator: states[2],
+                    left_parenthesis: states[3],
+                    right_parenthesis: states[4],
                 });
             }
         })
         .id();
 
     commands.spawn(hsm! {
-        #[state(after_enter="debug_on_enter", fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
+        #[state(after_enter=inpt_enter:debug_input_state("Input Enter",|mut c|{c.insert(FsmMark);}),
+                before_exit=input_exit:debug_input_state("Input Exit",|_|{}),
+                fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
         :ProcessingInput(
             #[state(after_enter=on_clear, on_update="Update:hsm_exit_commands")]: Clear,
             #[state(after_enter=on_equals, on_update="Update:hsm_exit_commands")]: Equals,
@@ -574,6 +643,7 @@ fn handle_button_message(
     hsm_entity: Res<HsmEntity>,
     state_map: Res<StateEntityMap>,
     fsm_states: Res<FsmStates>,
+    fsm: Single<Entity, With<FsmMark>>,
 ) {
     if let Some(button_type) = button_types.read().last() {
         calculator.input_buffer = Some(*button_type);
@@ -589,7 +659,7 @@ fn handle_button_message(
                     },
                     _ => unreachable!(),
                 };
-                commands.trigger(FsmTrigger::with_next(hsm_entity.0, target_fsm_state));
+                commands.trigger(FsmTrigger::with_next(fsm.entity(), target_fsm_state));
             }
             ButtonType::Command(cmd) => {
                 let target_state_name = match cmd {
@@ -605,6 +675,7 @@ fn handle_button_message(
         }
     }
 }
+
 fn update_display(
     calculator: Res<Calculator>,
     mut query: Query<(&mut Text, AnyOf<(&Input, &Output)>)>,

@@ -1,6 +1,8 @@
 use bevy::prelude::Entity;
 use std::fmt;
 
+use crate::labels::SystemLabel;
+
 /// The error type for operations within the state machine crate.
 #[derive(Debug)]
 pub enum StateMachineError {
@@ -17,11 +19,14 @@ pub enum StateMachineError {
     #[cfg(feature = "hsm")]
     StateLifecycleMissing(Entity),
     /// A registered system could not be found by its name.
-    SystemNotFound { system_name: String, state: Entity },
+    SystemNotFound {
+        system_name: SystemLabel,
+        state: Entity,
+    },
     /// An error occurred while running a state's action system (AfterEnter, OnUpdate, BeforeExit).
     #[cfg(feature = "hsm")]
     SystemRunFailed {
-        system_name: String,
+        system_name: SystemLabel,
         state: Entity,
         source: bevy::ecs::system::RunSystemError,
     },
@@ -176,4 +181,8 @@ impl fmt::Display for StateMachineError {
     }
 }
 
-impl std::error::Error for StateMachineError {}
+impl std::error::Error for StateMachineError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self)
+    }
+}

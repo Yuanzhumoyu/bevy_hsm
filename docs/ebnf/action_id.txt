@@ -1,4 +1,0 @@
-action_id ::= lit_str
-            | fn_identifier
-            | action_name, ':', ( expr_closure | expr_call | fn_identifier );
-action_name ::= identifier;

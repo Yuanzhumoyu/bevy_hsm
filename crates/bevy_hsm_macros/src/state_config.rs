@@ -115,6 +115,19 @@ impl StateConfig {
         }
     }
 
+    pub(crate) fn to_transitions(&self, actions: &mut Vec<(LitStr, ConfigFn)>) {
+        if let Some(enter) = &self.before_enter
+            && let Some(action) = enter.to_action()
+        {
+            actions.push(action);
+        }
+        if let Some(exit) = &self.after_exit
+            && let Some(action) = exit.to_action()
+        {
+            actions.push(action);
+        }
+    }
+
     pub(crate) fn from_attrs(attrs: &[syn::Attribute]) -> syn::Result<Self> {
         let mut config: StateConfig = Self::default();
         for attr in attrs {
@@ -156,7 +169,10 @@ impl StateConfig {
                         }
                         StateAttrType::AfterExit(exit) => {
                             if config.before_exit.is_some() {
-                                return Err(syn::Error::new(exit.span(), "before_exit already exists"));
+                                return Err(syn::Error::new(
+                                    exit.span(),
+                                    "before_exit already exists",
+                                ));
                             }
                             config.after_exit = Some(exit);
                         }
@@ -180,7 +196,10 @@ impl StateConfig {
                         }
                         StateAttrType::BeforeExit(exit) => {
                             if config.before_exit.is_some() {
-                                return Err(syn::Error::new(exit.span(), "before_exit already exists"));
+                                return Err(syn::Error::new(
+                                    exit.span(),
+                                    "before_exit already exists",
+                                ));
                             }
                             config.before_exit = Some(exit);
                         }
@@ -332,9 +351,9 @@ impl Parse for StateAttrType {
                 kw::before_enter,
                 ActionId,
             >(&input)?))
-        } else if lookahead.peek(kw::after_exit) {
-            Ok(StateAttrType::AfterExit(parse_attr::<
-                kw::after_exit,
+        } else if lookahead.peek(kw::after_enter) {
+            Ok(StateAttrType::AfterEnter(parse_attr::<
+                kw::after_enter,
                 ActionId,
             >(&input)?))
         } else if lookahead.peek(kw::on_update) {
@@ -342,13 +361,15 @@ impl Parse for StateAttrType {
                 parse_attr::<kw::on_update, LitStr>(&input)?,
             ))
         } else if lookahead.peek(kw::before_exit) {
-            Ok(StateAttrType::BeforeExit(parse_attr::<kw::before_exit, ActionId>(
-                &input,
-            )?))
-        } else if lookahead.peek(kw::after_enter) {
-            Ok(StateAttrType::AfterEnter(
-                parse_attr::<kw::after_enter, ActionId>(&input)?,
-            ))
+            Ok(StateAttrType::BeforeExit(parse_attr::<
+                kw::before_exit,
+                ActionId,
+            >(&input)?))
+        } else if lookahead.peek(kw::after_exit) {
+            Ok(StateAttrType::AfterExit(parse_attr::<
+                kw::after_exit,
+                ActionId,
+            >(&input)?))
         } else if lookahead.peek(kw::strategy) {
             Ok(StateAttrType::Strategy(parse_attr::<kw::strategy, Ident>(
                 &input,

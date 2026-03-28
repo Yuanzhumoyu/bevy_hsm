@@ -13,7 +13,7 @@ use bevy::{
 
 use crate::{
     action_dispatcher::system_state_trait::ExpandScheduleLabelFunction, context::*,
-    error::StateMachineError, state_actions::*,
+    labels::SystemLabel, state_actions::*,
 };
 
 /// # 一个对状态机系统的抽象\An abstraction of a state machine system
@@ -90,17 +90,17 @@ pub type GetBufferId = Arc<
 /// * Value: 是如何通过[World]获取缓存[StateActionBuffer]的方法
 /// - Value: How to get the cache resource through [World]
 #[derive(Resource, Default, Clone)]
-pub struct ActionDispatch(HashMap<String, GetBufferId>);
+pub struct ActionDispatch(HashMap<SystemLabel, GetBufferId>);
 
 impl ActionDispatch {
-    pub(super) fn insert(&mut self, action_name: impl Into<String>, system_id: GetBufferId) {
+    pub(super) fn insert(&mut self, action_name: impl Into<SystemLabel>, system_id: GetBufferId) {
         let action_name = action_name.into();
         self.0.insert(action_name, system_id);
     }
 
     pub(super) fn get<Q>(&self, action_name: &Q) -> Option<GetBufferId>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.0.get(action_name).cloned()
     }
@@ -185,7 +185,9 @@ impl StateActionBuffer {
     /// Get the current state group
     #[inline(always)]
     pub fn current_actions(&self) -> Vec<ActionContext> {
-        self.curr.iter().copied().collect()
+        let mut v = Vec::with_capacity(self.curr.len());
+        v.extend(self.curr.iter());
+        v
     }
 
     /// 更新为当前状态组
@@ -272,14 +274,8 @@ impl StateActionBuffer {
             return;
         };
         let guard_registry = world.resource::<ActionDispatch>();
-        let Some(get_buffer_scope) = guard_registry.get(on_update_system.as_str()) else {
-            warn!(
-                "{}",
-                StateMachineError::SystemNotFound {
-                    system_name: on_update_system.as_str().to_string(),
-                    state: state_id
-                }
-            );
+        let Some(get_buffer_scope) = guard_registry.get(on_update_system) else {
+            warn!("{}", on_update_system.not_found_error(state_id));
             return;
         };
 

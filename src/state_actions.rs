@@ -1,6 +1,7 @@
-use std::hash::Hash;
+use std::{borrow::Borrow, hash::Hash};
 
 use bevy::{
+    ecs::schedule::ScheduleLabel,
     platform::collections::{Equivalent, HashMap},
     prelude::*,
 };
@@ -8,6 +9,7 @@ use bevy::{
 use crate::{
     context::{ActionId, TransitionId},
     error::StateMachineError,
+    labels::SystemLabel,
 };
 
 /// 注册一次性用于运行[`AfterEnterSystem`] [`BeforeExitSystem`]的系统
@@ -27,7 +29,7 @@ use crate::{
 /// ```
 ///
 #[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub struct ActionRegistry(pub(super) HashMap<String, ActionId>);
+pub struct ActionRegistry(pub(super) HashMap<SystemLabel, ActionId>);
 
 impl ActionRegistry {
     /// 注册系统
@@ -45,7 +47,11 @@ impl ActionRegistry {
     ///     action_registry.insert("after_enter", system_id);
     /// }
     /// ```
-    pub fn insert(&mut self, name: impl Into<String>, system_id: ActionId) -> Option<ActionId> {
+    pub fn insert(
+        &mut self,
+        name: impl Into<SystemLabel>,
+        system_id: ActionId,
+    ) -> Option<ActionId> {
         self.0.insert(name.into(), system_id)
     }
 
@@ -62,7 +68,8 @@ impl ActionRegistry {
     /// ```
     pub fn remove<Q>(&mut self, name: &Q) -> Option<ActionId>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
+        SystemLabel: Borrow<Q>,
     {
         self.0.remove(name)
     }
@@ -70,24 +77,24 @@ impl ActionRegistry {
     /// 获取系统
     pub fn get<Q>(&self, name: &Q) -> Option<ActionId>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.0.get(name).copied()
     }
 
-    pub(crate) fn get_action_id<T: Component + std::ops::Deref<Target = String>>(
+    pub(crate) fn get_action_id<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
     ) -> Option<ActionId> {
         let on_system = world.get::<T>(state_id)?;
         let system = world.resource::<ActionRegistry>();
-        let system_name: &str = on_system.as_ref();
+        let system_name: &SystemLabel = <T as std::ops::Deref>::deref(on_system);
         let id = system.get(system_name);
         if id.is_none() {
             warn!(
                 "{}",
                 StateMachineError::SystemNotFound {
-                    system_name: system_name.to_string(),
+                    system_name: system_name.clone(),
                     state: state_id
                 }
             )
@@ -96,9 +103,15 @@ impl ActionRegistry {
     }
 }
 
-impl<S: Into<String>> Extend<(S, ActionId)> for ActionRegistry {
+impl<S: Into<SystemLabel>> Extend<(S, ActionId)> for ActionRegistry {
     fn extend<T: IntoIterator<Item = (S, ActionId)>>(&mut self, iter: T) {
         self.0.extend(iter.into_iter().map(|(s, a)| (s.into(), a)));
+    }
+}
+
+impl<S: Into<SystemLabel>, const N: usize> From<[(S, ActionId); N]> for ActionRegistry {
+    fn from(value: [(S, ActionId); N]) -> Self {
+        Self(HashMap::from(value.map(|(s, a)| (s.into(), a))))
     }
 }
 
@@ -106,7 +119,7 @@ impl<S: Into<String>> Extend<(S, ActionId)> for ActionRegistry {
 ///
 /// Register systems for state transitions
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
-pub struct TransitionRegistry(pub(super) HashMap<String, TransitionId>);
+pub struct TransitionRegistry(pub(super) HashMap<SystemLabel, TransitionId>);
 
 impl TransitionRegistry {
     /// 获取已注册的转换系统
@@ -114,7 +127,7 @@ impl TransitionRegistry {
     /// Get a registered transition system
     pub fn get<Q>(&self, name: &Q) -> Option<TransitionId>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.0.get(name).cloned()
     }
@@ -124,7 +137,7 @@ impl TransitionRegistry {
     /// Insert a new transition system
     pub fn insert(
         &mut self,
-        name: impl Into<String>,
+        name: impl Into<SystemLabel>,
         transition_id: TransitionId,
     ) -> Option<TransitionId> {
         self.0.insert(name.into(), transition_id)
@@ -135,7 +148,8 @@ impl TransitionRegistry {
     /// Remove a registered transition system
     pub fn remove<Q>(&mut self, name: &Q) -> Option<TransitionId>
     where
-        Q: Hash + Equivalent<String>,
+        Q: Hash + Equivalent<SystemLabel>,
+        SystemLabel: Borrow<Q>,
     {
         self.0.remove(name)
     }
@@ -156,19 +170,19 @@ impl TransitionRegistry {
         self.0.is_empty()
     }
 
-    pub(crate) fn get_transition_id<T: Component + std::ops::Deref<Target = String>>(
+    pub(crate) fn get_transition_id<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
     ) -> Option<TransitionId> {
         let on_system = world.get::<T>(state_id)?;
         let system = world.resource::<TransitionRegistry>();
-        let system_name: &str = on_system.as_ref();
+        let system_name: &SystemLabel = <T as std::ops::Deref>::deref(on_system);
         let id = system.get(system_name);
         if id.is_none() {
             warn!(
                 "{}",
                 StateMachineError::SystemNotFound {
-                    system_name: system_name.to_string(),
+                    system_name: system_name.clone(),
                     state: state_id
                 }
             )
@@ -177,21 +191,33 @@ impl TransitionRegistry {
     }
 }
 
-impl<S: Into<String>> Extend<(S, TransitionId)> for TransitionRegistry {
+impl<S: Into<SystemLabel>> Extend<(S, TransitionId)> for TransitionRegistry {
     fn extend<T: IntoIterator<Item = (S, TransitionId)>>(&mut self, iter: T) {
         self.0.extend(iter.into_iter().map(|(s, a)| (s.into(), a)));
+    }
+}
+
+impl<S: Into<SystemLabel>, const N: usize> From<[(S, TransitionId); N]> for TransitionRegistry {
+    fn from(value: [(S, TransitionId); N]) -> Self {
+        Self(HashMap::from(value.map(|(s, a)| (s.into(), a))))
     }
 }
 
 macro_rules! define_state_action_component {
     ($(#[$outer:meta])* $name:ident) => {
         $(#[$outer])*
-        #[derive(Component, PartialEq, Eq, Default, Debug, Deref, DerefMut)]
-        pub struct $name(pub String);
+        #[derive(Component, PartialEq, Eq, Hash, Default, Debug, Deref, DerefMut)]
+        pub struct $name(SystemLabel);
 
         impl $name {
-            pub fn new(name: impl Into<String>) -> Self {
+            pub fn new(name: impl Into<SystemLabel>) -> Self {
                 Self(name.into())
+            }
+        }
+
+        impl Equivalent<SystemLabel> for $name {
+            fn equivalent(&self, other: &SystemLabel) -> bool {
+                self.0.eq(other)
             }
         }
     };
@@ -254,6 +280,18 @@ define_state_action_component! {
     /// # }
     /// ```
     OnUpdateSystem
+}
+
+impl OnUpdateSystem {
+    pub fn with_schedule<T: ScheduleLabel>(action_name: impl Into<String>) -> Self {
+        let label = ShortName::of::<T>();
+        let action_name = action_name.into();
+        let name = match action_name.is_empty() {
+            false => format!("{}:{}", label, action_name),
+            true => label.to_string(),
+        };
+        Self(name.into())
+    }
 }
 
 define_state_action_component! {

@@ -7,6 +7,7 @@ use crate::{
     error::StateMachineError,
     hsm::{
         HsmState,
+        state_lifecycle::StateLifecycle,
         state_machine::{Transition, *},
         state_tree::StateTree,
     },
@@ -523,8 +524,6 @@ fn get_service_target(world: &World, state_machine_id: Entity) -> Entity {
 
 #[cfg(test)]
 mod tests {
-    use bevy::platform::collections::HashMap;
-
     use crate::{
         StateMachinePlugin, context::*, guards::GuardRegistry, prelude::SystemState,
         state_actions::*,
@@ -595,28 +594,22 @@ mod tests {
         app.add_action_system(Update, "set_condition_false", set_condition_false);
 
         let world = app.world_mut();
-        let systems = ActionRegistry(HashMap::from([
-            (
-                "log_on_enter".to_string(),
-                world.register_system(log_on_enter),
-            ),
-            (
-                "log_on_exit".to_string(),
-                world.register_system(log_on_exit),
-            ),
-        ]));
+        let systems = ActionRegistry::from([
+            ("log_on_enter", world.register_system(log_on_enter)),
+            ("log_on_exit", world.register_system(log_on_exit)),
+        ]);
         world.insert_resource(systems);
 
-        let guard_registry = GuardRegistry(HashMap::from([
+        let guard_registry = GuardRegistry::from([
             (
-                "is_condition_true".to_string(),
+                "is_condition_true",
                 world.register_system(is_condition_true),
             ),
             (
-                "is_condition_false".to_string(),
+                "is_condition_false",
                 world.register_system(is_condition_false),
             ),
-        ]));
+        ]);
 
         world.insert_resource(guard_registry);
 

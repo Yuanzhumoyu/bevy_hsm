@@ -6,6 +6,7 @@ pub mod event;
 pub mod guards;
 #[cfg(feature = "history")]
 pub mod history;
+pub mod state_lifecycle;
 pub mod state_machine;
 pub mod state_tree;
 pub mod transition_strategy;
