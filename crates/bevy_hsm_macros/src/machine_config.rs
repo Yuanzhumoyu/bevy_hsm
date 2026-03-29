@@ -37,13 +37,13 @@ impl StateMachineConfigImpl {
         {
             let history_capacity = self.history_capacity();
             quote! {
-                HsmStateMachine::new(HsmStateId::new(structure_id,ids[#init_state]),HsmStateId::new(structure_id,ids[#curr_state]),#history_capacity)
+                HsmStateMachine::new(structure_id,ids[#init_state],ids[#curr_state],#history_capacity)
             }
         }
         #[cfg(not(feature = "history"))]
         {
             quote! {
-                HsmStateMachine::new(HsmStateId::new(structure_id,ids[#init_state]),HsmStateId::new(structure_id,ids[#curr_state]))
+                HsmStateMachine::new(structure_id,ids[#init_state],ids[#curr_state])
             }
         }
     }

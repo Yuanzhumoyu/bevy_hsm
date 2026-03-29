@@ -26,7 +26,7 @@ pub type GuardId = SystemId<In<GuardContext>, bool>;
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn is_ok(entity:In<GuardContext>) -> bool {
+/// # fn is_ok(_:In<GuardContext>) -> bool {
 /// #     true
 /// # }
 /// # fn foo(mut commands:Commands, mut guard_registry: ResMut<GuardRegistry>) {

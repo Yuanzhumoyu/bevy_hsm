@@ -33,7 +33,7 @@ use crate::guards::GuardCondition;
 /// # let tree_id = commands.spawn(tree).id();
 /// #
 /// # // Spawn state machine
-/// # let sm_entity = commands.spawn(HsmStateMachine::with(HsmStateId::new(tree_id,root), 10)).id();
+/// # let sm_entity = commands.spawn(HsmStateMachine::with(tree_id, root,#[cfg(feature = "history")] 10)).id();
 /// #
 /// // To transition to a specific sub-state:
 /// commands.trigger(HsmTrigger::to_sub(sm_entity, child_a));

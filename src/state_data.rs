@@ -250,7 +250,8 @@ mod tests {
         let state_machine_id = world.spawn_empty().id();
         world.entity_mut(state_machine_id).insert((
             HsmStateMachine::with(
-                HsmStateId::new(state_machine_id, id1),
+                state_machine_id,
+                id1,
                 #[cfg(feature = "history")]
                 10,
             ),

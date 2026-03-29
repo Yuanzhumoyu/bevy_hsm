@@ -108,7 +108,8 @@ fn setup(mut commands: Commands) {
     commands.entity(state_machine).insert((
         state_tree,
         HsmStateMachine::with(
-            HsmStateId::new(state_machine, start_id),
+            state_machine,
+            start_id,
             #[cfg(feature = "history")]
             10,
         ),

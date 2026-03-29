@@ -15,7 +15,7 @@ use crate::{
     markers::Terminated,
     prelude::{
         ActionRegistry, AfterEnterSystem, AfterExitSystem, BeforeEnterSystem, BeforeExitSystem,
-        CheckOnTransitionStates, HsmStateId, OnUpdateSystem, ServiceTarget, StateActionBuffer,
+        CheckOnTransitionStates, OnUpdateSystem, ServiceTarget, StateActionBuffer,
         TransitionRegistry,
     },
 };
@@ -25,7 +25,7 @@ struct TransitionInfo {
     state_machine_id: Entity,
     prev_transition: Transition,
     curr_transition: Transition,
-    curr_state_id: HsmStateId,
+    curr_state_id: Entity,
     hsm_state: StateLifecycle,
 }
 
@@ -117,18 +117,14 @@ impl StateLifecycle {
     }
 
     #[cfg(feature = "hybrid")]
-    fn handle_hybrid_exit(
-        world: &mut DeferredWorld,
-        state_machine_id: Entity,
-        state_id: HsmStateId,
-    ) {
+    fn handle_hybrid_exit(world: &mut DeferredWorld, state_machine_id: Entity, state_id: Entity) {
         use crate::{fsm::state_machine::HsmOwnedFsms, prelude::FsmStateMachine};
 
         let Some(mut mapping) = world.get_mut::<HsmOwnedFsms>(state_machine_id) else {
             return;
         };
 
-        let Some(_fsm_state_machine) = mapping.0.remove(&state_id.state()) else {
+        let Some(_fsm_state_machine) = mapping.0.remove(&state_id) else {
             return;
         };
 
@@ -193,8 +189,7 @@ impl StateLifecycle {
         #[cfg(feature = "history")]
         state_machine.push_history(HistoricalNode::new(curr_state_id, lifecycle.into()));
 
-        let state_context =
-            ActionContext::new(service_target, state_machine_id, curr_state_id.state());
+        let state_context = ActionContext::new(service_target, state_machine_id, curr_state_id);
 
         Some(TransitionInfo {
             state_machine_id,
@@ -228,7 +223,7 @@ impl StateLifecycle {
                 // 运行进入之前的系统
                 Self::run_transition_lifecycle_system::<BeforeEnterSystem>(
                     &mut world,
-                    curr_state_id.state(),
+                    curr_state_id,
                     TransitionContext::with(
                         state_context.service_target,
                         state_machine_id,
@@ -237,19 +232,19 @@ impl StateLifecycle {
                 );
 
                 #[cfg(feature = "hybrid")]
-                Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id.state());
+                Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id);
 
                 #[cfg(feature = "state_data")]
                 StateData::clone_components(
                     &mut world,
-                    curr_state_id.state(),
+                    curr_state_id,
                     state_context.service_target,
                 );
 
                 // 运行进入后的系统
                 Self::run_lifecycle_system::<AfterEnterSystem>(
                     &mut world,
-                    curr_state_id.state(),
+                    curr_state_id,
                     state_context,
                 );
 
@@ -260,7 +255,7 @@ impl StateLifecycle {
             }
             StateLifecycle::Update => {
                 // 添加过渡条件检查系统
-                let curr_state = world.entity(curr_state_id.state());
+                let curr_state = world.entity(curr_state_id);
                 if curr_state.contains::<AfterEnterSystem>()
                     || curr_state.contains::<BeforeExitSystem>()
                 {
@@ -270,13 +265,10 @@ impl StateLifecycle {
                 }
 
                 // 运行更新系统
-                if world
-                    .entity(curr_state_id.state())
-                    .contains::<OnUpdateSystem>()
-                {
+                if world.entity(curr_state_id).contains::<OnUpdateSystem>() {
                     StateActionBuffer::buffer_scope(
                         world.as_unsafe_world_cell(),
-                        curr_state_id.state(),
+                        curr_state_id,
                         move |_world, buff| {
                             buff.remove_filter(state_context);
                             buff.add(state_context);
@@ -288,7 +280,7 @@ impl StateLifecycle {
                 // 过滤条件
                 StateActionBuffer::buffer_scope(
                     world.as_unsafe_world_cell(),
-                    curr_state_id.state(),
+                    curr_state_id,
                     move |_world, buff| {
                         buff.remove_interceptor(state_context);
                         buff.add_filter(state_context);
@@ -298,7 +290,7 @@ impl StateLifecycle {
                 // 运行退出之前的系统
                 Self::run_lifecycle_system::<BeforeExitSystem>(
                     &mut world,
-                    curr_state_id.state(),
+                    curr_state_id,
                     state_context,
                 );
 
@@ -308,7 +300,7 @@ impl StateLifecycle {
                 #[cfg(feature = "state_data")]
                 StateData::remove_components(
                     &mut world,
-                    curr_state_id.state(),
+                    curr_state_id,
                     state_context.service_target,
                 );
 
@@ -333,7 +325,7 @@ impl StateLifecycle {
                             state_machine.set_curr_state(curr_state);
                             Self::run_transition_lifecycle_system::<AfterExitSystem>(
                                 &mut world.into(),
-                                curr_state_id.state(),
+                                curr_state_id,
                                 TransitionContext::with(
                                     state_context.service_target,
                                     state_machine_id,
@@ -345,7 +337,7 @@ impl StateLifecycle {
                         None => {
                             Self::run_transition_lifecycle_system::<AfterExitSystem>(
                                 &mut world.into(),
-                                curr_state_id.state(),
+                                curr_state_id,
                                 TransitionContext::with(
                                     state_context.service_target,
                                     state_machine_id,

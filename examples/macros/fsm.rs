@@ -70,13 +70,16 @@ fn handle_input(
 ) {
     if keyboard_input.just_pressed(KeyCode::ArrowUp) {
         print!("[Input]Go");
-        commands.trigger(FsmTrigger::with_event(state_machine.entity(), MyEvent::Go));
+        commands.trigger(FsmTrigger::with_event(
+            state_machine.entity(),
+            EventData::new(MyEvent::Go),
+        ));
     }
     if keyboard_input.just_pressed(KeyCode::ArrowDown) {
         print!("[Input]Back");
         commands.trigger(FsmTrigger::with_event(
             state_machine.entity(),
-            MyEvent::Back,
+            EventData::new(MyEvent::Back),
         ));
     }
 }

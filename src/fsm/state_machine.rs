@@ -49,7 +49,7 @@ use crate::fsm::history::*;
 pub struct FsmStateMachine {
     /// 包含状态机拓扑 (`FsmGraph`) 的实体。
     /// The entity that holds the state machine's topology (`FsmGraph`).
-    pub graph_id: Entity,
+    graph_id: Entity,
     /// 状态机的初始状态，在创建时从图中复制。
     /// The initial state of the state machine, copied from the graph upon creation.
     pub(super) init_state: Entity,
@@ -90,6 +90,10 @@ impl FsmStateMachine {
             #[cfg(feature = "history")]
             history: FsmStateHistory::new(history_size),
         }
+    }
+
+    pub const fn graph_id(&self) -> Entity {
+        self.graph_id
     }
 
     pub const fn curr_state_id(&self) -> Entity {
@@ -289,8 +293,8 @@ impl FsmStateMachine {
                     );
                 }
             }
-            FsmTriggerType::Event(fsm_on_event) => {
-                if let Some(target) = state_transitions.get_by_event(fsm_on_event.as_ref()) {
+            FsmTriggerType::Event(mut fsm_on_event) => {
+                if let Some(target) = fsm_on_event.get_target(state_transitions) {
                     state_machine.handle_direct_transition(
                         &mut commands,
                         &action_systems,

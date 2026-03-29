@@ -19,7 +19,7 @@ use crate::{
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_hsm::prelude::*;
-/// # fn after_enter(entity:In<ActionContext>) {
+/// # fn after_enter(_:In<ActionContext>) {
 /// #     println!("进入系统");
 /// # }
 /// # fn foo(mut commands:Commands, mut action_registry: ResMut<ActionRegistry>) {
@@ -36,7 +36,7 @@ impl ActionRegistry {
     ///
     /// Register system
     /// # 示例\Example
-    /// ```rust
+    /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
     /// # fn after_enter(entity:In<ActionContext>) {
@@ -59,7 +59,7 @@ impl ActionRegistry {
     ///
     /// Remove system
     /// # 示例\Example
-    /// ```rust
+    /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
     /// fn foo(mut commands:Commands, mut action_registry: ResMut<ActionRegistry>) {

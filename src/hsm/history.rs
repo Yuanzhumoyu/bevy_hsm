@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use crate::hsm::{state_lifecycle::StateLifecycle, state_tree::HsmStateId};
+#[cfg(all(feature = "history", feature = "hybrid"))]
+use bevy::ecs::entity::Entity;
+
+use crate::hsm::state_lifecycle::StateLifecycle;
 
 /// # 状态历史
 /// * 表示一个层级状态机（HSM）访问过的状态的历史记录。
@@ -39,7 +42,7 @@ impl StateHistory {
     #[cfg(all(feature = "history", feature = "hybrid"))]
     pub fn set_last_state_fsm_history(
         &mut self,
-        state: HsmStateId,
+        state: Entity,
         fsm_history: crate::fsm::history::FsmStateHistory,
     ) {
         for HistoricalNode { left_cycle, id } in self.history.iter_mut().rev() {
@@ -149,12 +152,12 @@ impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoricalNode {
-    id: HsmStateId,
+    id: Entity,
     left_cycle: HsmStateLifecycleRecord,
 }
 
 impl HistoricalNode {
-    pub fn new(id: HsmStateId, left_cycle: HsmStateLifecycleRecord) -> Self {
+    pub fn new(id: Entity, left_cycle: HsmStateLifecycleRecord) -> Self {
         Self { id, left_cycle }
     }
 
@@ -162,7 +165,7 @@ impl HistoricalNode {
         &self.left_cycle
     }
 
-    pub fn id(&self) -> HsmStateId {
+    pub fn id(&self) -> Entity {
         self.id
     }
 }

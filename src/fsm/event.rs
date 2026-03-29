@@ -6,6 +6,8 @@ use dyn_clone::{DynClone, clone_trait_object};
 use dyn_eq::{DynEq, eq_trait_object};
 use dyn_hash::{DynHash, hash_trait_object};
 
+use crate::prelude::OutgoingTransitions;
+
 /// # FSM 触发器
 /// * 用于驱动有限状态机（FSM）进行状态转换的核心事件。
 ///
@@ -80,7 +82,7 @@ impl FsmTrigger {
         }
     }
 
-    pub fn with_event(state_machine: Entity, event: impl StateEvent + 'static) -> Self {
+    pub fn with_event(state_machine: Entity, event: impl StateEventType) -> Self {
         Self {
             state_machine,
             typed: FsmTriggerType::event(event),
@@ -103,7 +105,7 @@ pub enum FsmTriggerType {
     /// 根据条件跳转状态
     Guard(Entity),
     /// 根据事件跳转状态
-    Event(Box<dyn StateEvent>),
+    Event(Box<dyn StateEventType>),
 }
 
 impl FsmTriggerType {
@@ -115,7 +117,7 @@ impl FsmTriggerType {
         Self::Guard(target)
     }
 
-    pub fn event(event: impl StateEvent + 'static) -> Self {
+    pub fn event(event: impl StateEventType + 'static) -> Self {
         Self::Event(Box::new(event))
     }
 }
@@ -137,3 +139,77 @@ impl<T> StateEvent for T where T: Clone + Eq + PartialEq + Hash + Send + Sync + 
 clone_trait_object!(StateEvent);
 eq_trait_object!(StateEvent);
 hash_trait_object!(StateEvent);
+
+pub trait StateEventType: DynClone + DynEq + Debug + Send + Sync {
+    fn get_target(&mut self, state_transitions: &OutgoingTransitions) -> Option<Entity>;
+}
+
+clone_trait_object!(StateEventType);
+eq_trait_object!(StateEventType);
+
+#[derive(PartialEq, Debug, Eq, Clone)]
+pub struct EventData(Box<dyn StateEvent>);
+
+impl EventData {
+    pub fn new(event: impl StateEvent + 'static) -> Self {
+        Self(Box::new(event))
+    }
+}
+
+impl StateEventType for EventData {
+    fn get_target(&mut self, state_transitions: &OutgoingTransitions) -> Option<Entity> {
+        state_transitions.get_by_event(self.0.as_ref())
+    }
+}
+
+macro_rules! impl_state_event_type_for_ranges {
+    ($($range:ident),*) => {
+        $(
+            impl<T: StateEvent> StateEventType for std::ops::$range<T>
+            where
+                std::ops::$range<T>: std::iter::Iterator<Item = T> + Debug + Clone + Eq,
+            {
+                fn get_target(&mut self, state_transitions: &OutgoingTransitions) -> Option<Entity> {
+                    self.find_map(|v|state_transitions.get_by_event(&v))
+                }
+            }
+        )*
+    };
+}
+
+impl_state_event_type_for_ranges!(Range, RangeInclusive, RangeFrom);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_state_event_type_for_ranges() {
+        let [a, b, c, d] = [0, 1, 2, 3].map(|i| Entity::from_raw_u32(i).unwrap());
+
+        let mut state_transitions = OutgoingTransitions::default();
+        state_transitions.with_event(1, a);
+        state_transitions.with_event(2, b);
+        state_transitions.with_event(16, c);
+        state_transitions.with_event(4, d);
+
+        fn get(
+            value: &mut dyn StateEventType,
+            state_transitions: &OutgoingTransitions,
+        ) -> Option<Entity> {
+            value.get_target(state_transitions)
+        }
+
+        let target = get(&mut EventData::new(16), &state_transitions);
+        assert_eq!(target, Some(c));
+
+        let target = get(&mut (0..4), &state_transitions);
+        assert_eq!(target, Some(a));
+
+        let target = get(&mut (2..=3), &state_transitions);
+        assert_eq!(target, Some(b));
+
+        let target = get(&mut (16..), &state_transitions);
+        assert_eq!(target, Some(c));
+    }
+}

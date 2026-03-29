@@ -115,12 +115,12 @@ impl Paused {
             };
             // 查看当前状态是否有OnUpdateSystem,则将其添加进延期表中
             let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id.state());
+            let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(
                 unsafe_world_cell,
-                curr_state_id.state(),
+                curr_state_id,
                 move |_world, buff| {
                     buff.add(state_context);
                 },
@@ -159,12 +159,12 @@ impl Paused {
                 break 'hsm;
             };
             let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id.state());
+            let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(
                 unsafe_world_cell,
-                curr_state_id.state(),
+                curr_state_id,
                 move |_world, buff| {
                     buff.add(state_context);
                 },

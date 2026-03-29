@@ -4,7 +4,6 @@
 //! # 核心概念
 //!
 //! - **StateTree**: 状态树的根结构，维护所有状态节点的关系
-//! - **HsmStateId**: 树状态标识符，包含树实体和状态实体的组合
 //! - **TraversalStrategy**: 状态遍历策略，定义子状态的访问顺序
 //!
 //! # 使用示例
@@ -32,7 +31,7 @@
 //! }
 //! ```
 
-use std::{fmt::Display, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
@@ -370,44 +369,6 @@ impl StateTreeNode {
             self.sub_states.remove(i);
         }
         self.sub_states.push(state);
-    }
-}
-
-/// 状态机状态的唯一标识符
-///
-/// Unique identifier for the state of the state machine
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct HsmStateId {
-    tree: Entity,
-    state: Entity,
-}
-
-impl HsmStateId {
-    /// 创建一个新的状态ID
-    ///
-    /// Create a new state ID
-    pub fn new(tree: Entity, state: Entity) -> Self {
-        Self { tree, state }
-    }
-
-    /// 获取状态树的实体
-    ///
-    /// Get the entity of the state tree
-    pub const fn tree(&self) -> Entity {
-        self.tree
-    }
-
-    /// 获取状态的实体
-    ///
-    /// Get the entity of the state
-    pub const fn state(&self) -> Entity {
-        self.state
-    }
-}
-
-impl Display for HsmStateId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.tree, self.state)
     }
 }
 

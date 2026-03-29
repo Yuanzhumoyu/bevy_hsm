@@ -12,7 +12,7 @@ use crate::{
         state_tree::StateTree,
     },
     markers::*,
-    prelude::{GuardEnter, GuardEnterCache, GuardExit, GuardExitCache, HsmStateId, ServiceTarget},
+    prelude::{GuardEnter, GuardEnterCache, GuardExit, GuardExitCache, ServiceTarget},
 };
 
 /// 状态转换策略，用于控制状态转换行为
@@ -175,7 +175,8 @@ impl StateTraversalStrategy for ReverseTraversal {
 
 fn build_exit_transition_plan(
     world: &World,
-    mut state_id: HsmStateId,
+    state_tree_id: Entity,
+    mut state_id: Entity,
     strategy: StateTransitionStrategy,
     mut behavior: ExitTransitionBehavior,
 ) -> Result<Vec<Transition>, String> {
@@ -189,7 +190,7 @@ fn build_exit_transition_plan(
             ExitTransitionBehavior::Rebirth,
         ) => Ok(vec![Transition::Enter(state_id)]),
         (StateTransitionStrategy::Nested, ExitTransitionBehavior::Death) => {
-            let Some(state_tree) = world.get::<StateTree>(state_id.tree()) else {
+            let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
                 return Err(format!(
                     "The entity<{}> does not contain [StateTree]",
                     state_id
@@ -198,11 +199,11 @@ fn build_exit_transition_plan(
 
             let mut transition_queue = vec![Transition::Exit(state_id)];
 
-            if state_tree.get_root() == state_id.state() {
+            if state_tree.get_root() == state_id {
                 return Ok(transition_queue);
             }
 
-            while let Some(state) = state_tree.get_super_state(state_id.state()) {
+            while let Some(state) = state_tree.get_super_state(state_id) {
                 let Some(HsmState {
                     strategy, behavior, ..
                 }) = world.get::<HsmState>(state).copied()
@@ -212,8 +213,8 @@ fn build_exit_transition_plan(
                         state_id
                     ));
                 };
-                let state_id = HsmStateId::new(state_id.tree(), state);
-                if state_tree.get_root() == state_id.state() {
+                let state_id = state;
+                if state_tree.get_root() == state_id {
                     transition_queue.push(Transition::with_behavior(state_id, behavior));
                     return Ok(transition_queue);
                 }
@@ -222,7 +223,11 @@ fn build_exit_transition_plan(
                 {
                     true => {
                         transition_queue.extend(build_exit_transition_plan(
-                            world, state_id, strategy, behavior,
+                            world,
+                            state_tree_id,
+                            state_id,
+                            strategy,
+                            behavior,
                         )?);
                         return Ok(transition_queue);
                     }
@@ -234,25 +239,31 @@ fn build_exit_transition_plan(
             Ok(transition_queue)
         }
         (StateTransitionStrategy::Parallel, ExitTransitionBehavior::Death) => {
-            let Some(state_tree) = world.get::<StateTree>(state_id.tree()) else {
+            let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
                 return Err(format!(
                     "The entity<{}> does not contain [StateTree]",
                     state_id
                 ));
             };
 
-            while let Some(state) = state_tree.get_super_state(state_id.state())
+            while let Some(state) = state_tree.get_super_state(state_id)
                 && let Some(HsmState {
                     strategy,
                     behavior: new_behavior,
                     ..
                 }) = world.get::<HsmState>(state).copied()
             {
-                let new_state_id = HsmStateId::new(state_id.tree(), state);
+                let new_state_id = state;
                 if !(strategy == StateTransitionStrategy::Parallel
                     && new_behavior == ExitTransitionBehavior::Death)
                 {
-                    return build_exit_transition_plan(world, new_state_id, strategy, new_behavior);
+                    return build_exit_transition_plan(
+                        world,
+                        state_tree_id,
+                        new_state_id,
+                        strategy,
+                        new_behavior,
+                    );
                 }
                 state_id = new_state_id;
                 behavior = new_behavior;
@@ -299,28 +310,25 @@ fn handle_enter_transitions(
         query_state_machines.iter_many(check_on_transition_states.iter())
     {
         let curr_state_id = state_machine.curr_state_id();
+        let state_tree_id = state_machine.state_tree();
         let Ok(strategy) = query_states
-            .get(curr_state_id.state())
+            .get(curr_state_id)
             .map(|hsm_state| hsm_state.strategy)
         else {
             continue;
         };
         commands.queue(move |world: &mut World| {
-            let Some(state_tree) = world.get::<StateTree>(curr_state_id.tree()) else {
-                warn!(
-                    "{}",
-                    StateMachineError::StateTreeNotFound(curr_state_id.tree())
-                );
+            let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
+                warn!("{}", StateMachineError::StateTreeNotFound(state_tree_id));
                 return;
             };
-            let sub_state_iter =
-                state_tree.traversal_iter_with(world, curr_state_id.state(), |e| {
-                    if !e.contains::<HsmState>() {
-                        warn!("{}", StateMachineError::HsmStateMissing(e.id()));
-                        return false;
-                    }
-                    e.contains::<GuardEnter>()
-                });
+            let sub_state_iter = state_tree.traversal_iter_with(world, curr_state_id, |e| {
+                if !e.contains::<HsmState>() {
+                    warn!("{}", StateMachineError::HsmStateMissing(e.id()));
+                    return false;
+                }
+                e.contains::<GuardEnter>()
+            });
             let Some(enter_state_id) = world.resource_scope(
                 |world: &mut World, condition_buffer: Mut<GuardEnterCache>| {
                     for sub_state_id in sub_state_iter {
@@ -334,7 +342,7 @@ fn handle_enter_transitions(
                             GuardContext::new(
                                 service_target,
                                 state_machine_id,
-                                curr_state_id.state(),
+                                curr_state_id,
                                 sub_state_id,
                             ),
                         ) {
@@ -345,7 +353,7 @@ fn handle_enter_transitions(
                                     "{}",
                                     StateMachineError::GuardRunFailed {
                                         state_machine: state_machine_id,
-                                        from_state: curr_state_id.state(),
+                                        from_state: curr_state_id,
                                         to_state: Some(sub_state_id),
                                         source: e.into(),
                                     }
@@ -369,7 +377,7 @@ fn handle_enter_transitions(
 
 pub(super) fn handle_enter_transition(
     state_machine_id: Entity,
-    curr_state_id: HsmStateId,
+    curr_state_id: Entity,
     enter_state_id: Entity,
     strategy: StateTransitionStrategy,
 ) -> impl Command<Result<()>> {
@@ -387,15 +395,14 @@ pub(super) fn handle_enter_transition(
             return Ok(());
         };
 
-        let state_id = HsmStateId::new(curr_state_id.tree(), enter_state_id);
         let next_on_state: StateLifecycle = match strategy {
             StateTransitionStrategy::Nested => {
-                state_machine.set_curr_state(state_id);
+                state_machine.set_curr_state(enter_state_id);
                 StateLifecycle::Enter
             }
             StateTransitionStrategy::Parallel => {
                 state_machine.set_curr_state(curr_state_id);
-                state_machine.push_next_state(Transition::Enter(state_id));
+                state_machine.push_next_state(Transition::Enter(enter_state_id));
                 StateLifecycle::Exit
             }
         };
@@ -417,22 +424,20 @@ fn handle_exit_transitions(
         query_state_machines.iter_many(check_on_transition_states.iter())
     {
         let curr_state_id = state_machine.curr_state_id();
-        let Ok(true) = query_on_exit_conditions.get(curr_state_id.state()) else {
+        let state_tree_id = state_machine.state_tree();
+        let Ok(true) = query_on_exit_conditions.get(curr_state_id) else {
             continue;
         };
-        let Ok(state_tree) = query_state_trees.get(curr_state_id.tree()) else {
-            warn!(
-                "{}",
-                StateMachineError::StateTreeNotFound(curr_state_id.tree())
-            );
+        let Ok(state_tree) = query_state_trees.get(state_tree_id) else {
+            warn!("{}", StateMachineError::StateTreeNotFound(state_tree_id));
             continue;
         };
-        let Some(super_state_id) = state_tree.get_super_state(curr_state_id.state()) else {
+        let Some(super_state_id) = state_tree.get_super_state(curr_state_id) else {
             warn!(
                 "{}",
                 StateMachineError::SuperStateNotFound {
-                    state_tree: curr_state_id.tree(),
-                    state: curr_state_id.state()
+                    state_tree: state_tree_id,
+                    state: curr_state_id
                 }
             );
             continue;
@@ -440,7 +445,7 @@ fn handle_exit_transitions(
         commands.queue(move |world: &mut World| -> Result<()> {
             match world.resource_scope(
                 |world: &mut World, exit_guard_cache: Mut<GuardExitCache>| match exit_guard_cache
-                    .get(&curr_state_id.state())
+                    .get(&curr_state_id)
                 {
                     Some(guard) => {
                         let service_target = get_service_target(world, state_machine_id);
@@ -449,7 +454,7 @@ fn handle_exit_transitions(
                             GuardContext::new(
                                 service_target,
                                 state_machine_id,
-                                curr_state_id.state(),
+                                curr_state_id,
                                 super_state_id,
                             ),
                         )
@@ -464,7 +469,7 @@ fn handle_exit_transitions(
                         "{}",
                         StateMachineError::GuardRunFailed {
                             state_machine: state_machine_id,
-                            from_state: curr_state_id.state(),
+                            from_state: curr_state_id,
                             to_state: None,
                             source: e.into(),
                         }
@@ -473,7 +478,13 @@ fn handle_exit_transitions(
                 }
             };
 
-            handle_exit_transition(state_machine_id, curr_state_id, super_state_id).apply(world)
+            handle_exit_transition(
+                state_machine_id,
+                state_tree_id,
+                curr_state_id,
+                super_state_id,
+            )
+            .apply(world)
         });
     }
 }
@@ -481,7 +492,8 @@ fn handle_exit_transitions(
 #[inline]
 pub(super) fn handle_exit_transition(
     state_machine_id: Entity,
-    curr_state_id: HsmStateId,
+    state_tree_id: Entity,
+    curr_state_id: Entity,
     exit_state_id: Entity,
 ) -> impl Command<Result<()>> {
     move |world: &mut World| -> Result<()> {
@@ -497,8 +509,8 @@ pub(super) fn handle_exit_transition(
             return Ok(());
         };
 
-        let state_id = HsmStateId::new(curr_state_id.tree(), exit_state_id);
-        let transition_queue = build_exit_transition_plan(world, state_id, strategy, behavior)?;
+        let transition_queue =
+            build_exit_transition_plan(world, state_tree_id, exit_state_id, strategy, behavior)?;
 
         let mut service_target = world.entity_mut(state_machine_id);
         let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
@@ -651,7 +663,8 @@ mod tests {
         world.entity_mut(state_machine_id).insert((
             state_tree,
             HsmStateMachine::with(
-                HsmStateId::new(state_machine_id, start_id),
+                state_machine_id,
+                start_id,
                 #[cfg(feature = "history")]
                 10,
             ),

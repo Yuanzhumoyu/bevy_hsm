@@ -77,11 +77,11 @@ fn test_fsm_event() {
     assert_eq!(get_curr_state(world, state_machine), ids[1]);
 
     // B -> ? event=false false
-    world.trigger(FsmTrigger::with_event(state_machine, false));
+    world.trigger(FsmTrigger::with_event(state_machine, EventData::new(false)));
     assert_eq!(get_curr_state(world, state_machine), ids[1]);
 
     // B -event(true)-> C true
-    world.trigger(FsmTrigger::with_event(state_machine, true));
+    world.trigger(FsmTrigger::with_event(state_machine, EventData::new(true)));
     assert_eq!(get_curr_state(world, state_machine), ids[2]);
 
     // C -guard(false)-> B false
@@ -125,7 +125,6 @@ fn test_hsm_event() {
             .get::<HsmStateMachine>(state_machine)
             .unwrap()
             .curr_state_id()
-            .state()
     }
 
     let tautology = GuardCondition::from("tautology");

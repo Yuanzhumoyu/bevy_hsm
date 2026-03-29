@@ -96,7 +96,10 @@ fn handle_input(
     if keyboard_input.just_pressed(KeyCode::Space) {
         info!("Spacebar pressed, sending ToggleEvent.");
         let state_machine = state_machine.entity();
-        commands.trigger(FsmTrigger::with_event(state_machine, ToggleEvent));
+        commands.trigger(FsmTrigger::with_event(
+            state_machine,
+            EventData::new(ToggleEvent),
+        ));
     }
 
     if keyboard_input.just_pressed(KeyCode::KeyP) {
