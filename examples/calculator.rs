@@ -291,20 +291,19 @@ fn on_enter_operator(
         *just_calculated = false;
     }
 
-    while let Some(&top_op) = calculator.operator_stack.last() {
-        if top_op != '(' && precedence(op) <= precedence(top_op) {
-            if calculator.number_stack.len() < 2 {
-                break;
-            }
-            let b = calculator.number_stack.pop().unwrap();
-            let a = calculator.number_stack.pop().unwrap();
-            let op_to_apply = calculator.operator_stack.pop().unwrap();
-            let result = calculate(a, b, op_to_apply);
-            calculator.number_stack.push(result);
-            calculator.current_display = result.to_string();
-        } else {
+    while let Some(&top_op) = calculator.operator_stack.last()
+        && top_op != '('
+        && precedence(op) <= precedence(top_op)
+    {
+        if calculator.number_stack.len() < 2 {
             break;
         }
+        let b = calculator.number_stack.pop().unwrap();
+        let a = calculator.number_stack.pop().unwrap();
+        let op_to_apply = calculator.operator_stack.pop().unwrap();
+        let result = calculate(a, b, op_to_apply);
+        calculator.number_stack.push(result);
+        calculator.current_display = result.to_string();
     }
     calculator.operator_stack.push(op);
     calculator.history_display.push(' ');
@@ -381,11 +380,9 @@ fn on_right_parenthesis(In(_context): In<ActionContext>, mut calculator: ResMut<
         current_number.clear();
     }
 
-    while let Some(&top_op) = calculator.operator_stack.last() {
-        if top_op == '(' {
-            calculator.operator_stack.pop(); // Discard '('
-            break;
-        }
+    while let Some(&top_op) = calculator.operator_stack.last()
+        && top_op != '('
+    {
         if calculator.number_stack.len() < 2 {
             break;
         }
@@ -396,6 +393,7 @@ fn on_right_parenthesis(In(_context): In<ActionContext>, mut calculator: ResMut<
         calculator.number_stack.push(result);
         calculator.current_display = result.to_string();
     }
+    calculator.operator_stack.pop(); // Discard '('
     calculator.history_display.push(')');
     calculator.parenthesis_count -= 1;
 }

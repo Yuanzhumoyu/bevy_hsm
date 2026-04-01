@@ -47,7 +47,7 @@ use crate::prelude::OutgoingTransitions;
 /// commands.trigger(FsmTrigger::with_next(sm_entity, walking));
 ///
 /// // To trigger a transition based on an event:
-/// commands.trigger(FsmTrigger::with_event(sm_entity, MyEvent));
+/// commands.trigger(FsmTrigger::with_event(sm_entity, EventData::new(MyEvent)));
 ///
 /// // To trigger a transition that needs to be checked by a guard:
 /// commands.trigger(FsmTrigger::with_guard(sm_entity, idle));

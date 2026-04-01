@@ -27,6 +27,19 @@ fn debug_hello_world(
     Some(contexts.0)
 }
 
+fn debug_hello_world2(
+    contexts: In<Vec<ActionContext>>,
+    mut query_switch: Query<&mut Switch>,
+) -> Option<Vec<ActionContext>> {
+    let mut switch = query_switch.get_mut(contexts.0[0].service_target).unwrap();
+    println!("Hello World2 {:?}", switch.as_ref());
+    *switch = match *switch {
+        Switch::Open => Switch::Close,
+        Switch::Close => Switch::Open,
+    };
+    Some(contexts.0)
+}
+
 fn is_open(entity: In<GuardContext>, query: Query<&Switch>) -> bool {
     let switch = query.get(entity.service_target).unwrap();
     matches!(switch, Switch::Open)
@@ -94,6 +107,11 @@ fn setup(mut commands: Commands) {
     ));
 }
 
+fn count(mut c: Local<usize>) {
+    *c += 1;
+    println!("updata: {}", *c);
+}
+
 #[test]
 fn remove_action_system() {
     let mut app = App::new();
@@ -103,11 +121,12 @@ fn remove_action_system() {
     app.add_action_system(Update, "debug_hello_world", debug_hello_world);
 
     app.add_systems(Startup, (register_condition, setup).chain());
+    app.add_systems(Update, count);
 
     app.update();
     app.update();
-    app.update();
-    app.update();
+    println!("Replaced action system, should see 'Hello World2'.");
+    app.replace_action_system(Update, "debug_hello_world", debug_hello_world2);
     app.update();
     app.update();
 }

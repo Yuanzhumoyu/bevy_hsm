@@ -54,12 +54,20 @@ fn main() {
 - `Paused`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
 - `Terminated`: A marker component indicating that the state machine has finished its execution.
 
+**Two Design Philosophies: HSM vs. FSM**
+At its core, `bevy_hsm` offers two state machines with distinct design philosophies:
+
+- **HSM (Hierarchical State Machine)** uses an **asynchronous, plan-based** lifecycle model. A transition intent (triggered by a guard or event) is placed into a queue, and a system later executes a detailed transition plan asynchronously (typically in the `Last` schedule). This makes it ideal for managing complex, hierarchical behaviors that require robust entry/exit logic.
+- **FSM (Finite State Machine)** uses a **synchronous, command-based** lifecycle model. A transition is triggered by an event and **immediately** completes all exit and entry actions synchronously within the event-handling function. This makes it very lightweight and fast, suitable for responsive, direct state switching.
+
+Understanding the difference between these two modes is key to using this library effectively.
+
 ### Hierarchical State Machine (HSM) - State-Driven
 
-The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles. It supports two driving modes:
+The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles. Its lifecycle management is **asynchronous and plan-based**. It supports two driving modes:
 
-- **State-Driven (Automatic)**: Via the `StateLifecycle` component. This is a special component whose value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage of the state machine and drives all logic through its `on_insert` hook. This mode is typically used for automatic transitions triggered by the state's own conditions.
-- **Event-Driven (Manual)**: By sending an `HsmTrigger` event. This is a Bevy event that, when sent, forces an HSM state transition, providing imperative and precise control.
+- **State-Driven (Automatic)**: Via the `StateLifecycle` component. This is a special component whose value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage. When a transition is needed, the system calculates a detailed **transition plan** (a series of enter and exit steps) and then drives the execution of this plan asynchronously by modifying the `StateLifecycle` value.
+- **Event-Driven (Manual)**: By sending an `HsmTrigger` event. This is a Bevy event that, when sent, forces an HSM state transition. It also generates a transition plan, which is then driven by the `StateLifecycle`, providing an imperative and precise method of control.
 - `StateTree`: Defines the parent-child hierarchical relationships between states.
 - `GuardEnter` / `GuardExit`: Components attached to state entities to specify the conditions for entering or exiting that state.
 
@@ -107,11 +115,11 @@ fn main() {
 
 ### Finite State Machine (FSM) - Event-Driven
 
-The FSM is driven by external events, making it ideal for responsive, direct state switching.
+The FSM is driven entirely by external events, and its lifecycle management is **synchronous and command-based**. This makes it ideal for responsive, direct state switching.
 
 - `FsmState`: A marker component used to identify an entity as an FSM state.
 - `FsmStateMachine`: The core component of the FSM, managing the current state and graph.
-- `FsmTrigger`: **The engine of the FSM**. This is a Bevy event used to drive FSM state transitions. You can use it to trigger unconditional transitions or to wrap a custom event (like an enum or struct) to trigger a specific event-driven transition.
+- `FsmTrigger`: **The sole event engine of the FSM**. This is a Bevy event used to drive FSM state transitions. When the event is received, the state machine **immediately and synchronously** completes the entire process from exiting the old state to entering the new one.
 - `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
 
 ## Macro Syntax (EBNF)
@@ -181,7 +189,7 @@ state_ref ::= identifier | integer_literal; (* State name or index *)
 - The `fsm!` macro consists of three parts: the `fsm_graph`, an optional `components` block, and an optional `config_fn`.
 - The `fsm_graph` is required and contains both a `states` and a `transitions` block.
 - The syntax for `state_definition` is similar to `state_node` in `hsm!`, but it cannot contain nested states.
-- `state_definition` also supports `#[state(...)]` and `#[state_data(...)]` attributes. However, please note that because FSMs have a flat, event-driven structure, parameters in `#[state(...)]` related to HSM's automatic transitions and hierarchy (like `guard_enter`, `guard_exit`, `strategy`, `behavior`) are invalid here.
+- `state_definition` also supports `#[state(...)]` and `#[state_data(...)]` attributes. However, please note that because FSMs have a flat, event-driven structure, parameters in `#[state(...)]` related to HSM's automatic transitions and hierarchy (like `guard_enter`, `guard_exit`, `strategy`, `behavior`) are invalid here. (*FSM transitions must be explicitly triggered by an `FsmTrigger` event and thus do not support automatic guards.*)
 - A `transition` defines the rules for moving between states. It can be unconditional or conditional (via an event or a guard).
   - The arrows define the direction of the transition. There are three valid patterns:
     - A => B: A unidirectional transition from A to B.
@@ -218,7 +226,7 @@ system_registry ::= '< ', source, ',', system_registry, '>', '[', [ system_defin
 system_definition ::= ( lit_str | fn_identifier ), '=>', rust_expression;
 
 source ::= identifier; (* A variable of type `Commands` or `World` *)
-system_registry ::= identifier; (* A variable that implements `Extend<(String, SystemId)>` *)
+system_registry ::= identifier; (* A variable that implements `Extend<(SystemLabel, SystemId)>` *)
 lit_str ::= (* A unique name within the system_registry *)
 fn_identifier ::= (* A unique name within the system_registry *)
 rust_expression ::= (* A Bevy system (function or closure) *)

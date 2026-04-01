@@ -255,14 +255,9 @@ impl StateLifecycle {
             }
             StateLifecycle::Update => {
                 // 添加过渡条件检查系统
-                let curr_state = world.entity(curr_state_id);
-                if curr_state.contains::<AfterEnterSystem>()
-                    || curr_state.contains::<BeforeExitSystem>()
-                {
-                    let mut check_on_transition_states =
-                        world.resource_mut::<CheckOnTransitionStates>();
-                    check_on_transition_states.insert(state_machine_id);
-                }
+                let mut check_on_transition_states =
+                    world.resource_mut::<CheckOnTransitionStates>();
+                check_on_transition_states.insert(state_machine_id);
 
                 // 运行更新系统
                 if world.entity(curr_state_id).contains::<OnUpdateSystem>() {

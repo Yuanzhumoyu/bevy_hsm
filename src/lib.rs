@@ -13,7 +13,7 @@
 //! ## 主要功能
 //!
 //! - **双模式支持**: 同时支持有限状态机 (`FSM`) 和分层状态机 (`HSM`)。
-//! - **生命周期动作**: 为每个状态定义 `AfterEnter`, `OnUpdate`, `BeforeExit` 动作，它们都是 Bevy 系统。
+//! - **生命周期动作**: 为每个状态定义 `BeforeEnter`, `AfterEnter`, `OnUpdate`, `BeforeExit`, `AfterExit` 动作，它们都是 Bevy 系统。
 //! - **转换守卫 (Guards)**: 使用 Bevy 系统作为守卫条件，以编程方式决定是否允许状态转换。
 //! - **状态数据 (`StateData`)**: 自动在进入/退出状态时为实体添加/移除指定的组件。
 //! - **历史状态 (History)**: HSM 支持历史状态，可以轻松返回到之前的活动子状态。
@@ -39,7 +39,7 @@
 //! ## Features
 //!
 //! - **Dual-Mode Support**: Supports both Finite State Machines (`FSM`) and Hierarchical State Machines (`HSM`).
-//! - **Lifecycle Actions**: Define `AfterEnter`, `OnUpdate`, and `BeforeExit` actions for each state, all of which are Bevy systems.
+//! - **Lifecycle Actions**: Define `BeforeEnter`, `AfterEnter`, `OnUpdate`, `BeforeExit`, and `AfterExit` actions for each state, all of which are Bevy systems.
 //! - **Transition Guards**: Use Bevy systems as guard conditions to programmatically decide whether a state transition is allowed.
 //! - **State Data**: Automatically add or remove specified components from an entity upon entering/exiting a state.
 //! - **History States**: HSMs support history states, making it easy to return to a previous active sub-state.
@@ -127,6 +127,7 @@ impl Plugin for StateMachinePlugin {
             app.init_resource::<CheckOnTransitionStates>();
             app.init_resource::<GuardEnterCache>();
             app.init_resource::<GuardExitCache>();
+            app.init_resource::<prelude::ActionSystemRegistry>();
 
             (self.transition_system)(app);
 

@@ -1,10 +1,9 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc};
+use std::{any::TypeId, fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc};
 
 use bevy::{
     app::App,
     ecs::{
-        component::ComponentId,
-        schedule::{IntoScheduleConfigs, ScheduleLabel},
+        schedule::{IntoScheduleConfigs, ScheduleError, ScheduleLabel},
         world::unsafe_world_cell::UnsafeWorldCell,
     },
     platform::collections::{Equivalent, HashMap, HashSet},
@@ -44,11 +43,142 @@ where
     }
 }
 
+/// A trait for adding, removing, and replacing action systems in a Bevy `App` or `World`.
+/// This provides a unified interface for managing action systems.
+///
+/// 用于在 Bevy 的 `App` 或 `World` 中添加、删除和替换动作系统的 trait。
+/// 这为管理动作系统提供了一个统一的接口。
 pub trait SystemState {
+    /// 将一个动作系统添加至指定的 `Schedule`。
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: 将要添加动作系统的 `Schedule`。
+    /// * `action_name`: 动作系统的唯一名称。
+    /// * `system`: 要添加的动作系统，必须实现 `IntoActionSystem`。
+    ///
+    /// Adds an action system to the specified schedule.
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: The schedule to which the action system will be added.
+    /// * `action_name`: A unique name for the action system.
+    /// * `system`: The action system to add, which must implement `IntoActionSystem`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn my_action_system(In(contexts): In<Vec<ActionContext>>) -> Option<Vec<ActionContext>> { Some(contexts) }
+    /// # fn my_fn() {
+    /// let mut app = App::new();
+    /// app.add_plugins(StateMachinePlugin::default());
+    ///
+    /// app.add_action_system(Update, "my_action", my_action_system);
+    /// # }
+    /// ```
+    ///
     fn add_action_system<M>(
         &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFunction + Default,
-        action_name: impl Into<String>,
+        schedule: impl ScheduleLabel + Default,
+        action_name: impl Into<SystemLabel>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self;
+
+    /// 从指定的 `Schedule` 中移除一个动作系统。
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: 将要移除动作系统的 `Schedule`。
+    /// * `action_name`: 要移除的动作系统的名称。
+    ///
+    /// # 注意
+    ///
+    /// 当前函数功能会将所有此前状态机注册的上下文全部删除，
+    /// 如果需要继承先前函数的缓冲区，请使用 `replace_action_system`。
+    ///
+    /// Removes an action system from the specified schedule.
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: The schedule from which the action system will be removed.
+    /// * `action_name`: The name of the action system to remove.
+    ///
+    /// # Note
+    ///
+    /// This function will delete all previously registered contexts of the state machine.
+    /// If you need to inherit the buffer of the previous function, please use `replace_action_system`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn my_action_system(In(contexts): In<Vec<ActionContext>>) -> Option<Vec<ActionContext>> { Some(contexts) }
+    /// # fn my_fn() {
+    /// let mut app = App::new();
+    /// app.add_plugins(StateMachinePlugin::default());
+    ///
+    /// app.add_action_system(Update, "my_action", my_action_system);
+    /// // ...
+    /// app.remove_action_system(Update, "my_action");
+    /// # }
+    /// ```
+    ///
+    fn remove_action_system(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        action_name: impl Into<SystemLabel>,
+    ) -> &mut Self;
+
+    /// 在指定的 `Schedule` 中用一个新的动作系统替换现有的动作系统。
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: 将要替换动作系统的 `Schedule`。
+    /// * `action_name`: 要替换的动作系统的名称。
+    /// * `system`: 新的动作系统。
+    ///
+    /// # 注意
+    ///
+    /// 当前函数功能会继承所有此前状态机注册的上下文，
+    /// 如果需要删除先前函数的缓冲区，请使用 `remove_action_system`。
+    ///
+    /// Replaces an existing action system with a new one in the specified schedule.
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule`: The schedule where the action system will be replaced.
+    /// * `action_name`: The name of the action system to replace.
+    /// * `system`: The new action system.
+    ///
+    /// # Note
+    ///
+    /// This function will inherit all contexts previously registered by the state machine.
+    /// If you need to delete the buffer of the previous function, please use `remove_action_system`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_hsm::prelude::*;
+    /// # fn my_action_system(In(contexts): In<Vec<ActionContext>>) -> Option<Vec<ActionContext>> { Some(contexts) }
+    /// # fn my_new_action_system(In(contexts): In<Vec<ActionContext>>) -> Option<Vec<ActionContext>> { Some(contexts) }
+    /// # fn my_fn() {
+    /// let mut app = App::new();
+    /// app.add_plugins(StateMachinePlugin::default());
+    ///
+    /// app.add_action_system(Update, "my_action", my_action_system);
+    /// // ...
+    /// app.replace_action_system(Update, "my_action", my_new_action_system);
+    /// # }
+    /// ```
+    ///
+    fn replace_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + Clone,
+        action_name: impl Into<SystemLabel>,
         system: impl IntoActionSystem<M>,
     ) -> &mut Self;
 }
@@ -56,22 +186,81 @@ pub trait SystemState {
 impl SystemState for App {
     fn add_action_system<M>(
         &mut self,
-        schedule: impl ScheduleLabel + ExpandScheduleLabelFunction + Default,
-        action_name: impl Into<String>,
+        schedule: impl ScheduleLabel + Default,
+        action_name: impl Into<SystemLabel>,
         system: impl IntoActionSystem<M>,
     ) -> &mut Self {
         let world = self.world_mut();
-        let action_name = Arc::new(action_name.into());
+        world.add_action_system(schedule, action_name, system);
+        self
+    }
+
+    fn remove_action_system(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        action_name: impl Into<SystemLabel>,
+    ) -> &mut Self {
+        let world = self.world_mut();
+        world.remove_action_system(schedule, action_name);
+        self
+    }
+
+    fn replace_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + Clone,
+        action_name: impl Into<SystemLabel>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self {
+        let world = self.world_mut();
+        world.replace_action_system(schedule, action_name, system);
+        self
+    }
+}
+
+impl SystemState for World {
+    fn add_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + Default,
+        action_name: impl Into<SystemLabel>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self {
+        let action_name = action_name.into();
 
         // 注册状态系统
-        if let Err(e) = schedule.add_system_info(world, action_name.clone()) {
-            warn!("{}", e);
-            return self;
-        }
+        schedule.add_system_info(self, action_name.clone()).unwrap();
 
         // 添加系统
-        let mut schedules = world.resource_mut::<Schedules>();
-        schedule.add_system(&mut schedules, action_name, system);
+        let system = schedule.configuration_action_system(action_name.clone(), system);
+        self.resource_scope(
+            |world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
+                let index = schedule.push_system_index(action_name, &mut systems);
+                world.schedule_scope(schedule, |_world: &mut World, schedule: &mut Schedule| {
+                    schedule.add_systems(system.in_set(index));
+                });
+            },
+        );
+        self
+    }
+
+    fn remove_action_system(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        action_name: impl Into<SystemLabel>,
+    ) -> &mut Self {
+        let action_name = action_name.into();
+        schedule.remove_system_info(self, &action_name).unwrap();
+        schedule.remove_system(self, action_name).unwrap();
+        self
+    }
+
+    fn replace_action_system<M>(
+        &mut self,
+        schedule: impl ScheduleLabel + Clone,
+        action_name: impl Into<SystemLabel>,
+        system: impl IntoActionSystem<M>,
+    ) -> &mut Self {
+        let action_name = action_name.into();
+        schedule.replace_system(self, action_name, system).unwrap();
         self
     }
 }
@@ -98,6 +287,13 @@ impl ActionDispatch {
         self.0.insert(action_name, system_id);
     }
 
+    pub(super) fn remove<Q>(&mut self, action_name: &Q) -> Option<GetBufferId>
+    where
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
+    {
+        self.0.remove(action_name)
+    }
+
     pub(super) fn get<Q>(&self, action_name: &Q) -> Option<GetBufferId>
     where
         Q: Hash + Equivalent<SystemLabel> + ?Sized,
@@ -105,14 +301,6 @@ impl ActionDispatch {
         self.0.get(action_name).cloned()
     }
 }
-
-/// 状态机系统缓存管理器
-///
-/// Status machine system cache manager
-/// * Key: `ScheduleLabel`
-/// * Value: `ScheduleActionBuffers<T: ScheduleLabel>` 的 `ComponentId`
-#[derive(Resource, Default, Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
-pub(super) struct ScheduleBufferIndex(HashMap<String, ComponentId>);
 
 #[derive(ScheduleLabel, Hash, Debug, PartialEq, Eq, Clone)]
 pub(super) struct DefaultActionSchedule;
@@ -122,32 +310,39 @@ pub(super) struct DefaultActionSchedule;
 /// Status machine system cache manager
 #[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
 pub(super) struct ScheduleActionBuffers<T: ScheduleLabel = DefaultActionSchedule> {
-    buffers: HashMap<String, StateActionBuffer>,
+    buffers: HashMap<SystemLabel, StateActionBuffer>,
     _marker: PhantomData<T>,
 }
 
 impl<T: ScheduleLabel> ScheduleActionBuffers<T> {
-    pub fn insert_buffer(&mut self, action_name: String, buffer: StateActionBuffer) {
+    pub fn insert_buffer(&mut self, action_name: SystemLabel, buffer: StateActionBuffer) {
         self.buffers.insert(action_name, buffer);
     }
 
     pub fn get_buffer<Q>(&self, action_name: &Q) -> Option<&StateActionBuffer>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.buffers.get(action_name)
     }
 
     pub fn get_buffer_mut<Q>(&mut self, action_name: &Q) -> Option<&mut StateActionBuffer>
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.buffers.get_mut(action_name)
     }
 
+    pub fn remove_buffer<Q>(&mut self, action_name: &Q) -> Option<StateActionBuffer>
+    where
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
+    {
+        self.buffers.remove(action_name)
+    }
+
     pub fn contains<Q>(&self, action_name: &Q) -> bool
     where
-        Q: Hash + Equivalent<String> + ?Sized,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.buffers.contains_key(action_name)
     }
@@ -303,11 +498,11 @@ impl Extend<ActionContext> for StateActionBuffer {
 /// 创建一个处理动作系统运行逻辑的闭包。
 /// 这个闭包会接收来自前一个系统的 `ActionContext`，并将其添加到对应的 `StateActionBuffer` 中。
 fn create_action_system_runner<T: ScheduleLabel>(
-    action_name: Arc<String>,
+    action_name: SystemLabel,
 ) -> impl Fn(In<Option<Vec<ActionContext>>>, ResMut<ScheduleActionBuffers<T>>) {
     move |state_contexts: In<Option<Vec<ActionContext>>>,
           mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| {
-        let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) else {
+        let Some(buffer) = action_system_buffers.get_buffer_mut(&action_name) else {
             return;
         };
         if let bevy::prelude::In(Some(state_contexts)) = state_contexts
@@ -322,12 +517,12 @@ fn create_action_system_runner<T: ScheduleLabel>(
 /// 创建一个用于判断动作系统是否应该运行的条件闭包。
 /// 只有当对应的 `StateActionBuffer` 的 `next` 缓冲区不为空时，系统才会运行。
 fn create_run_condition_for_action_system<T: ScheduleLabel>(
-    action_name: Arc<String>,
+    action_name: SystemLabel,
 ) -> impl Fn(Option<Res<ScheduleActionBuffers<T>>>) -> bool {
     move |action_system_buffer: Option<Res<ScheduleActionBuffers<T>>>| {
         action_system_buffer.is_some_and(|buffers| {
             buffers
-                .get_buffer(action_name.as_str())
+                .get_buffer(&action_name)
                 .is_some_and(|buffer| !buffer.next.is_empty())
         })
     }
@@ -336,10 +531,10 @@ fn create_run_condition_for_action_system<T: ScheduleLabel>(
 /// 创建一个更新 `StateActionBuffer` 并返回当前动作的闭包。
 /// 这个闭包是动作系统管道的第一个阶段，它负责准备好当前帧需要处理的 `ActionContext`。
 fn create_buffer_updater_and_get_actions<T: ScheduleLabel>(
-    action_name: Arc<String>,
+    action_name: SystemLabel,
 ) -> impl Fn(ResMut<ScheduleActionBuffers<T>>) -> Vec<ActionContext> {
     move |mut action_system_buffers: ResMut<ScheduleActionBuffers<T>>| -> Vec<ActionContext> {
-        if let Some(buffer) = action_system_buffers.get_buffer_mut(action_name.as_str()) {
+        if let Some(buffer) = action_system_buffers.get_buffer_mut(&action_name) {
             buffer.update();
             buffer.current_actions()
         } else {
@@ -349,88 +544,277 @@ fn create_buffer_updater_and_get_actions<T: ScheduleLabel>(
 }
 
 pub(super) mod system_state_trait {
-    use std::sync::Arc;
+    use bevy::ecs::{
+        schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel},
+        system::{IntoSystem, System},
+        world::World,
+    };
 
-    use bevy::ecs::{schedule::Schedules, world::World};
-
-    use crate::action_dispatcher::IntoActionSystem;
+    use crate::{
+        action_dispatcher::{
+            ActionSystemSet, IntoActionSystem, create_action_system_runner,
+            create_buffer_updater_and_get_actions, create_run_condition_for_action_system,
+        },
+        labels::SystemLabel,
+        prelude::ActionSystemRegistry,
+    };
 
     /// 系统状态
     pub trait ExpandScheduleLabelFunction: Send + Sync + 'static {
+        fn configuration_action_system<M>(
+            &self,
+            action_name: SystemLabel,
+            system: impl IntoActionSystem<M>,
+        ) -> ScheduleConfigs<Box<dyn System<In = (), Out = ()> + 'static>>
+        where
+            Self: ScheduleLabel + Sized,
+        {
+            let action_system = create_buffer_updater_and_get_actions::<Self>(action_name.clone())
+                .pipe(system.into_system())
+                .pipe(create_action_system_runner::<Self>(action_name.clone()));
+            action_system.run_if(create_run_condition_for_action_system::<Self>(action_name))
+        }
+
+        #[inline]
+        fn push_system_index(
+            &self,
+            action_name: SystemLabel,
+            update_systems: &mut ActionSystemRegistry,
+        ) -> ActionSystemSet
+        where
+            Self: ScheduleLabel + Sized,
+        {
+            update_systems.push::<Self>(action_name)
+        }
+
+        #[inline]
+        fn replace_system_index(
+            &self,
+            action_name: &SystemLabel,
+            update_systems: &mut ActionSystemRegistry,
+        ) -> Option<ActionSystemSet>
+        where
+            Self: ScheduleLabel + Sized,
+        {
+            update_systems.replace::<Self>(action_name)
+        }
+
         fn add_system_info(
             &self,
             world: &mut World,
-            action_name: Arc<String>,
-        ) -> Result<(), String>;
+            action_name: SystemLabel,
+        ) -> bevy::prelude::Result<()>
+        where
+            Self: Default;
 
-        fn add_system<M>(
+        fn remove_system_info(
+            &self,
+            world: &mut World,
+            action_name: &SystemLabel,
+        ) -> bevy::prelude::Result<()>;
+
+        fn remove_system(
             self,
-            schedules: &mut Schedules,
-            action_name: Arc<String>,
+            world: &mut World,
+            action_name: SystemLabel,
+        ) -> bevy::prelude::Result<()>;
+
+        fn replace_system<M>(
+            self,
+            world: &mut World,
+            action_name: SystemLabel,
             system: impl IntoActionSystem<M>,
-        );
+        ) -> bevy::prelude::Result<()>
+        where
+            Self: Clone;
     }
 }
 
-impl<T: ScheduleLabel + Default> system_state_trait::ExpandScheduleLabelFunction for T {
+impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
     #[inline]
-    fn add_system_info(&self, world: &mut World, action_name: Arc<String>) -> Result<(), String> {
+    fn add_system_info(
+        &self,
+        world: &mut World,
+        action_name: SystemLabel,
+    ) -> bevy::prelude::Result<()>
+    where
+        Self: Default,
+    {
         let mut buffers = world.get_resource_or_init::<ScheduleActionBuffers<T>>();
-        if buffers.contains(action_name.as_str()) {
-            return Err(format!(
-                "The system<{}> for this ScheduleLabel<{:?}> already exists",
-                action_name, self
-            ));
+        if buffers.contains(&action_name) {
+            return Err(ActionSystemError::ActionBufferAlreadyExists(
+                action_name.clone(),
+                std::any::type_name::<T>(),
+            )
+            .into());
         }
+        buffers.insert_buffer(action_name.clone(), StateActionBuffer::default());
 
-        buffers.insert_buffer(action_name.to_string(), StateActionBuffer::default());
-
-        let buffers_id = world.register_resource::<ScheduleActionBuffers<T>>();
-        let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
         let label = ShortName::of::<T>();
         let name = match action_name.is_empty() {
             false => format!("{}:{}", label, action_name),
             true => label.to_string(),
         };
-
         let get_buffer_id =
             move |world: &mut World, f: Box<dyn FnOnce(&mut World, &mut StateActionBuffer)>| {
                 world.resource_scope::<ScheduleActionBuffers<T>, ()>(|world, mut buffers| {
-                    let Some(buffer) = buffers.get_buffer_mut(action_name.as_str()) else {
-                        warn!(
-                            "Buffer not found in buffers map, action_name: {}",
-                            action_name
-                        );
+                    let Some(buffer) = buffers.get_buffer_mut(&action_name) else {
+                        warn!("Action buffer for system label {} not found", action_name);
                         return;
                     };
                     f(world, buffer)
                 });
             };
-        hsm_action_systems.insert(name, Arc::new(get_buffer_id));
 
-        let mut hsm_action_system_buffer_manager =
-            world.get_resource_or_init::<ScheduleBufferIndex>();
-        hsm_action_system_buffer_manager
-            .entry(label.to_string())
-            .or_insert(buffers_id);
+        let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
+        hsm_action_systems.insert(name, Arc::new(get_buffer_id));
         Ok(())
     }
 
-    #[inline]
-    fn add_system<M>(
+    fn remove_system_info(
+        &self,
+        world: &mut World,
+        action_name: &SystemLabel,
+    ) -> bevy::prelude::Result<()> {
+        let mut buffers = world.resource_mut::<ScheduleActionBuffers<T>>();
+        if !buffers.contains(action_name) {
+            return Err(ActionSystemError::ActionBufferNotExists(
+                action_name.clone(),
+                std::any::type_name::<T>(),
+            )
+            .into());
+        }
+
+        buffers.remove_buffer(action_name);
+
+        let label = ShortName::of::<T>();
+        let name = match action_name.is_empty() {
+            false => format!("{}:{}", label, action_name),
+            true => label.to_string(),
+        };
+        let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
+        hsm_action_systems.remove(name.as_str());
+        Ok(())
+    }
+
+    fn remove_system(
         self,
-        schedules: &mut Schedules,
-        action_name: Arc<String>,
+        world: &mut World,
+        action_name: SystemLabel,
+    ) -> bevy::prelude::Result<()> {
+        world.resource_scope(|world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
+            let Some(index) = systems.remove::<T>(&action_name) else {
+                return Err(ActionSystemError::SystemNotFound(action_name));
+            };
+            world.schedule_scope(self,move|world:&mut World,schedule:&mut Schedule|{
+                schedule.remove_systems_in_set( index,world, bevy::ecs::schedule::ScheduleCleanupPolicy::RemoveSetAndSystemsAllowBreakages)?;
+                Ok(())
+            },
+        )})?;
+        Ok(())
+    }
+
+    fn replace_system<M>(
+        self,
+        world: &mut World,
+        action_name: SystemLabel,
         system: impl IntoActionSystem<M>,
-    ) {
-        let action_system = create_buffer_updater_and_get_actions::<T>(action_name.clone())
-            .pipe(system.into_system())
-            .pipe(create_action_system_runner::<T>(action_name.clone()));
+    ) -> bevy::prelude::Result<()>
+    where
+        Self: Clone,
+    {
+        let system = self.configuration_action_system(action_name.clone(), system);
+        world.resource_scope(
+                |world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
+                    let new_index=ActionSystemSet(systems.counter);
+                    let Some(index)= self.replace_system_index(&action_name,&mut systems) else {
+                        return Err(ActionSystemError::SystemNotFound(action_name));
+                    };
+                    world.schedule_scope(self,|world: &mut World, schedule:&mut Schedule| {
+                    schedule.add_systems(system.in_set(new_index));
 
-        let system = action_system.run_if(create_run_condition_for_action_system::<T>(
-            action_name.clone(),
-        ));
+                    schedule.remove_systems_in_set(index,world, bevy::ecs::schedule::ScheduleCleanupPolicy::RemoveSetAndSystemsAllowBreakages)?;
+                    Ok(())
+                },
+            )
+        })?;
+        Ok(())
+    }
+}
 
-        schedules.add_systems(self, system);
+#[derive(Resource, Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ActionSystemRegistry {
+    systems: HashMap<TypeId, HashMap<SystemLabel, ActionSystemSet>>,
+    counter: usize,
+}
+
+impl ActionSystemRegistry {
+    pub fn push<T: ScheduleLabel>(&mut self, action_name: SystemLabel) -> ActionSystemSet {
+        let index = ActionSystemSet(self.counter);
+        self.systems
+            .entry(TypeId::of::<T>())
+            .or_default()
+            .insert(action_name, index);
+        self.counter += 1;
+        index
+    }
+
+    pub fn remove<T: ScheduleLabel>(
+        &mut self,
+        action_name: &SystemLabel,
+    ) -> Option<ActionSystemSet> {
+        self.systems
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|map| map.remove(action_name))
+    }
+
+    pub fn replace<T: ScheduleLabel>(
+        &mut self,
+        action_name: &SystemLabel,
+    ) -> Option<ActionSystemSet> {
+        let new = ActionSystemSet(self.counter);
+        self.counter += 1;
+        self.systems.get_mut(&TypeId::of::<T>()).and_then(|map| {
+            map.get_mut(action_name)
+                .map(|old| std::mem::replace(old, new))
+        })
+    }
+}
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct ActionSystemSet(usize);
+
+#[derive(Debug)]
+enum ActionSystemError {
+    SystemNotFound(SystemLabel),
+    ActionBufferAlreadyExists(SystemLabel, &'static str),
+    ActionBufferNotExists(SystemLabel, &'static str),
+    ScheduleError(ScheduleError),
+}
+
+impl From<ActionSystemError> for bevy::prelude::BevyError {
+    fn from(value: ActionSystemError) -> Self {
+        match value {
+            ActionSystemError::SystemNotFound(system_label) => {
+                format!("System with label {} not found", system_label).into()
+            }
+            ActionSystemError::ActionBufferAlreadyExists(system_label, schedule_name) => format!(
+                "The system<{}> for this ScheduleLabel<{}> already exists",
+                system_label, schedule_name
+            )
+            .into(),
+            ActionSystemError::ActionBufferNotExists(system_label, schedule_name) => format!(
+                "The system<{}> for this ScheduleLabel<{}> does not exist",
+                system_label, schedule_name
+            )
+            .into(),
+            ActionSystemError::ScheduleError(schedule_error) => schedule_error.into(),
+        }
+    }
+}
+
+impl From<ScheduleError> for ActionSystemError {
+    fn from(value: ScheduleError) -> Self {
+        ActionSystemError::ScheduleError(value)
     }
 }

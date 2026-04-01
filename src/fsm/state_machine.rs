@@ -211,7 +211,7 @@ impl FsmStateMachine {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn handle_fsm_trigger(
-        on: On<FsmTrigger>,
+        mut on: On<FsmTrigger>,
         mut commands: Commands,
         action_systems: ActionSystems,
         guard_registry: Res<GuardRegistry>,
@@ -220,9 +220,10 @@ impl FsmStateMachine {
         #[cfg(feature = "state_data")] query_state_data: Query<&StateData, With<FsmState>>,
     ) {
         let FsmTrigger {
-            state_machine: state_machine_id,
+            state_machine,
             typed,
-        } = on.event().clone();
+        } = on.event_mut();
+        let state_machine_id = *state_machine;
 
         let Ok(mut state_machine) = query.get_mut(state_machine_id) else {
             error!(
@@ -251,7 +252,7 @@ impl FsmStateMachine {
 
         match typed {
             FsmTriggerType::Guard(target) => {
-                if let Some(guard) = state_transitions.get_by_guard(target) {
+                if let Some(guard) = state_transitions.get_by_guard(*target) {
                     Self::handle_guard_transition(
                         &mut commands,
                         &action_systems,
@@ -259,7 +260,7 @@ impl FsmStateMachine {
                         &state_machine,
                         state_machine_id,
                         guard,
-                        target,
+                        *target,
                     );
                 } else {
                     trace!(
@@ -267,18 +268,18 @@ impl FsmStateMachine {
                         StateMachineError::InvalidTransitionTarget {
                             graph: state_machine.graph_id,
                             from_state: state_machine.curr_state_id(),
-                            to_state: target
+                            to_state: *target
                         }
                     );
                 }
             }
             FsmTriggerType::Next(target) => {
-                if state_transitions.contains(target) {
+                if state_transitions.contains(*target) {
                     state_machine.handle_direct_transition(
                         &mut commands,
                         &action_systems,
                         state_machine_id,
-                        target,
+                        *target,
                         #[cfg(feature = "state_data")]
                         &query_state_data,
                     );
@@ -288,12 +289,12 @@ impl FsmStateMachine {
                         StateMachineError::InvalidTransitionTarget {
                             graph: state_machine.graph_id,
                             from_state: state_machine.curr_state_id(),
-                            to_state: target
+                            to_state: *target
                         }
                     );
                 }
             }
-            FsmTriggerType::Event(mut fsm_on_event) => {
+            FsmTriggerType::Event(fsm_on_event) => {
                 if let Some(target) = fsm_on_event.get_target(state_transitions) {
                     state_machine.handle_direct_transition(
                         &mut commands,
@@ -577,7 +578,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.transition_registry.get(enter) {
-            commands.run_system_with(id, context);
+            commands.queue(context.run_system_command(id));
             return;
         }
         warn!("{}", enter.not_found_error(state))
@@ -589,7 +590,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.action_registry.get(enter) {
-            commands.run_system_with(id, context);
+            commands.queue(context.run_system_command(id));
             return;
         };
         warn!("{}", enter.not_found_error(state))
@@ -602,7 +603,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
         };
 
         if let Some(id) = self.action_registry.get(exit) {
-            commands.run_system_with(id, context);
+            commands.queue(context.run_system_command(id));
             return;
         }
         warn!("{}", exit.not_found_error(state))
@@ -618,7 +619,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.transition_registry.get(exit) {
-            commands.run_system_with(id, context);
+            commands.queue(context.run_system_command(id));
             return;
         }
         warn!("{}", exit.not_found_error(state))

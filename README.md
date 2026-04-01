@@ -54,12 +54,20 @@ fn main() {
 - `Paused`: 一个标记组件，用于临时“暂停”一个状态机，使其不响应任何转换。
 - `Terminated`: 一个标记组件，表示状态机已运行结束。
 
+**两种设计哲学：HSM vs. FSM**
+`bevy_hsm` 的核心在于它提供了两种不同设计哲学的状态机：
+
+- **HSM (层级状态机)** 采用**异步、基于计划**的生命周期模型。转换意图（由守卫或事件触发）会被放入一个队列，由系统在稍后（通常是 `Last` 阶段）异步地执行一个详细的转换计划。这使其非常适合管理复杂的、需要严谨退出/进入逻辑的层级行为。
+- **FSM (有限状态机)** 采用**同步、基于命令**的生命周期模型。转换由事件触发，并**立即**在事件处理函数内同步地完成所有退出和进入动作。这使其非常轻量和快速，适合响应式的、直接的状态切换。
+
+理解这两种模式的差异，是有效使用本库的关键。
+
 ### 层级状态机 (HSM) - 状态驱动
 
-HSM 的运行由其内部状态驱动，非常适合管理复杂的、有生命周期的行为。它支持两种驱动模式：
+HSM 的运行由其内部状态驱动，非常适合管理复杂的、有生命周期的行为。它的生命周期管理是**异步的、基于计划的**。它支持两种驱动模式：
 
-- **状态驱动 (自动)**: 通过 `StateLifecycle` 组件。这是一个特殊的组件，它的值 (`Enter`, `Update`, `Exit`) 决定了状态机当前所处的生命周期阶段，并通过 `on_insert` 钩子驱动所有逻辑。这种模式通常用于由状态自身条件触发的自动转换。
-- **事件驱动 (手动)**: 通过发送 `HsmTrigger` 事件。这是一个 Bevy 事件，发送此事件会强制触发 HSM 的状态转换，提供了命令式的、精确的控制方式。
+- **状态驱动 (自动)**: 通过 `StateLifecycle` 组件。这是一个特殊的组件，它的值 (`Enter`, `Update`, `Exit`) 决定了状态机当前所处的生命周期阶段。当需要进行状态转换时，系统会计算出一个详细的**转换计划**（一系列的进入和退出步骤），然后通过修改 `StateLifecycle` 的值来逐步、异步地驱动这个计划的执行。
+- **事件驱动 (手动)**: 通过发送 `HsmTrigger` 事件。这是一个 Bevy 事件，发送此事件会强制触发 HSM 进行一次状态转换。它同样会生成一个转换计划，并交由 `StateLifecycle` 驱动执行，提供了命令式的、精确的控制方式。
 - `StateTree`: 定义状态之间的父子层级关系。
 - `GuardEnter` / `GuardExit`: 附加在状态实体上的组件，用于指定进入或退出该状态的条件。
 
@@ -107,11 +115,11 @@ fn main() {
 
 ### 有限状态机 (FSM) - 事件驱动
 
-FSM 的运行由外部事件驱动，非常适合响应式的、直接的状态切换。
+FSM 的运行完全由外部事件驱动，其生命周期管理是**同步的、命令式的**。这使得它非常适合响应式的、直接的状态切换。
 
 - `FsmState`: 一个标记组件，用于将一个实体标识为 FSM 的状态。
 - `FsmStateMachine`: FSM 的核心组件，管理当前状态和图。
-- `FsmTrigger`: **FSM 的事件引擎**。这是一个 Bevy 事件，用于驱动 FSM 进行状态转换。您可以通过它来触发无条件转换，或包装一个自定义事件（如枚举或结构体）来触发一个特定的事件驱动转换。
+- `FsmTrigger`: **FSM 的唯一事件引擎**。这是一个 Bevy 事件，用于驱动 FSM 进行状态转换。当事件被接收时，状态机会**立即、同步地**完成从退出旧状态到进入新状态的整个过程。
 - `FsmGraph`: 定义一个 FSM 中所有有效的转换路径。一个转换必须在图中被定义才能执行。
 
 ## 宏语法 (EBNF)
@@ -182,7 +190,7 @@ state_ref ::= identifier | integer_literal; (* 状态名称或索引 *)
 - `fsm!` 宏由三个部分组成：`fsm_graph` 一个可选的 `components` 块和一个可选的 `config_fn`。
 - `fsm_graph` 是必需的，它包含 `states` 和 `transitions` 两个块。
 - `state_definition` 的语法与 `hsm!` 中的 `state_node` 类似，但它不能嵌套其他状态。
-- `state_definition` 同样支持 `#[state(...)]` 和 `#[state_data(...)]` 属性。但请注意，由于 FSM 是扁平且由事件驱动的结构，`#[state(...)]` 中与 HSM 自动转换和层级相关的参数（如 `guard_enter`, `guard_exit`, `strategy`, `behavior`）在此处是无效的。
+- `state_definition` 同样支持 `#[state(...)]` 和 `#[state_data(...)]` 属性。但请注意，由于 FSM 是扁平且完全由事件驱动的结构，`#[state(...)]` 中与 HSM 自动转换和层级相关的参数（如 `guard_enter`, `guard_exit`, `strategy`, `behavior`）在此处是无效的。(*FSM 的转换必须由 `FsmTrigger` 事件显式触发，因此不支持自动守卫。*)
 - `transition` 定义了状态之间的转换规则，可以是有条件的（通过事件或 `guard`）或无条件的。
   - 箭头定义了转换的方向。存在三种有效的模式：
     - A => B: 表示从 A 到 B 的单向转换。
@@ -219,7 +227,7 @@ system_registry ::= '<', source, ',', system_registry, '>', '[', [ system_defini
 system_definition ::= ( lit_str | fn_identifier ), '=>', rust_expression;
 
 source ::= identifier; (* `Commands` 或 `World` 类型的变量 *)
-system_registry ::= identifier; (* 实现了 `Extend<(String, SystemId)>` 的类型的变量 *)
+system_registry ::= identifier; (* 实现了 `Extend<(SystemLabel, SystemId)>` 的类型的变量 *)
 lit_str ::= (* system_registry 中的唯一名称 *)
 fn_identifier ::= (* system_registry 中的唯一名称 *)
 rust_expression ::= (* Bevy 系统 (函数或闭包) *)

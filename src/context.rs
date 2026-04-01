@@ -112,6 +112,18 @@ impl ActionContext {
         world.flush();
         world.run_system_with(id, self)
     }
+
+    #[cfg(feature = "fsm")]
+    pub(crate) fn run_system_command(
+        self,
+        id: ActionId,
+    ) -> impl Command<bevy::prelude::Result<()>> {
+        move |world: &mut World| -> bevy::prelude::Result<()> {
+            world.flush();
+            world.run_system_with(id, self)?;
+            Ok(())
+        }
+    }
 }
 
 impl Debug for ActionContext {
@@ -243,6 +255,18 @@ impl TransitionContext {
         let world = unsafe { world.as_unsafe_world_cell().world_mut() };
         world.flush();
         world.run_system_with(id, self)
+    }
+
+    #[cfg(feature = "fsm")]
+    pub(crate) fn run_system_command(
+        self,
+        id: TransitionId,
+    ) -> impl Command<bevy::prelude::Result<()>> {
+        move |world: &mut World| -> bevy::prelude::Result<()> {
+            world.flush();
+            world.run_system_with(id, self)?;
+            Ok(())
+        }
     }
 }
 
