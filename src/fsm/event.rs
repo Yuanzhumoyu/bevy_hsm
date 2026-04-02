@@ -11,14 +11,14 @@ use crate::prelude::OutgoingTransitions;
 /// # FSM 触发器
 /// * 用于驱动有限状态机（FSM）进行状态转换的核心事件。
 ///
-/// 当这个事件被发送时，它会指定目标 `FsmStateMachine` 实体，并附带一个 `FsmTriggerType`，
+/// 当这个事件被发送时，它会指定目标 [`FsmStateMachine`] 实体，并附带一个 [`FsmTriggerType`]，
 /// 该类型描述了要执行的转换的具体种类（例如，无条件转换、事件触发的转换或带守卫的转换）。
 ///
 /// # FSM Trigger
 /// * The core event used to drive state transitions in a Finite State Machine (FSM).
 ///
-/// When this event is sent, it specifies the target `FsmStateMachine` entity and includes an
-/// `FsmTriggerType`, which describes the specific kind of transition to perform (e.g., an
+/// When this event is sent, it specifies the target [`FsmStateMachine`] entity and includes an
+/// [`FsmTriggerType`], which describes the specific kind of transition to perform (e.g., an
 /// unconditional, event-triggered, or guard-conditioned transition).
 ///
 /// # Example

@@ -18,13 +18,13 @@ enum FsmTransitionType {
 /// # 传出转换
 /// * 定义从单个状态出发的所有可能的转换规则。
 ///
-/// 这个结构体被用在 `FsmGraph` 中，作为 `transitions` 哈希图的值。
+/// 这个结构体被用在 [`FsmGraph`] 中，作为 `transitions` 哈希图的值。
 /// 它包含了三种类型的转换：无条件转换、事件触发的转换和守卫条件触发的转换。
 ///
 /// # Outgoing Transitions
 /// * Defines all possible transition rules originating from a single state.
 ///
-/// This struct is used as the value in the `FsmGraph`'s `transitions` HashMap.
+/// This struct is used as the value in the [`FsmGraph`]'s `transitions` HashMap.
 /// It contains three types of transitions: unconditional, event-triggered, and guard-conditioned.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OutgoingTransitions {
@@ -128,14 +128,14 @@ impl OutgoingTransitions {
 /// * 表示一个有限状态机（FSM）的拓扑结构。
 ///
 /// 该组件作为一个蓝图，定义了所有可能的状态以及它们之间的转换关系。
-/// 它通常被附加到一个单独的“图”实体上，并被一个或多个 `FsmStateMachine` 实例所引用。
+/// 它通常被附加到一个单独的“图”实体上，并被一个或多个 [`FsmStateMachine`] 实例所引用。
 ///
 /// # FSM Graph
 /// * Represents the topological structure of a Finite State Machine (FSM).
 ///
 /// This component acts as a blueprint, defining all possible states and the transitions
 /// between them. It is typically attached to a separate "graph" entity and is referenced
-/// by one or more `FsmStateMachine` instances.
+/// by one or more [`FsmStateMachine`] instances.
 ///
 /// # Example
 ///

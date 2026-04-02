@@ -16,19 +16,6 @@ impl SystemLabel {
         }
     }
 
-    /// 运行系统失败的错误
-    pub(crate) fn run_failed_error(
-        &self,
-        state: Entity,
-        source: bevy::ecs::system::RunSystemError,
-    ) -> StateMachineError {
-        StateMachineError::SystemRunFailed {
-            system_name: self.clone(),
-            state,
-            source,
-        }
-    }
-
     pub fn type_name<T: 'static>() -> Self {
         SystemLabel(Cow::Borrowed(std::any::type_name::<T>()))
     }

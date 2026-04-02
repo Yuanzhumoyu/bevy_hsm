@@ -45,7 +45,7 @@ impl Terminated {
                     break 'before_exit;
                 };
                 let context = ActionContext::new(service_target, entity, curr_state);
-                let _ = context.run_system(&mut world, id);
+                context.run_system(&mut world, id);
             }
 
             #[cfg(feature = "state_data")]
@@ -69,7 +69,7 @@ impl Terminated {
                     break 'after_enter;
                 };
                 let context = ActionContext::new(service_target, entity, init_state);
-                let _ = context.run_system(&mut world, id);
+                context.run_system(&mut world, id);
             }
         }
 
@@ -94,8 +94,8 @@ impl Terminated {
 /// # 状态机组件\State Machine Component
 /// * 用于静止拥有该组件的状态机
 /// - Used for state machines that statically possess this component
-/// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的OnEnter、BeforeExit、OnUpdate系统
-/// - If it exists, the AfterEnter, BeforeExit, and OnUpdate systems of the state machine will not be called during the running of the state machine's state transition
+/// * 如果存在, 系统不会在运行状态机的状态转换时调用状态的Enter、Exit、Update系统
+/// - If it exists, the Enter, Exit, and Update systems of the state machine will not be called during the running of the state machine's state transition
 #[derive(Component, Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[cfg_attr(any(feature = "hsm",feature = "fsm"), component(on_insert = Self::on_insert, on_remove = Self::on_remove))]
 pub struct Paused;
@@ -118,13 +118,9 @@ impl Paused {
             let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(
-                unsafe_world_cell,
-                curr_state_id,
-                move |_world, buff| {
-                    buff.add(state_context);
-                },
-            );
+            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
+                buff.add(state_context);
+            });
         }
 
         #[cfg(feature = "fsm")]
@@ -137,13 +133,9 @@ impl Paused {
             let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(
-                unsafe_world_cell,
-                curr_state_id,
-                move |_world, buff| {
-                    buff.add_filter(state_context);
-                },
-            );
+            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
+                buff.add_filter(state_context);
+            });
         }
     }
 
@@ -162,13 +154,9 @@ impl Paused {
             let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(
-                unsafe_world_cell,
-                curr_state_id,
-                move |_world, buff| {
-                    buff.add(state_context);
-                },
-            );
+            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
+                buff.add(state_context);
+            });
         }
 
         #[cfg(feature = "fsm")]
@@ -181,13 +169,9 @@ impl Paused {
             let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(
-                unsafe_world_cell,
-                curr_state_id,
-                move |_world, buff| {
-                    buff.add(state_context);
-                },
-            );
+            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
+                buff.add(state_context);
+            });
         }
     }
 }

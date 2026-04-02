@@ -26,10 +26,10 @@ use crate::fsm::history::*;
 /// # FSM 状态机
 /// * 一个有限状态机（FSM）的运行时实例。
 ///
-/// 该组件负责跟踪一个具体状态机的当前状态 (`curr_state`)。每个 `FsmStateMachine` 都必须关联到一个
-/// 定义了其拓扑结构的 `FsmGraph`。
+/// 该组件负责跟踪一个具体状态机的当前状态 (`curr_state`)。每个 [`FsmStateMachine`] 都必须关联到一个
+/// 定义了其拓扑结构的 [`FsmGraph`]。
 ///
-/// 多个 `FsmStateMachine` 实例可以共享同一个 `FsmGraph`，从而允许创建多个行为相同但状态独立的“智能体”。
+/// 多个 [`FsmStateMachine`] 实例可以共享同一个 [[`FsmGraph`]]，从而允许创建多个行为相同但状态独立的“智能体”。
 ///
 /// 它的 `on_insert` 和 `on_remove` 钩子负责处理进入初始状态和在状态机被销毁时进行清理的逻辑。
 ///
@@ -37,9 +37,9 @@ use crate::fsm::history::*;
 /// * A runtime instance of a Finite State Machine (FSM).
 ///
 /// This component is responsible for tracking the current state (`curr_state`) of a specific state machine.
-/// Each `FsmStateMachine` must be associated with an `FsmGraph` that defines its topology.
+/// Each [`FsmStateMachine`] must be associated with an [[`FsmGraph`]] that defines its topology.
 ///
-/// Multiple `FsmStateMachine` instances can share the same `FsmGraph`, allowing for the creation of
+/// Multiple [`FsmStateMachine`] instances can share the same [`FsmGraph`], allowing for the creation of
 /// multiple "agents" that have the same behavior but independent states.
 ///
 /// Its `on_insert` and `on_remove` hooks handle the logic for entering the initial state and
@@ -47,8 +47,8 @@ use crate::fsm::history::*;
 #[derive(Component)]
 #[component(on_insert = Self::on_insert,on_remove = Self::on_remove)]
 pub struct FsmStateMachine {
-    /// 包含状态机拓扑 (`FsmGraph`) 的实体。
-    /// The entity that holds the state machine's topology (`FsmGraph`).
+    /// 包含状态机拓扑 ([`FsmGraph`]) 的实体。
+    /// The entity that holds the state machine's topology ([`FsmGraph`]).
     graph_id: Entity,
     /// 状态机的初始状态，在创建时从图中复制。
     /// The initial state of the state machine, copied from the graph upon creation.
@@ -152,7 +152,7 @@ impl FsmStateMachine {
             TransitionRegistry::get_transition_id::<BeforeEnterSystem>(&world, curr_state)
         {
             let context = TransitionContext::with_initial(service_target, entity, curr_state);
-            let _ = context.run_system(&mut world, id);
+            context.run_system(&mut world, id);
         }
 
         #[cfg(feature = "state_data")]
@@ -161,14 +161,14 @@ impl FsmStateMachine {
         let context = ActionContext::new(service_target, entity, curr_state);
 
         if let Some(id) = ActionRegistry::get_action_id::<AfterEnterSystem>(&world, curr_state) {
-            let _ = context.run_system(&mut world, id);
+            context.run_system(&mut world, id);
         }
 
         info!("after enter");
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),
             curr_state,
-            move |_world: &mut World, buffer: &mut StateActionBuffer| {
+            move |buffer: &mut StateActionBuffer| {
                 buffer.add(context);
             },
         );
@@ -186,7 +186,7 @@ impl FsmStateMachine {
         let context = ActionContext::new(service_target, entity, curr_state);
 
         if let Some(id) = ActionRegistry::get_action_id::<BeforeExitSystem>(&world, curr_state) {
-            let _ = context.run_system(&mut world, id);
+            context.run_system(&mut world, id);
         }
 
         #[cfg(feature = "state_data")]
@@ -196,13 +196,13 @@ impl FsmStateMachine {
             TransitionRegistry::get_transition_id::<AfterExitSystem>(&world, curr_state)
         {
             let context = TransitionContext::with_final(service_target, entity, curr_state);
-            let _ = context.run_system(&mut world, id);
+            context.run_system(&mut world, id);
         }
 
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),
             curr_state,
-            move |_world: &mut World, buffer: &mut StateActionBuffer| {
+            move |buffer: &mut StateActionBuffer| {
                 buffer.remove_interceptor(context);
                 buffer.add_filter(context);
             },
@@ -327,7 +327,7 @@ impl FsmStateMachine {
             commands.queue(move |world: &mut World| {
                 (get_buff_id)(
                     world,
-                    Box::new(move |_world, buffer| {
+                    Box::new(move |buffer| {
                         buffer.remove_interceptor(context);
                         buffer.add_filter(context);
                     }),
@@ -364,7 +364,7 @@ impl FsmStateMachine {
             commands.queue(move |world: &mut World| {
                 (get_buff_id)(
                     world,
-                    Box::new(move |_world, buffer| {
+                    Box::new(move |buffer| {
                         buffer.add(context);
                     }),
                 )
@@ -426,81 +426,73 @@ impl FsmStateMachine {
             )
         });
 
-        commands.queue(move |world: &mut World| {
-            match id.run(world, context) {
-                Ok(true) => {
-                    if let Some((system, action_context)) = remove_buffer_id {
-                        (system)(
-                            world,
-                            Box::new(move |_world, buffer| {
-                                buffer.remove_interceptor(action_context);
-                                buffer.add_filter(action_context);
-                            }),
-                        );
-                    }
-                    if let Some((id, context)) = on_exit_system_id {
-                        world.flush();
-                        let _ = world.run_system_with(id, context);
+        commands.queue(move |world: &mut World| -> bevy::prelude::Result<()> {
+            if !id.run(world, context)? {
+                return Ok(());
+            }
+            if let Some((system, action_context)) = remove_buffer_id {
+                (system)(
+                    world,
+                    Box::new(move |buffer| {
+                        buffer.remove_interceptor(action_context);
+                        buffer.add_filter(action_context);
+                    }),
+                );
+            }
+            if let Some((id, context)) = on_exit_system_id {
+                context.queue_system_command(id).apply(world)?;
 
-                        #[cfg(feature = "state_data")]
-                        if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
-                            state_data
-                                .remove_state_data_command(context.service_target)
-                                .apply(world);
-                        }
-                    }
-
-                    if let Some(id) = after_exit_system_id {
-                        let context = TransitionContext::with_transition(
-                            service_target,
-                            state_machine_id,
-                            from,
-                            target,
-                        );
-                        world.flush();
-                        let _ = world.run_system_with(id, context);
-                    }
-
-                    if let Some(mut state_machine) =
-                        world.get_mut::<FsmStateMachine>(state_machine_id)
-                    {
-                        state_machine.set_curr_state(target);
-                    }
-
-                    if let Some(id) = before_enter_system_id {
-                        let context = TransitionContext::with_transition(
-                            service_target,
-                            state_machine_id,
-                            from,
-                            target,
-                        );
-                        world.flush();
-                        let _ = world.run_system_with(id, context);
-                    }
-
-                    if let Some((id, context)) = on_enter_system_id {
-                        #[cfg(feature = "state_data")]
-                        if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
-                            state_data
-                                .clone_state_data_command(context.state(), context.service_target)
-                                .apply(world);
-                        }
-                        world.flush();
-                        let _ = world.run_system_with(id, context);
-                    }
-
-                    if let Some((system, action_context)) = add_buffer_id {
-                        (system)(
-                            world,
-                            Box::new(move |_world, buffer| {
-                                buffer.add(action_context);
-                            }),
-                        )
-                    }
+                #[cfg(feature = "state_data")]
+                if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
+                    state_data
+                        .remove_state_data_command(context.service_target)
+                        .apply(world);
                 }
-                Ok(false) => {} // Guard failed, do nothing
-                Err(e) => error!("{}", e),
-            };
+            }
+
+            if let Some(id) = after_exit_system_id {
+                let context = TransitionContext::with_transition(
+                    service_target,
+                    state_machine_id,
+                    from,
+                    target,
+                );
+                context.queue_system_command(id).apply(world)?;
+            }
+
+            if let Some(mut state_machine) = world.get_mut::<FsmStateMachine>(state_machine_id) {
+                state_machine.set_curr_state(target);
+            }
+
+            if let Some(id) = before_enter_system_id {
+                let context = TransitionContext::with_transition(
+                    service_target,
+                    state_machine_id,
+                    from,
+                    target,
+                );
+                context.queue_system_command(id).apply(world)?;
+            }
+
+            if let Some((id, context)) = on_enter_system_id {
+                #[cfg(feature = "state_data")]
+                if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
+                    state_data
+                        .clone_state_data_command(context.state(), context.service_target)
+                        .apply(world);
+                }
+                context.queue_system_command(id).apply(world)?;
+            }
+
+            if let Some((system, action_context)) = add_buffer_id {
+                (system)(
+                    world,
+                    Box::new(move |buffer| {
+                        buffer.add(action_context);
+                    }),
+                )
+            }
+            Ok(())
         });
     }
 }
@@ -578,7 +570,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.transition_registry.get(enter) {
-            commands.queue(context.run_system_command(id));
+            commands.queue(context.queue_system_command(id));
             return;
         }
         warn!("{}", enter.not_found_error(state))
@@ -590,7 +582,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.action_registry.get(enter) {
-            commands.queue(context.run_system_command(id));
+            commands.queue(context.queue_system_command(id));
             return;
         };
         warn!("{}", enter.not_found_error(state))
@@ -603,7 +595,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
         };
 
         if let Some(id) = self.action_registry.get(exit) {
-            commands.queue(context.run_system_command(id));
+            commands.queue(context.queue_system_command(id));
             return;
         }
         warn!("{}", exit.not_found_error(state))
@@ -619,7 +611,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             return;
         };
         if let Some(id) = self.transition_registry.get(exit) {
-            commands.queue(context.run_system_command(id));
+            commands.queue(context.queue_system_command(id));
             return;
         }
         warn!("{}", exit.not_found_error(state))
@@ -627,14 +619,14 @@ impl<'w, 's> ActionSystems<'w, 's> {
 }
 
 /// # FSM 蓝图
-/// * 一个用于配置和创建 `FsmStateMachine` 实例的数据结构。
+/// * 一个用于配置和创建 [`FsmStateMachine`] 实例的数据结构。
 ///
 /// 这不是一个组件，而是一个普通的结构体，用作数据传输对象（DTO）。
 /// 它的主要用途是在更复杂的结构中（例如 `HsmState`）定义一个嵌套的 FSM，
 /// 允许在创建时精确控制 FSM 的初始状态和配置。
 ///
 /// # FSM Blueprint
-/// * A data structure for configuring and creating an `FsmStateMachine` instance.
+/// * A data structure for configuring and creating an [`FsmStateMachine`] instance.
 ///
 /// This is not a component but a plain struct that acts as a Data Transfer Object (DTO).
 /// Its primary use is to define a nested FSM within more complex structures (e.g., an `HsmState`),

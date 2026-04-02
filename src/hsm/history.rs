@@ -11,7 +11,7 @@ use crate::hsm::state_lifecycle::StateLifecycle;
 /// 它作为一个有容量上限的双端队列（`VecDeque`），存储了 HSM 进入的状态序列。
 /// 当一个新的状态被推入时，如果历史记录超出了容量，最旧的状态就会被移除。
 ///
-/// 当 `history` 特性启用时，这个结构体通常是 `HsmStateMachine` 的一部分。
+/// 当 `history` 特性启用时，这个结构体通常是 [`HsmStateMachine`]的一部分。
 ///
 /// # State History
 /// * Represents the history of visited states for a Hierarchical State Machine (HSM).
@@ -20,7 +20,7 @@ use crate::hsm::state_lifecycle::StateLifecycle;
 /// of states an HSM has entered. When a new state is pushed, if the history exceeds its
 /// capacity, the oldest state is removed.
 ///
-/// It is typically part of an `HsmStateMachine` when the `history` feature is enabled.
+/// It is typically part of an [`HsmStateMachine`]when the `history` feature is enabled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateHistory {
     history: VecDeque<HistoricalNode>,

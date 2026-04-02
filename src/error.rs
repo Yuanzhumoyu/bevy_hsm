@@ -9,7 +9,7 @@ pub enum StateMachineError {
     /// A required `StateTree` component was not found on an entity.
     #[cfg(feature = "hsm")]
     StateTreeNotFound(Entity),
-    /// A required `HsmStateMachine` component was not found on an entity.
+    /// A required [`HsmStateMachine`]component was not found on an entity.
     #[cfg(feature = "hsm")]
     HsmStateMachineMissing(Entity),
     /// A required `HsmState` component was not found on a state entity.
@@ -22,13 +22,6 @@ pub enum StateMachineError {
     SystemNotFound {
         system_name: SystemLabel,
         state: Entity,
-    },
-    /// An error occurred while running a state's action system (AfterEnter, OnUpdate, BeforeExit).
-    #[cfg(feature = "hsm")]
-    SystemRunFailed {
-        system_name: SystemLabel,
-        state: Entity,
-        source: bevy::ecs::system::RunSystemError,
     },
     /// An error occurred while running a transition's guard system.
     #[cfg(feature = "hsm")]
@@ -44,13 +37,13 @@ pub enum StateMachineError {
     /// A sub state was not found for a given state within its `StateTree`.
     #[cfg(feature = "hsm")]
     SubStateNotFound { state_tree: Entity, state: Entity },
-    /// A required `FsmStateMachine` component was not found on an entity.
+    /// A required [`FsmStateMachine`] component was not found on an entity.
     #[cfg(feature = "fsm")]
     FsmStateMachineMissing(Entity),
-    /// A required `FsmGraph` component was not found on an entity.
+    /// A required [`FsmGraph`] component was not found on an entity.
     #[cfg(feature = "fsm")]
     GraphMissing(Entity),
-    /// A state was not found within the `FsmGraph`.
+    /// A state was not found within the [`FsmGraph`].
     #[cfg(feature = "fsm")]
     StateNotInGraph { graph: Entity, state: Entity },
     /// An attempt was made to transition to a target that is not a valid state in the graph.
@@ -97,16 +90,6 @@ impl fmt::Display for StateMachineError {
                 f,
                 "System '{}' not found for state {:?}",
                 system_name, state
-            ),
-            #[cfg(feature = "hsm")]
-            StateMachineError::SystemRunFailed {
-                system_name,
-                state,
-                source,
-            } => write!(
-                f,
-                "Failed to run system '{}' for state {:?}. Source: {:?}",
-                system_name, state, source
             ),
             #[cfg(feature = "hsm")]
             StateMachineError::GuardRunFailed {

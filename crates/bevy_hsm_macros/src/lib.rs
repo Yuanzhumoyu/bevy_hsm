@@ -218,10 +218,10 @@ pub fn fsm(item: TokenStream) -> TokenStream {
     fsm::fsm_impl(item)
 }
 
-/// Builds an `FsmGraph` component for a Finite State Machine.
+/// Builds an [`FsmGraph`] component for a Finite State Machine.
 ///
 /// This is a utility macro that is a subset of the `fsm!` macro. It is used to construct
-/// an `FsmGraph` component, which defines the states and valid transitions for an FSM.
+/// an [`FsmGraph`] component, which defines the states and valid transitions for an FSM.
 ///
 /// # EBNF Syntax
 ///

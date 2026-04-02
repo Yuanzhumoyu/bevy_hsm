@@ -125,13 +125,13 @@ impl<S: Into<SystemLabel>, const N: usize> From<[(S, GuardId); N]> for GuardRegi
 /// # 编译后的组合守卫
 ///
 /// * 用于在运行时执行的已编译的守卫条件。
-///   `CompiledGuard` 是从 `GuardCondition` 编译而来的，它将守卫的逻辑（如 `And`, `Or`, `Not`）
+///   [`CompiledGuard`] 是从 [`GuardCondition`] 编译而来的，它将守卫的逻辑（如 `and`, `or`, `not`）
 ///   与实际的 `SystemId` 结合起来，以便在状态转换时高效地执行。
 ///
 /// # Compiled Combined Guard
 ///
 /// * A compiled guard condition for execution at runtime.
-///   `CompiledGuard` is compiled from `GuardCondition` and combines guard logic (like `And`, `Or`, `Not`)
+///   [`CompiledGuard`] is compiled from [`GuardCondition`] and combines guard logic (like `and`, `or`, `not`)
 ///   with the actual `SystemId` for efficient execution during state transitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledGuard {
@@ -209,10 +209,7 @@ impl CompiledGuard {
                 Ok(false)
             }
             CompiledGuard::Not(not) => Ok(!not.run(world, input)?),
-            CompiledGuard::Id(system_id) => {
-                world.flush();
-                world.run_system_with(*system_id, input)
-            }
+            CompiledGuard::Id(system_id) => input.queue_system_command(*system_id).apply(world),
         }
     }
 }

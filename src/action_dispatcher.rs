@@ -96,7 +96,7 @@ pub trait SystemState {
     /// # 注意
     ///
     /// 当前函数功能会将所有此前状态机注册的上下文全部删除，
-    /// 如果需要继承先前函数的缓冲区，请使用 `replace_action_system`。
+    /// 如果需要继承先前函数的缓冲区，请使用 [Self::replace_action_system()]。
     ///
     /// Removes an action system from the specified schedule.
     ///
@@ -108,7 +108,7 @@ pub trait SystemState {
     /// # Note
     ///
     /// This function will delete all previously registered contexts of the state machine.
-    /// If you need to inherit the buffer of the previous function, please use `replace_action_system`.
+    /// If you need to inherit the buffer of the previous function, please use [Self::replace_action_system()].
     ///
     /// # Example
     ///
@@ -143,7 +143,7 @@ pub trait SystemState {
     /// # 注意
     ///
     /// 当前函数功能会继承所有此前状态机注册的上下文，
-    /// 如果需要删除先前函数的缓冲区，请使用 `remove_action_system`。
+    /// 如果需要删除先前函数的缓冲区，请使用 [Self::remove_action_system()]。
     ///
     /// Replaces an existing action system with a new one in the specified schedule.
     ///
@@ -156,7 +156,7 @@ pub trait SystemState {
     /// # Note
     ///
     /// This function will inherit all contexts previously registered by the state machine.
-    /// If you need to delete the buffer of the previous function, please use `remove_action_system`.
+    /// If you need to delete the buffer of the previous function, please use [Self::remove_action_system()].
     ///
     /// # Example
     ///
@@ -265,9 +265,8 @@ impl SystemState for World {
     }
 }
 
-pub type GetBufferId = Arc<
-    dyn Fn(&mut World, Box<dyn FnOnce(&mut World, &mut StateActionBuffer)>) + Send + Sync + 'static,
->;
+pub type GetBufferId =
+    Arc<dyn Fn(&mut World, Box<dyn FnOnce(&mut StateActionBuffer)>) + Send + Sync + 'static>;
 
 /// 状态机系统
 ///
@@ -462,8 +461,9 @@ impl StateActionBuffer {
     pub fn buffer_scope(
         world: UnsafeWorldCell,
         state_id: Entity,
-        f: impl FnOnce(&mut World, &mut StateActionBuffer) + 'static,
+        f: impl FnOnce(&mut StateActionBuffer) + 'static,
     ) {
+        // SAFETY: 该函数必须在系统中调用，并且保证在调用过程中不会有并发访问 `World` 的情况发生。
         let world = unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<OnUpdateSystem>(state_id) else {
             return;
@@ -655,16 +655,14 @@ impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
             false => format!("{}:{}", label, action_name),
             true => label.to_string(),
         };
-        let get_buffer_id =
-            move |world: &mut World, f: Box<dyn FnOnce(&mut World, &mut StateActionBuffer)>| {
-                world.resource_scope::<ScheduleActionBuffers<T>, ()>(|world, mut buffers| {
-                    let Some(buffer) = buffers.get_buffer_mut(&action_name) else {
-                        warn!("Action buffer for system label {} not found", action_name);
-                        return;
-                    };
-                    f(world, buffer)
-                });
+        let get_buffer_id = move |world: &mut World, f: Box<dyn FnOnce(&mut StateActionBuffer)>| {
+            let mut buffers = world.resource_mut::<ScheduleActionBuffers<T>>();
+            let Some(buffer) = buffers.get_buffer_mut(&action_name) else {
+                warn!("Action buffer for system label {} not found", action_name);
+                return;
             };
+            f(buffer);
+        };
 
         let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
         hsm_action_systems.insert(name, Arc::new(get_buffer_id));

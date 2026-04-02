@@ -45,7 +45,10 @@ pub enum StateLifecycle {
 }
 
 impl StateLifecycle {
-    fn run_lifecycle_system<T: Component + std::ops::Deref<Target = SystemLabel>>(
+    /// 运行与特定状态关联的动作系统
+    ///
+    /// Runs the action system associated with a specific state
+    fn run_state_action_system<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &mut DeferredWorld,
         state_id: Entity,
         state_context: ActionContext,
@@ -54,15 +57,13 @@ impl StateLifecycle {
             return;
         };
 
-        if let Err(e) = state_context.run_system(world, action_system_id) {
-            let Some(system_name) = world.get::<T>(state_id) else {
-                return;
-            };
-            error!("{}", system_name.run_failed_error(state_id, e.into()));
-        }
+        state_context.run_system(world, action_system_id);
     }
 
-    fn run_transition_lifecycle_system<T: Component + std::ops::Deref<Target = SystemLabel>>(
+    /// 运行与状态转换关联的转换系统
+    ///
+    /// Runs the transition system associated with a state transition
+    fn run_transition_action_system<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &mut DeferredWorld,
         state_id: Entity,
         state_context: TransitionContext,
@@ -71,12 +72,7 @@ impl StateLifecycle {
         else {
             return;
         };
-        if let Err(e) = state_context.run_system(world, action_system_id) {
-            let Some(system_name) = world.get::<T>(state_id) else {
-                return;
-            };
-            error!("{}", system_name.run_failed_error(state_id, e.into()));
-        }
+        state_context.run_system(world, action_system_id);
     }
 
     #[cfg(feature = "hybrid")]
@@ -221,7 +217,7 @@ impl StateLifecycle {
                 };
 
                 // 运行进入之前的系统
-                Self::run_transition_lifecycle_system::<BeforeEnterSystem>(
+                Self::run_transition_action_system::<BeforeEnterSystem>(
                     &mut world,
                     curr_state_id,
                     TransitionContext::with(
@@ -242,7 +238,7 @@ impl StateLifecycle {
                 );
 
                 // 运行进入后的系统
-                Self::run_lifecycle_system::<AfterEnterSystem>(
+                Self::run_state_action_system::<AfterEnterSystem>(
                     &mut world,
                     curr_state_id,
                     state_context,
@@ -264,7 +260,7 @@ impl StateLifecycle {
                     StateActionBuffer::buffer_scope(
                         world.as_unsafe_world_cell(),
                         curr_state_id,
-                        move |_world, buff| {
+                        move |buff| {
                             buff.remove_filter(state_context);
                             buff.add(state_context);
                         },
@@ -276,14 +272,14 @@ impl StateLifecycle {
                 StateActionBuffer::buffer_scope(
                     world.as_unsafe_world_cell(),
                     curr_state_id,
-                    move |_world, buff| {
+                    move |buff| {
                         buff.remove_interceptor(state_context);
                         buff.add_filter(state_context);
                     },
                 );
 
                 // 运行退出之前的系统
-                Self::run_lifecycle_system::<BeforeExitSystem>(
+                Self::run_state_action_system::<BeforeExitSystem>(
                     &mut world,
                     curr_state_id,
                     state_context,
@@ -318,7 +314,7 @@ impl StateLifecycle {
                     match next_transition.to() {
                         Some((curr_state, on_state)) => {
                             state_machine.set_curr_state(curr_state);
-                            Self::run_transition_lifecycle_system::<AfterExitSystem>(
+                            Self::run_transition_action_system::<AfterExitSystem>(
                                 &mut world.into(),
                                 curr_state_id,
                                 TransitionContext::with(
@@ -330,7 +326,7 @@ impl StateLifecycle {
                             world.entity_mut(state_machine_id).insert(on_state);
                         }
                         None => {
-                            Self::run_transition_lifecycle_system::<AfterExitSystem>(
+                            Self::run_transition_action_system::<AfterExitSystem>(
                                 &mut world.into(),
                                 curr_state_id,
                                 TransitionContext::with(

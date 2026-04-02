@@ -5,14 +5,14 @@ use crate::guards::GuardCondition;
 /// # HSM 触发器
 /// * 用于驱动层级状态机（HSM）进行状态转换的核心事件。
 ///
-/// 当这个事件被发送时，它会指定目标 `HsmStateMachine` 实体，并附带一个 `HsmTriggerType`，
+/// 当这个事件被发送时，它会指定目标 [`HsmStateMachine`]实体，并附带一个 [`HsmTriggerType`]，
 /// 该类型描述了要执行的转换的具体种类（例如，转换到父状态、子状态，或带条件的转换）。
 ///
 /// # HSM Trigger
 /// * The core event used to drive state transitions in a Hierarchical State Machine (HSM).
 ///
-/// When this event is sent, it specifies the target `HsmStateMachine` entity and includes an
-/// `HsmTriggerType`, which describes the specific kind of transition to perform (e.g., transitioning
+/// When this event is sent, it specifies the target [`HsmStateMachine`] entity and includes an
+/// [`HsmTriggerType`], which describes the specific kind of transition to perform (e.g., transitioning
 /// to a super-state, a sub-state, or a conditional transition).
 ///
 /// # Example

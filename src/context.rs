@@ -18,10 +18,16 @@ pub type TransitionId = SystemId<In<TransitionContext>, ()>;
 pub type ActionId = SystemId<In<ActionContext>, ()>;
 
 /// 用于状态转换的上下文
+///
+/// Context for state transitions
 pub type TransitionContext = StateContext<TransitionRelationship>;
 /// 用于条件守卫的上下文
+///
+/// Context for condition guards
 pub type GuardContext = StateContext<ConditionRelationship>;
 /// 用于状态动作的上下文
+///
+/// Context for state actions
 pub type ActionContext = StateContext<Entity>;
 
 mod context_type {
@@ -48,8 +54,8 @@ pub struct StateContext<C: context_type::ContextRelationship = Entity> {
     /// 主体实体
     ///
     /// Main body entity
-    /// + 当状态机拥有\[ServiceTarget\]时,该成员为\[ServiceTarget\]的值,否则默认为该状态的状态机[Entity]
-    /// - When the state machine possesses \[ServiceTarget\], this member is the value of \[ServiceTarget\]; otherwise, it defaults to the state machine's [Entity] state
+    /// + 当状态机拥有[`ServiceTarget`]时,该成员为[`ServiceTarget`]的值,否则默认为该状态的状态机[Entity]
+    /// - When the state machine possesses [`ServiceTarget`], this member is the value of [`ServiceTarget`]; otherwise, it defaults to the state machine's [`Entity`] state
     pub service_target: Entity,
     /// 状态机实体
     ///
@@ -59,6 +65,14 @@ pub struct StateContext<C: context_type::ContextRelationship = Entity> {
 }
 
 impl<T: context_type::ContextRelationship> StateContext<T> {
+    /// 创建一个新的状态上下文
+    ///
+    /// Creates a new state context
+    ///
+    /// # 参数
+    /// * `service_target` - 服务目标实体
+    /// * `state_machine` - 状态机实体
+    /// * `relationship` - 关系数据
     pub(crate) const fn with(
         service_target: Entity,
         state_machine: Entity,
@@ -71,8 +85,34 @@ impl<T: context_type::ContextRelationship> StateContext<T> {
         }
     }
 
+    /// 获取上下文中的关系数据
+    ///
+    /// Gets the relationship data from the context
     pub const fn relationship(&self) -> &T {
         &self.relationship
+    }
+
+    #[inline]
+    pub(crate) fn run_system(self, world: &mut DeferredWorld, id: SystemId<In<Self>, ()>)
+    where
+        Self: Send + 'static,
+    {
+        world.commands().queue(Self::queue_system_command(self, id));
+    }
+
+    #[inline]
+    pub(crate) fn queue_system_command<O>(
+        self,
+        id: SystemId<In<Self>, O>,
+    ) -> impl Command<Result<O, RegisteredSystemError<In<Self>, O>>>
+    where
+        Self: Send + 'static,
+        O: 'static,
+    {
+        move |world: &mut World| -> Result<O, RegisteredSystemError<In<Self>, O>> {
+            world.flush();
+            world.run_system_with(id, self)
+        }
     }
 }
 
@@ -100,29 +140,6 @@ impl ActionContext {
     /// 返回与此动作关联的状态实体。
     pub const fn state(&self) -> Entity {
         self.relationship
-    }
-
-    pub(crate) fn run_system(
-        self,
-        world: &mut DeferredWorld,
-        id: ActionId,
-    ) -> Result<(), RegisteredSystemError<In<Self>, ()>> {
-        // TODO: This is a hack to get around the fact that we can't get a mutable reference to the world
-        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-        world.flush();
-        world.run_system_with(id, self)
-    }
-
-    #[cfg(feature = "fsm")]
-    pub(crate) fn run_system_command(
-        self,
-        id: ActionId,
-    ) -> impl Command<bevy::prelude::Result<()>> {
-        move |world: &mut World| -> bevy::prelude::Result<()> {
-            world.flush();
-            world.run_system_with(id, self)?;
-            Ok(())
-        }
     }
 }
 
@@ -243,29 +260,6 @@ impl TransitionContext {
             TransitionRelationship::Initial(to) => (None, Some(to)),
             TransitionRelationship::Transition(from, to) => (Some(from), Some(to)),
             TransitionRelationship::Final(from) => (Some(from), None),
-        }
-    }
-
-    pub(crate) fn run_system(
-        self,
-        world: &mut DeferredWorld,
-        id: TransitionId,
-    ) -> Result<(), RegisteredSystemError<In<Self>, ()>> {
-        // TODO: This is a hack to get around the fact that we can't get a mutable reference to the world
-        let world = unsafe { world.as_unsafe_world_cell().world_mut() };
-        world.flush();
-        world.run_system_with(id, self)
-    }
-
-    #[cfg(feature = "fsm")]
-    pub(crate) fn run_system_command(
-        self,
-        id: TransitionId,
-    ) -> impl Command<bevy::prelude::Result<()>> {
-        move |world: &mut World| -> bevy::prelude::Result<()> {
-            world.flush();
-            world.run_system_with(id, self)?;
-            Ok(())
         }
     }
 }

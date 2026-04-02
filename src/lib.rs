@@ -95,11 +95,11 @@ pub struct StateMachinePlugin {
 
 #[cfg(feature = "hsm")]
 impl StateMachinePlugin {
-    /// 创建一个新的 `StateMachinePlugin`，并指定 HSM 的转换系统在哪个调度阶段运行。
-    /// 默认情况下，系统在 `Last` 调度中运行。
+    /// 创建一个新的 [`StateMachinePlugin`]，并指定 HSM 的转换系统在哪个调度阶段运行。
+    /// 默认情况下，系统在 [`Last`] 调度中运行。
     ///
-    /// Creates a new `StateMachinePlugin` and specifies in which schedule the HSM's transition systems should run.
-    /// By default, the systems run in the `Last` schedule.
+    /// Creates a new [`StateMachinePlugin`] and specifies in which schedule the HSM's transition systems should run.
+    /// By default, the systems run in the [`Last`] schedule.
     pub fn with_schedule<T: ScheduleLabel + Clone>(schedule: T) -> Self {
         let f = move |app: &mut App| {
             crate::hsm::transition_strategy::install_transition_systems(app, schedule.clone());
@@ -153,14 +153,14 @@ impl Default for StateMachinePlugin {
 /// A macro to simplify the registration of multiple systems into a registry.
 ///
 /// This macro is a convenient way to register multiple Bevy systems (like actions or guards)
-/// into their respective registries (`ActionRegistry`, `GuardRegistry`) at once.
-/// It takes a source for system registration (usually `Commands`),
+/// into their respective registries ([ActionRegistry], [GuardRegistry]) at once.
+/// It takes a source for system registration (usually [Commands]),
 /// the registry resource, and a list of name-system pairs.
 ///
 /// # Arguments
 ///
-/// * `$source`: The identifier for the system registration source, typically `commands` of type `Commands`.
-/// * `$system_registry`: The identifier for the registry resource, e.g., `action_registry` of type `ResMut<ActionRegistry>`.
+/// * `$source`: The identifier for the system registration source, typically [Commands].
+/// * `$system_registry`: The identifier for the registry resource, e.g., `action_registry` of type [ResMut<ActionRegistry>].
 /// * `[$($system_name:expr => $system:expr),*]`: A comma-separated list of pairs, where:
 ///     * `$system_name`: A string literal representing the name to associate with the system.
 ///     * `$system`: The system (e.g., a function identifier) to be registered.

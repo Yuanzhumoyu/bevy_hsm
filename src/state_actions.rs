@@ -14,7 +14,7 @@ use crate::{
 
 /// 注册一次性用于运行[`AfterEnterSystem`] [`BeforeExitSystem`]的系统
 ///
-/// Register a one-time system for running [AfterEnterSystem] [BeforeExitSystem]
+/// Register a one-time system for running [`AfterEnterSystem`] [`BeforeExitSystem`]
 /// # 示例\Example
 /// ```
 /// # use bevy::prelude::*;
@@ -258,13 +258,13 @@ define_state_action_component! {
     ///
     /// Update state when calling
     /// # 使用方法\Usage
-    ///  由于注册动作系统时，通过`ScheduleLabel`来确定系统调用时间，
-    ///  所以在使用对应`ScheduleLabel`的系统时，需要特定格式。
+    ///  由于注册动作系统时，通过[`ScheduleLabel`]来确定系统调用时间，
+    ///  所以在使用对应[`ScheduleLabel`]的系统时，需要特定格式。
     ///
-    ///  When registering an action system, the system call time is determined through `ScheduleLabel`,
-    ///  Therefore, when using the system corresponding to `ScheduleLabel`, a specific format is required.
-    /// * 正常格式: `ScheduleLabel` + `:` + `方法名称`
-    /// - Normal format: `ScheduleLabel` + `:` + `method name`
+    ///  When registering an action system, the system call time is determined through [`ScheduleLabel`],
+    ///  Therefore, when using the system corresponding to [`ScheduleLabel`], a specific format is required.
+    /// * 正常格式: [`ScheduleLabel`] + `:` + `方法名称`
+    /// - Normal format: [`ScheduleLabel`] + `:` + `method name`
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_hsm::prelude::*;
@@ -328,13 +328,13 @@ define_state_action_component! {
 /// # 状态机服务目标
 ///
 /// * 用于将状态机事件委托给另一个实体处理，从而实现状态机与业务逻辑的分离。
-///   当 `ServiceTarget` 存在时，所有状态机事件（如 `AfterEnter`、`BeforeExit`）将发送到 `ServiceTarget` 指定的实体，
+///   当 [`ServiceTarget`] 存在时，所有状态机事件（如 [`AfterEnter`]、[`BeforeExit`]）将发送到 [`ServiceTarget`] 指定的实体，
 ///   而不是状态机本身。这在实现可复用的状态机蓝图或需要将状态逻辑与实体属性分离时非常有用。
 ///
 /// # State Machine Service Target
 ///
 /// * Used to delegate state machine events to another entity for processing, thereby separating the state machine from business logic.
-///   When `ServiceTarget` is present, all state machine events (such as `AfterEnter`, `BeforeExit`) will be sent to the entity specified by `ServiceTarget`,
+///   When [`ServiceTarget`] is present, all state machine events (such as [`AfterEnter [`BeforeExit`]]) will be sent to the entity specified by [`ServiceTarget
 ///   instead of the state machine itself. This is very useful when implementing reusable state machine blueprints or when state logic needs to be separated from entity properties.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[relationship(relationship_target = StateMachineForest)]
@@ -343,14 +343,14 @@ pub struct ServiceTarget(pub Entity);
 /// # 状态机森林
 ///
 /// * 一个实体，用于聚合多个状态机，形成一个状态机“森林”。
-///   `StateMachineForest` 与 `ServiceTarget` 结合使用，允许一个实体（森林）管理多个状态机实例。
-///   当一个状态机被添加到森林中时，它的 `ServiceTarget` 会指向这个森林实体，从而将事件委托给森林进行统一处理。
+///   [`StateMachineForest`] 与 [`ServiceTarget`] 结合使用，允许一个实体（森林）管理多个状态机实例。
+///   当一个状态机被添加到森林中时，它的 [`ServiceTarget`] 会指向这个森林实体，从而将事件委托给森林进行统一处理。
 ///
 /// # State Machine Forest
 ///
 /// * An entity used to aggregate multiple state machines, forming a state machine "forest".
-///   `StateMachineForest` is used in conjunction with `ServiceTarget` to allow one entity (the forest) to manage multiple state machine instances.
-///   When a state machine is added to the forest, its `ServiceTarget` will point to this forest entity, thus delegating events to the forest for unified processing.
+///   [`StateMachineForest`] is used in conjunction with [`ServiceTarget`] to allow one entity (the forest) to manage multiple state machine instances.
+///   When a state machine is added to the forest, its [`ServiceTarget`] will point to this forest entity, thus delegating events to the forest for unified processing.
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref)]
 #[relationship_target(relationship = ServiceTarget)]
 pub struct StateMachineForest(Vec<Entity>);
