@@ -499,7 +499,9 @@ mod tests {
         tree.with_child(entitys[1], entitys[3]);
         tree.with_child(entitys[2], entitys[4]);
 
-        let (exit_path, enter_path) = tree.find_lca_and_paths(entitys[3], entitys[4]).unwrap();
+        let (exit_path, enter_path) = tree
+            .find_lca_and_paths(entitys[3], entitys[4])
+            .expect("find_lca_and_paths should return Some for the given entities");
 
         assert_eq!(exit_path, vec![entitys[3], entitys[1], entitys[0]]);
         assert_eq!(enter_path, vec![entitys[4], entitys[2], entitys[0]]);

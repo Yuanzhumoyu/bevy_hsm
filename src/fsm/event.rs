@@ -185,7 +185,8 @@ mod tests {
 
     #[test]
     fn test_state_event_type_for_ranges() {
-        let [a, b, c, d] = [0, 1, 2, 3].map(|i| Entity::from_raw_u32(i).unwrap());
+        let [a, b, c, d] =
+            [0, 1, 2, 3].map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"));
 
         let mut state_transitions = OutgoingTransitions::default();
         state_transitions.with_event(1, a);

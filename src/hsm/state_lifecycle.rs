@@ -76,23 +76,25 @@ impl StateLifecycle {
     }
 
     #[cfg(feature = "hybrid")]
-    fn handle_hybrid_entry(world: &mut DeferredWorld, state_machine_id: Entity, state_id: Entity) {
+    fn handle_hybrid_entry(
+        world: &mut DeferredWorld,
+        state_machine_id: Entity,
+        state_id: Entity,
+    ) -> Result<(), StateMachineError> {
         use crate::{fsm::state_machine::NestedFsm, hsm::HsmState, prelude::FsmGraph};
-
         let Some(state) = world.get::<HsmState>(state_id) else {
-            error!("{}", StateMachineError::HsmStateMissing(state_id));
-            return;
+            return Err(StateMachineError::HsmStateMissing(state_id));
         };
+
         let Some(fsm_config) = state.fsm_config else {
-            return;
+            return Ok(());
         };
 
         let Some(init_state) = world
             .get::<FsmGraph>(fsm_config.graph_id)
             .map(|graph| graph.init_state())
         else {
-            error!("{}", StateMachineError::GraphMissing(fsm_config.graph_id));
-            return;
+            return Err(StateMachineError::GraphMissing(fsm_config.graph_id));
         };
 
         let curr_state = match fsm_config.curr_state {
@@ -110,6 +112,8 @@ impl StateLifecycle {
                 fsm_config.history_size,
             ),
         ));
+
+        Ok(())
     }
 
     #[cfg(feature = "hybrid")]
@@ -147,23 +151,15 @@ impl StateLifecycle {
     fn prepare_transition(
         world: &mut DeferredWorld,
         hook_context: HookContext,
-    ) -> Option<TransitionInfo> {
+    ) -> Result<TransitionInfo, StateMachineError> {
         let state_machine_id = hook_context.entity;
 
         let Ok(mut entity_mut) = world.get_entity_mut(state_machine_id) else {
-            error!(
-                "{}",
-                StateMachineError::HsmStateMachineMissing(state_machine_id)
-            );
-            return None;
+            return Err(StateMachineError::HsmStateMachineMissing(state_machine_id));
         };
 
         let Some(lifecycle) = entity_mut.get::<StateLifecycle>().copied() else {
-            warn!(
-                "{}",
-                StateMachineError::StateLifecycleMissing(state_machine_id)
-            );
-            return None;
+            return Err(StateMachineError::StateLifecycleMissing(state_machine_id));
         };
 
         let service_target = match entity_mut.get::<ServiceTarget>() {
@@ -172,11 +168,7 @@ impl StateLifecycle {
         };
 
         let Some(mut state_machine) = entity_mut.get_mut::<HsmStateMachine>() else {
-            warn!(
-                "{}",
-                StateMachineError::HsmStateMachineMissing(state_machine_id)
-            );
-            return None;
+            return Err(StateMachineError::HsmStateMachineMissing(state_machine_id));
         };
 
         let curr_state_id = state_machine.curr_state_id();
@@ -187,7 +179,7 @@ impl StateLifecycle {
 
         let state_context = ActionContext::new(service_target, state_machine_id, curr_state_id);
 
-        Some(TransitionInfo {
+        Ok(TransitionInfo {
             state_machine_id,
             prev_transition: prev,
             curr_transition: curr,
@@ -198,17 +190,22 @@ impl StateLifecycle {
     }
 
     fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let Some(TransitionInfo {
+        let transition_info = match Self::prepare_transition(&mut world, hook_context) {
+            Ok(info) => info,
+            Err(e) => {
+                warn!("{}", e);
+                return;
+            }
+        };
+
+        let TransitionInfo {
             state_machine_id,
             prev_transition,
             curr_transition,
             curr_state_id,
             state_context,
             hsm_state,
-        }) = Self::prepare_transition(&mut world, hook_context)
-        else {
-            return;
-        };
+        } = transition_info;
 
         match hsm_state {
             StateLifecycle::Enter => {
@@ -228,7 +225,11 @@ impl StateLifecycle {
                 );
 
                 #[cfg(feature = "hybrid")]
-                Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id);
+                if let Err(e) =
+                    Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id)
+                {
+                    error!("{}", e);
+                }
 
                 #[cfg(feature = "state_data")]
                 StateData::clone_components(

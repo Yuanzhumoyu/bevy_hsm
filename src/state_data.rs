@@ -31,7 +31,7 @@ use bevy::{
 /// #[derive(Component)]
 /// struct PlayerIdleMarker;
 ///
-/// #[derive(Component)]
+/// #[derive(Component, Clone)]
 /// struct PlayerSpeed(f32);
 ///
 /// fn setup_player(mut commands: Commands) {
@@ -43,6 +43,14 @@ use bevy::{
 ///     ));
 /// }
 /// ```
+///
+/// # 注意
+/// * 当使用[`StateData`] 或 [`StateDataBundle`] 时，请确保 [`Bundle`] 中的所有组件都实现了 [`Clone`] trait，因为它们需要在状态转换期间被克隆。
+///
+/// # Note
+/// * When using [`StateData`] or [`StateDataBundle`], ensure that all components within the [`Bundle`]
+///   implement the [`Clone`] trait, as they need to be cloned during state transitions.
+///
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, Hash, Deref)]
 pub struct StateData(Vec<ComponentId>);
 

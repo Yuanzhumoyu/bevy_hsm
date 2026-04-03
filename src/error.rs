@@ -1,4 +1,4 @@
-use bevy::prelude::Entity;
+use bevy::{ecs::schedule::ScheduleError, prelude::Entity};
 use std::fmt;
 
 use crate::labels::SystemLabel;
@@ -33,10 +33,16 @@ pub enum StateMachineError {
     },
     /// A super state was not found for a given state within its `StateTree`.
     #[cfg(feature = "hsm")]
-    SuperStateNotFound { state_tree: Entity, state: Entity },
+    SuperStateNotFound {
+        state_tree: Entity,
+        state: Entity,
+    },
     /// A sub state was not found for a given state within its `StateTree`.
     #[cfg(feature = "hsm")]
-    SubStateNotFound { state_tree: Entity, state: Entity },
+    SubStateNotFound {
+        state_tree: Entity,
+        state: Entity,
+    },
     /// A required [`FsmStateMachine`] component was not found on an entity.
     #[cfg(feature = "fsm")]
     FsmStateMachineMissing(Entity),
@@ -45,7 +51,10 @@ pub enum StateMachineError {
     GraphMissing(Entity),
     /// A state was not found within the [`FsmGraph`].
     #[cfg(feature = "fsm")]
-    StateNotInGraph { graph: Entity, state: Entity },
+    StateNotInGraph {
+        graph: Entity,
+        state: Entity,
+    },
     /// An attempt was made to transition to a target that is not a valid state in the graph.
     #[cfg(feature = "fsm")]
     InvalidTransitionTarget {
@@ -53,6 +62,10 @@ pub enum StateMachineError {
         from_state: Entity,
         to_state: Entity,
     },
+    ActionBufferAlreadyExists(SystemLabel, &'static str),
+    ActionBufferNotExists(SystemLabel, &'static str),
+    ActionNotFound(SystemLabel),
+    ScheduleError(ScheduleError),
 }
 
 impl fmt::Display for StateMachineError {
@@ -160,7 +173,27 @@ impl fmt::Display for StateMachineError {
                     from_state, to_state, graph
                 )
             }
+            StateMachineError::ActionBufferAlreadyExists(system_label, schedule_name) => write!(
+                f,
+                "The system<{}> for this ScheduleLabel<{}> already exists",
+                system_label, schedule_name
+            ),
+            StateMachineError::ActionBufferNotExists(system_label, schedule_name) => write!(
+                f,
+                "The system<{}> for this ScheduleLabel<{}> does not exist",
+                system_label, schedule_name
+            ),
+            StateMachineError::ActionNotFound(system_label) => {
+                write!(f, "Action with label {} not found", system_label)
+            }
+            StateMachineError::ScheduleError(schedule_error) => schedule_error.fmt(f),
         }
+    }
+}
+
+impl From<ScheduleError> for StateMachineError {
+    fn from(value: ScheduleError) -> Self {
+        StateMachineError::ScheduleError(value)
     }
 }
 

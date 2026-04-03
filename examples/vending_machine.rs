@@ -8,6 +8,7 @@
 //! 运行指南：
 //! - 按 `P` 键：尝试购买一件价格为 10 的商品。
 //! - 按 `M` 键：给玩家增加 10 金钱。
+//! - 按 `R` 键：向售货机添加 5 件商品库存。
 
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
@@ -19,8 +20,10 @@ struct Player {
 }
 
 /// 售货机实体。
-#[derive(Component, Default)]
-struct VendingMachine;
+#[derive(Component)]
+struct VendingMachine {
+    stock: u32,
+}
 
 /// 玩家尝试购买商品时触发的事件。
 #[derive(Component, Clone)]
@@ -60,24 +63,42 @@ fn has_enough_money(
     result
 }
 
+/// 检查售货机是否有库存。
+fn is_in_stock(
+    In(context): In<GuardContext>,
+    vending_machine_query: Query<&VendingMachine>,
+) -> bool {
+    let Ok(vending_machine) = vending_machine_query.get(context.service_target) else {
+        return false;
+    };
+
+    let result = vending_machine.stock > 0;
+    if !result {
+        println!("[VendingMachine] Out of stock!");
+    }
+    result
+}
+
 // --- 4. 定义状态动作 ---
 
 /// 进入 "Dispensing" 状态时执行的动作。
 fn on_enter_dispensing(
     In(context): In<ActionContext>,
-    mut vending_machine_query: Query<&Purchase, With<VendingMachine>>,
+    mut vending_machine_query: Query<(&mut VendingMachine, &Purchase)>,
     mut player_query: Query<&mut Player>,
     vending_machine_states: Res<VendingMachineStates>,
     mut commands: Commands,
 ) {
-    let Ok(purchase) = vending_machine_query.get_mut(context.service_target) else {
+    let Ok((mut vending_machine, purchase)) = vending_machine_query.get_mut(context.service_target)
+    else {
         return;
     };
     if let Ok(mut player) = player_query.get_mut(purchase.buyer) {
-        player.money -= 10;
+        player.money -= purchase.item_price;
+        vending_machine.stock -= 1;
         println!(
-            "[VendingMachine] Dispensing item. Player money is now: {}",
-            player.money
+            "[VendingMachine] Dispensing item. Player money is now: {}. Stock is now: {}",
+            player.money, vending_machine.stock
         );
     }
     commands.entity(context.service_target).remove::<Purchase>();
@@ -100,6 +121,8 @@ fn setup(
     // 注册守卫系统，并给它一个字符串名称
     let has_enough_money_guard = commands.register_system(has_enough_money);
     guard_registry.insert("has_enough_money", has_enough_money_guard);
+    let is_in_stock_guard = commands.register_system(is_in_stock);
+    guard_registry.insert("is_in_stock", is_in_stock_guard);
 
     let id = commands.register_system(on_enter_dispensing);
     action_registry.insert("on_enter_dispensing", id);
@@ -121,11 +144,11 @@ fn setup(
             #[state(after_enter = "on_enter_dispensing")]: dispensing,
         },
         transitions: {
-            idle => dispensing :guard("has_enough_money"),
+            idle => dispensing :guard(and("has_enough_money", "is_in_stock")),
             dispensing => idle,
         },
         components:{
-            VendingMachine,
+            VendingMachine { stock: 5 },
             Name::new("VendingMachine"),
         },
         :create_resource,
@@ -137,6 +160,7 @@ fn setup(
     println!("Player starts with {} money.", 20);
     println!("Press 'P' to try to purchase an item for 10.");
     println!("Press 'M' to add 10 money to the player.");
+    println!("Press 'R' to restock the vending machine.");
 }
 
 // --- 6. 辅助系统 ---
@@ -147,12 +171,13 @@ fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_query: Query<(Entity, &mut Player)>,
     vending_machine_states: Res<VendingMachineStates>,
-    vending_machine_query: Query<Entity, With<VendingMachine>>,
+    mut vending_machine_query: Query<(Entity, &mut VendingMachine)>,
 ) {
     let Ok((player_entity, mut player)) = player_query.single_mut() else {
         return;
     };
-    let Ok(vending_machine_entity) = vending_machine_query.single() else {
+    let Ok((vending_machine_entity, mut vending_machine)) = vending_machine_query.single_mut()
+    else {
         return;
     };
 
@@ -171,6 +196,14 @@ fn handle_input(
     if keyboard_input.just_pressed(KeyCode::KeyM) {
         player.money += 10;
         println!("[Input] 'M' pressed. Player money is now: {}", player.money);
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyR) {
+        vending_machine.stock += 5;
+        println!(
+            "[Input] 'R' pressed. Vending machine stock is now: {}",
+            vending_machine.stock
+        );
     }
 }
 

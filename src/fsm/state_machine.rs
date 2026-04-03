@@ -382,12 +382,15 @@ impl FsmStateMachine {
         guard: &GuardCondition,
         target: Entity,
     ) {
-        let Some(id) = guard_registry.to_combinator_condition_id(guard) else {
-            warn!(
-                "[GuardRegistry] This guard<{:?}> does not exist for state {:?}",
-                guard, target
-            );
-            return;
+        let id = match guard_registry.to_combinator_condition_id(guard) {
+            Ok(id) => id,
+            Err(e) => {
+                warn!(
+                    "[GuardRegistry] This guard<{:?}> does not exist for state {:?}: {}",
+                    guard, target, e
+                );
+                return;
+            }
         };
 
         let service_target = action_systems.service_target(state_machine_id);
@@ -408,9 +411,9 @@ impl FsmStateMachine {
             )
         });
 
-        let after_exit_system_id = action_systems.get_after_exit_transition_id(from);
+        let after_exit_system_id = action_systems.get_exit_transition_id(from);
 
-        let before_enter_system_id = action_systems.get_before_enter_transition_id(target);
+        let before_enter_system_id = action_systems.get_enter_transition_id(target);
 
         let on_enter_system_id = action_systems.get_enter_action_id(target).map(|id| {
             (
@@ -525,39 +528,42 @@ impl<'w, 's> ActionSystems<'w, 's> {
             .map_or(state_machine, ServiceTarget::get)
     }
 
+    #[inline]
+    fn ok_and_then<T, E, R, F>(&self, res: Result<&T, E>, f: F) -> Option<R>
+    where
+        F: FnOnce(&T) -> Option<R>,
+    {
+        res.ok().and_then(f)
+    }
+
     pub fn get_buffer_id(&self, state: Entity) -> Option<GetBufferId> {
-        self.query_on_update_system
-            .get(state)
-            .ok()
-            .and_then(|update| self.action_dispatch.get(update))
+        self.ok_and_then(self.query_on_update_system.get(state), |update| {
+            self.action_dispatch.get(update)
+        })
     }
 
     pub fn get_enter_action_id(&self, state: Entity) -> Option<ActionId> {
-        self.query_on_enter_system
-            .get(state)
-            .ok()
-            .and_then(|enter| self.action_registry.get(enter))
+        self.ok_and_then(self.query_on_enter_system.get(state), |enter| {
+            self.action_registry.get(enter)
+        })
     }
 
     pub fn get_exit_action_id(&self, state: Entity) -> Option<ActionId> {
-        self.query_on_exit_system
-            .get(state)
-            .ok()
-            .and_then(|exit| self.action_registry.get(exit))
+        self.ok_and_then(self.query_on_exit_system.get(state), |exit| {
+            self.action_registry.get(exit)
+        })
     }
 
-    pub fn get_before_enter_transition_id(&self, state: Entity) -> Option<TransitionId> {
-        self.query_before_enter_system
-            .get(state)
-            .ok()
-            .and_then(|enter| self.transition_registry.get(enter))
+    pub fn get_enter_transition_id(&self, state: Entity) -> Option<TransitionId> {
+        self.ok_and_then(self.query_before_enter_system.get(state), |enter| {
+            self.transition_registry.get(enter)
+        })
     }
 
-    pub fn get_after_exit_transition_id(&self, state: Entity) -> Option<TransitionId> {
-        self.query_after_exit_system
-            .get(state)
-            .ok()
-            .and_then(|exit| self.transition_registry.get(exit))
+    pub fn get_exit_transition_id(&self, state: Entity) -> Option<TransitionId> {
+        self.ok_and_then(self.query_after_exit_system.get(state), |exit| {
+            self.transition_registry.get(exit)
+        })
     }
 
     pub fn run_before_enter(
@@ -569,11 +575,11 @@ impl<'w, 's> ActionSystems<'w, 's> {
         let Ok(enter) = self.query_before_enter_system.get(state) else {
             return;
         };
-        if let Some(id) = self.transition_registry.get(enter) {
+        if let Some(id) = self.get_enter_transition_id(state) {
             commands.queue(context.queue_system_command(id));
             return;
         }
-        warn!("{}", enter.not_found_error(state))
+        warn!("{}", enter.not_found_error(state));
     }
 
     #[inline]
@@ -585,7 +591,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             commands.queue(context.queue_system_command(id));
             return;
         };
-        warn!("{}", enter.not_found_error(state))
+        warn!("{}", enter.not_found_error(state));
     }
 
     #[inline]
@@ -598,7 +604,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             commands.queue(context.queue_system_command(id));
             return;
         }
-        warn!("{}", exit.not_found_error(state))
+        warn!("{}", exit.not_found_error(state));
     }
 
     pub fn run_after_exit(
@@ -614,7 +620,7 @@ impl<'w, 's> ActionSystems<'w, 's> {
             commands.queue(context.queue_system_command(id));
             return;
         }
-        warn!("{}", exit.not_found_error(state))
+        warn!("{}", exit.not_found_error(state));
     }
 }
 

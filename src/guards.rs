@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     fmt::{Debug, Display},
     hash::Hash,
+    str::FromStr,
 };
 
 use bevy::{
@@ -10,6 +11,61 @@ use bevy::{
     prelude::*,
 };
 use smallvec::SmallVec;
+
+/// 解析 GuardCondition 时的错误类型
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GuardConditionParseError {
+    EmptyInput,
+    UnexpectedToken(String),
+    UnexpectedEOF,
+    InvalidOperator(String),
+    TooFewOperands(String),
+    TrailingToken(String),
+}
+
+impl std::fmt::Display for GuardConditionParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardConditionParseError::EmptyInput => write!(f, "input is empty"),
+            GuardConditionParseError::UnexpectedToken(tok) => {
+                write!(f, "unexpected token: {}", tok)
+            }
+            GuardConditionParseError::UnexpectedEOF => write!(f, "unexpected end of input"),
+            GuardConditionParseError::InvalidOperator(op) => write!(f, "invalid operator: {}", op),
+            GuardConditionParseError::TooFewOperands(op) => {
+                write!(f, "operator '{}' needs at least 2 operands", op)
+            }
+            GuardConditionParseError::TrailingToken(tok) => write!(f, "trailing token: {}", tok),
+        }
+    }
+}
+
+impl std::error::Error for GuardConditionParseError {}
+
+impl FromStr for GuardCondition {
+    type Err = GuardConditionParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+/// Guard 解析/解析到已注册系统 ID 时可能出现的错误
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardResolveError {
+    UnregisteredGuard(SystemLabel),
+}
+
+impl std::fmt::Display for GuardResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardResolveError::UnregisteredGuard(label) => {
+                write!(f, "unregistered guard: {}", label)
+            }
+        }
+    }
+}
+
+impl std::error::Error for GuardResolveError {}
 
 /// 状态条件的系统ID
 ///
@@ -38,27 +94,35 @@ pub type GuardId = SystemId<In<GuardContext>, bool>;
 pub struct GuardRegistry(pub(super) HashMap<SystemLabel, GuardId>);
 
 impl GuardRegistry {
-    pub fn to_combinator_condition_id(&self, condition: &GuardCondition) -> Option<CompiledGuard> {
-        Some(match condition {
+    pub fn to_combinator_condition_id(
+        &self,
+        condition: &GuardCondition,
+    ) -> Result<CompiledGuard, GuardResolveError> {
+        match condition {
             GuardCondition::And(conditions) => {
                 let mut condition_ids = SmallVec::new();
                 for condition in conditions {
                     condition_ids.push(Box::new(self.to_combinator_condition_id(condition)?));
                 }
-                CompiledGuard::And(condition_ids)
+                Ok(CompiledGuard::And(condition_ids))
             }
             GuardCondition::Or(conditions) => {
                 let mut condition_ids = SmallVec::new();
                 for condition in conditions {
                     condition_ids.push(Box::new(self.to_combinator_condition_id(condition)?));
                 }
-                CompiledGuard::Or(condition_ids)
+                Ok(CompiledGuard::Or(condition_ids))
             }
-            GuardCondition::Not(condition) => {
-                CompiledGuard::Not(Box::new(self.to_combinator_condition_id(condition)?))
+            GuardCondition::Not(condition) => Ok(CompiledGuard::Not(Box::new(
+                self.to_combinator_condition_id(condition)?,
+            ))),
+            GuardCondition::Id(condition_id) => {
+                let id = self
+                    .get(condition_id)
+                    .ok_or_else(|| GuardResolveError::UnregisteredGuard(condition_id.clone()))?;
+                Ok(CompiledGuard::Id(id))
             }
-            GuardCondition::Id(condition_id) => CompiledGuard::Id(self.get(condition_id)?),
-        })
+        }
     }
 
     /// 获取一个条件
@@ -343,10 +407,21 @@ impl GuardCondition {
     ///- and_condition := `and` `(` combination_condition `,` ( combination_condition )+ `)`
     ///- or_condition := `or` `(` combination_condition `,` ( combination_condition )+ `)`
     ///- id_condition := ident
-    pub fn parse(s: impl AsRef<str>) -> Result<Self, String> {
+    pub fn parse(s: impl AsRef<str>) -> Result<Self, GuardConditionParseError> {
         let input = s.as_ref().trim();
+        if input.is_empty() {
+            return Err(GuardConditionParseError::EmptyInput);
+        }
         let mut parser = Parser::new(input);
-        parser.parse_combination_condition()
+        let cond = parser.parse_combination_condition()?;
+        // 检查是否有多余 token
+        if parser.current_token.is_some() {
+            return Err(GuardConditionParseError::TrailingToken(format!(
+                "{:?}",
+                parser.current_token
+            )));
+        }
+        Ok(cond)
     }
 }
 
@@ -512,18 +587,22 @@ impl<'a> Parser<'a> {
     }
 
     /// 期望并消耗一个标识符 `Token`。
-    fn expect_identifier(&mut self) -> Result<String, String> {
+    fn expect_identifier(&mut self) -> Result<String, GuardConditionParseError> {
         match self.current_token.take() {
             Some(Token::Identifier(id)) => {
                 self.advance();
                 Ok(id)
             }
-            _ => Err("combination_condition: expect identifier".to_string()),
+            Some(tok) => Err(GuardConditionParseError::UnexpectedToken(format!(
+                "{:?}",
+                tok
+            ))),
+            None => Err(GuardConditionParseError::UnexpectedEOF),
         }
     }
 
     /// 解析一个组合条件。
-    fn parse_combination_condition(&mut self) -> Result<GuardCondition, String> {
+    fn parse_combination_condition(&mut self) -> Result<GuardCondition, GuardConditionParseError> {
         match &self.current_token {
             Some(Token::Identifier(id)) if id == "not" => self.parse_not_condition(),
             Some(Token::Identifier(id)) if id == "and" => self.parse_and_condition(),
@@ -531,33 +610,37 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(id)) => {
                 let next_token = self.lexer.peek();
                 if matches!(next_token, Some('(')) {
-                    return Err(format!(
-                        "combination_condition: invalid operator '{}', only 'and', 'or', 'not' are allowed",
-                        id
-                    ));
+                    return Err(GuardConditionParseError::InvalidOperator(id.clone()));
                 }
-
                 // 否则，这是一个普通的标识符
                 let id = self.expect_identifier()?;
                 Ok(GuardCondition::Id(SystemLabel::from(id)))
             }
-            _ => Err("combination_condition: expect 'not', 'and', 'or' or identifier".to_string()),
+            Some(tok) => Err(GuardConditionParseError::UnexpectedToken(format!(
+                "{:?}",
+                tok
+            ))),
+            None => Err(GuardConditionParseError::UnexpectedEOF),
         }
     }
 
     /// 解析一个 `NOT` 条件。
-    fn parse_not_condition(&mut self) -> Result<GuardCondition, String> {
+    fn parse_not_condition(&mut self) -> Result<GuardCondition, GuardConditionParseError> {
         // 期望 "not("
         self.expect_identifier()?; // "not"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'not'".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected '(' after 'not'".to_string(),
+            ));
         }
         self.advance(); // '('
 
         let inner_condition = self.parse_combination_condition()?;
 
         if !matches!(self.current_token, Some(Token::RightParen)) {
-            return Err("combination_condition: expect ')' after inner condition".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected ')' after inner condition".to_string(),
+            ));
         }
         self.advance(); // ')'
 
@@ -565,11 +648,13 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析一个 `AND` 条件。
-    fn parse_and_condition(&mut self) -> Result<GuardCondition, String> {
+    fn parse_and_condition(&mut self) -> Result<GuardCondition, GuardConditionParseError> {
         // 期望 "and("
         self.expect_identifier()?; // "and"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'and'".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected '(' after 'and'".to_string(),
+            ));
         }
         self.advance(); // '('
 
@@ -582,23 +667,27 @@ impl<'a> Parser<'a> {
         }
 
         if !matches!(self.current_token, Some(Token::RightParen)) {
-            return Err("combination_condition: expect ')' after inner conditions".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected ')' after inner conditions".to_string(),
+            ));
         }
         self.advance(); // ')'
 
         if conditions.len() == 1 {
-            Err("combination_condition: expect at least 2 conditions after 'and'".to_string())
+            Err(GuardConditionParseError::TooFewOperands("and".to_string()))
         } else {
             Ok(GuardCondition::And(conditions))
         }
     }
 
     /// 解析一个 `OR` 条件。
-    fn parse_or_condition(&mut self) -> Result<GuardCondition, String> {
+    fn parse_or_condition(&mut self) -> Result<GuardCondition, GuardConditionParseError> {
         // 期望 "or("
         self.expect_identifier()?; // "or"
         if !matches!(self.current_token, Some(Token::LeftParen)) {
-            return Err("combination_condition: expect '(' after 'or'".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected '(' after 'or'".to_string(),
+            ));
         }
         self.advance(); // '('
 
@@ -611,12 +700,14 @@ impl<'a> Parser<'a> {
         }
 
         if !matches!(self.current_token, Some(Token::RightParen)) {
-            return Err("combination_condition: expect ')' after inner conditions".to_string());
+            return Err(GuardConditionParseError::UnexpectedToken(
+                "expected ')' after inner conditions".to_string(),
+            ));
         }
         self.advance(); // ')'
 
         if conditions.len() == 1 {
-            Err("combination_condition: expect at least 2 conditions after 'or'".to_string())
+            Err(GuardConditionParseError::TooFewOperands("or".to_string()))
         } else {
             Ok(GuardCondition::Or(conditions))
         }
@@ -715,19 +806,23 @@ mod test {
 
     #[test]
     fn test_parse_combination_condition() {
-        let condition = GuardCondition::parse("and(a, b)").unwrap();
+        let condition = GuardCondition::parse("and(a, b)")
+            .expect("failed to parse guard condition 'and(a, b)'");
         assert_eq!(format!("{}", condition), "and(a, b)");
 
-        let condition = GuardCondition::parse("or(a, b)").unwrap();
+        let condition =
+            GuardCondition::parse("or(a, b)").expect("failed to parse guard condition 'or(a, b)'");
         assert_eq!(format!("{}", condition), "or(a, b)");
 
-        let condition = GuardCondition::parse("not(a)").unwrap();
+        let condition =
+            GuardCondition::parse("not(a)").expect("failed to parse guard condition 'not(a)'");
         assert_eq!(format!("{}", condition), "not(a)");
 
-        let condition = GuardCondition::parse("a").unwrap();
+        let condition = GuardCondition::parse("a").expect("failed to parse guard condition 'a'");
         assert_eq!(format!("{}", condition), "a");
 
-        let condition = GuardCondition::parse("and(a, not(b), or(c, b))").unwrap();
+        let condition = GuardCondition::parse("and(a, not(b), or(c, b))")
+            .expect("failed to parse guard condition 'and(a, not(b), or(c, b))'");
         assert_eq!(format!("{}", condition), "and(a, not(b), or(c, b))");
     }
 
@@ -736,11 +831,12 @@ mod test {
         // 测试新的构造方法
         // Test new construction method
         let and_condition =
-            GuardCondition::and([GuardCondition::new("a"), GuardCondition::new("b")]).unwrap();
+            GuardCondition::and([GuardCondition::new("a"), GuardCondition::new("b")])
+                .expect("failed to create 'and' combination condition");
         assert_eq!(format!("{}", and_condition), "and(a, b)");
 
-        let or_condition =
-            GuardCondition::or([GuardCondition::new("a"), GuardCondition::new("b")]).unwrap();
+        let or_condition = GuardCondition::or([GuardCondition::new("a"), GuardCondition::new("b")])
+            .expect("failed to create 'or' combination condition");
         assert_eq!(format!("{}", or_condition), "or(a, b)");
 
         let not_condition = GuardCondition::not(GuardCondition::new("a"));

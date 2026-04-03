@@ -37,15 +37,18 @@ impl GuardEnter {
         let enter = world
             .get::<Self>(hook_context.entity)
             .expect("Component should be present in on_insert hook");
-        let Some(id) = conditions.to_combinator_condition_id(&enter.0) else {
-            warn!(
-                "[GuardRegistry] This condition<{:?}> does not exist for state {:?}",
-                enter.0, hook_context.entity
-            );
-            return;
-        };
-        let mut buffer = world.resource_mut::<GuardEnterCache>();
-        buffer.insert(hook_context.entity, id);
+        match conditions.to_combinator_condition_id(&enter.0) {
+            Ok(id) => {
+                let mut buffer = world.resource_mut::<GuardEnterCache>();
+                buffer.insert(hook_context.entity, id);
+            }
+            Err(e) => {
+                warn!(
+                    "[GuardRegistry] This condition<{:?}> does not exist for state {:?}: {}",
+                    enter.0, hook_context.entity, e
+                );
+            }
+        }
     }
 
     fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
@@ -65,11 +68,11 @@ impl FromWorld for GuardEnterCache {
                 .iter(world)
                 .filter_map(|(id, condition)| {
                     match conditions.to_combinator_condition_id(condition) {
-                        Some(condition_id) => Some((id, condition_id)),
-                        None => {
+                        Ok(condition_id) => Some((id, condition_id)),
+                        Err(e) => {
                             warn!(
-                                "[GuardRegistry] This condition<{:?}> does not exist",
-                                condition.0
+                                "[GuardRegistry] This condition<{:?}> does not exist: {}",
+                                condition.0, e
                             );
                             None
                         }
@@ -112,15 +115,18 @@ impl GuardExit {
         let exit = world
             .get::<Self>(hook_context.entity)
             .expect("Component should be present in on_insert hook");
-        let Some(id) = conditions.to_combinator_condition_id(&exit.0) else {
-            warn!(
-                "[GuardRegistry] This condition<{:?}> does not exist for state {:?}",
-                exit.0, hook_context.entity
-            );
-            return;
-        };
-        let mut buffer = world.resource_mut::<GuardExitCache>();
-        buffer.insert(hook_context.entity, id);
+        match conditions.to_combinator_condition_id(&exit.0) {
+            Ok(id) => {
+                let mut buffer = world.resource_mut::<GuardExitCache>();
+                buffer.insert(hook_context.entity, id);
+            }
+            Err(e) => {
+                warn!(
+                    "[GuardRegistry] This condition<{:?}> does not exist for state {:?}: {}",
+                    exit.0, hook_context.entity, e
+                );
+            }
+        }
     }
 
     fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
@@ -140,11 +146,11 @@ impl FromWorld for GuardExitCache {
                 .iter(world)
                 .filter_map(|(id, condition)| {
                     match conditions.to_combinator_condition_id(condition) {
-                        Some(condition_id) => Some((id, condition_id)),
-                        None => {
+                        Ok(condition_id) => Some((id, condition_id)),
+                        Err(e) => {
                             warn!(
-                                "[GuardRegistry] This condition<{:?}> does not exist",
-                                condition.0
+                                "[GuardRegistry] This condition<{:?}> does not exist: {}",
+                                condition.0, e
                             );
                             None
                         }

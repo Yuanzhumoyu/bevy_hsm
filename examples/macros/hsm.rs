@@ -1,19 +1,8 @@
-use bevy::prelude::*;
+use bevy::{
+    ecs::{lifecycle::HookContext, world::DeferredWorld},
+    prelude::*,
+};
 use bevy_hsm::prelude::*;
-
-use bevy_hsm_macros::hsm;
-
-#[derive(Component)]
-pub struct ComponentA;
-
-#[derive(Component)]
-pub struct ComponentB;
-
-#[derive(Component)]
-pub struct ComponentC;
-
-#[derive(Component)]
-pub struct ComponentD;
 
 fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<HsmState>>) {
     move |context: In<ActionContext>, query: Query<&Name, With<HsmState>>| {
@@ -22,12 +11,32 @@ fn debug_on_state(info: &str) -> impl Fn(In<ActionContext>, Query<&Name, With<Hs
     }
 }
 
-fn a(_context: In<GuardContext>) -> bool {
-    false
+fn is_up(_: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+    input.just_pressed(KeyCode::ArrowUp)
 }
 
-fn b(_context: In<GuardContext>) -> bool {
-    false
+fn is_down(_: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
+    input.just_pressed(KeyCode::ArrowDown)
+}
+
+#[derive(Component, Clone)]
+#[component(on_insert = Self::on_insert, on_remove = Self::on_remove)]
+struct StateAData;
+
+impl StateAData {
+    fn on_insert(_world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        println!("StateAData inserted for state {:?}", entity);
+    }
+
+    fn on_remove(_world: DeferredWorld, HookContext { entity, .. }: HookContext) {
+        println!("StateAData removed for state {:?}", entity);
+    }
+}
+
+fn check_state_a_data(query: Query<(), (With<StateAData>, With<HsmStateMachine>)>) {
+    if !query.is_empty() {
+        println!("--> Found StateAData component!");
+    }
 }
 
 fn setup(
@@ -35,10 +44,10 @@ fn setup(
     mut guard_registry: ResMut<GuardRegistry>,
     mut action_registry: ResMut<ActionRegistry>,
 ) {
-    let id = commands.register_system(a);
-    guard_registry.insert("a", id);
-    let id = commands.register_system(b);
-    guard_registry.insert("b", id);
+    let id = commands.register_system(is_up);
+    guard_registry.insert("is_up", id);
+    let id = commands.register_system(is_down);
+    guard_registry.insert("is_down", id);
 
     let id = commands.register_system(debug_on_state("Enter"));
     action_registry.insert("on_enter_name", id);
@@ -46,28 +55,14 @@ fn setup(
     action_registry.insert("on_exit_name", id);
 
     commands.spawn(hsm!(
-        ComponentA,
-        ComponentB,
         StateLifecycle::default(),
-        #[state_data(ComponentA,ComponentB)]
-        #[state(after_enter="on_enter_name", before_exit="on_exit_name")]:state
-        (
-            ComponentC,
-            #[state] ComponentA,
-            #[state(strategy=Nested)]
-            (ComponentA,ComponentB),
-            #[state]:A
-            ComponentB,
-            #[state_data(ComponentA,ComponentB)]
-            #[state]:C
-            (
-                #[state]
-                ComponentC,
-                ComponentD,
-            ),
-            #[state(minimal)]:MinimalState,
-            ComponentD,
-        ),
+        Name::new("MyHSM"),
+        #[state(after_enter="on_enter_name", before_exit="on_exit_name",behavior=Rebirth)]: Root(
+            #[state_data(StateAData)]
+            #[state(guard_enter="is_up", guard_exit="is_down", after_enter="on_enter_name", before_exit="on_exit_name")]: StateA(
+                #[state(guard_enter="is_up", guard_exit="is_down", after_enter="on_enter_name", before_exit="on_exit_name")]: StateB
+            )
+        )
     ));
 }
 
@@ -78,6 +73,7 @@ fn main() {
         .add_plugins(StateMachinePlugin::default());
 
     app.add_systems(Startup, setup);
+    app.add_systems(Update, check_state_a_data);
 
     app.run();
 }

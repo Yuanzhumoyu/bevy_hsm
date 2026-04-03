@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn test_graph_remove_edge() {
         let ids = [0, 1, 2, 3, 4, 5, 6, 7]
-            .map(|i| Entity::from_raw_u32(i).unwrap())
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
             .to_vec();
 
         let mut graph = FsmGraph::new(ids[0]);
@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn test_graph_remove_state() {
         let ids = [0, 1, 2, 3, 4, 5, 6, 7]
-            .map(|i| Entity::from_raw_u32(i).unwrap())
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
             .to_vec();
 
         let mut graph = FsmGraph::new(ids[0]);
@@ -511,7 +511,9 @@ mod tests {
 
         graph.set_init_state(ids[1]);
 
-        let mut new_subgraph = graph.remove_state(ids[0]).unwrap();
+        let mut new_subgraph = graph
+            .remove_state(ids[0])
+            .expect("remove_state should return Some for this test graph");
         new_subgraph.sort_by_key(|a| a.init_state);
 
         let mut graph1 = FsmGraph::new(ids[1]);

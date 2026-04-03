@@ -173,13 +173,26 @@ impl StateTraversalStrategy for ReverseTraversal {
     }
 }
 
+fn get_state_tree(world: &World, state_tree_id: Entity) -> Result<&StateTree, StateMachineError> {
+    world
+        .get::<StateTree>(state_tree_id)
+        .ok_or(StateMachineError::StateTreeNotFound(state_tree_id))
+}
+
+fn get_hsm_state(world: &World, state: Entity) -> Result<HsmState, StateMachineError> {
+    world
+        .get::<HsmState>(state)
+        .copied()
+        .ok_or(StateMachineError::HsmStateMissing(state))
+}
+
 fn build_exit_transition_plan(
     world: &World,
     state_tree_id: Entity,
     mut state_id: Entity,
     strategy: StateTransitionStrategy,
     mut behavior: ExitTransitionBehavior,
-) -> Result<Vec<Transition>, String> {
+) -> Result<Vec<Transition>, StateMachineError> {
     match (strategy, behavior) {
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
@@ -190,84 +203,66 @@ fn build_exit_transition_plan(
             ExitTransitionBehavior::Rebirth,
         ) => Ok(vec![Transition::Enter(state_id)]),
         (StateTransitionStrategy::Nested, ExitTransitionBehavior::Death) => {
-            let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
-                return Err(format!(
-                    "The entity<{}> does not contain [StateTree]",
-                    state_id
-                ));
-            };
-
+            let state_tree = get_state_tree(world, state_tree_id)?;
             let mut transition_queue = vec![Transition::Exit(state_id)];
 
             if state_tree.get_root() == state_id {
                 return Ok(transition_queue);
             }
 
-            while let Some(state) = state_tree.get_super_state(state_id) {
-                let Some(HsmState {
-                    strategy, behavior, ..
-                }) = world.get::<HsmState>(state).copied()
-                else {
-                    return Err(format!(
-                        "The entity<{}> does not contain [HsmState]",
-                        state_id
+            while let Some(super_state) = state_tree.get_super_state(state_id) {
+                let next_hsm_state = get_hsm_state(world, super_state)?;
+
+                if state_tree.get_root() == super_state {
+                    transition_queue.push(Transition::with_behavior(
+                        super_state,
+                        next_hsm_state.behavior,
                     ));
-                };
-                let state_id = state;
-                if state_tree.get_root() == state_id {
-                    transition_queue.push(Transition::with_behavior(state_id, behavior));
                     return Ok(transition_queue);
                 }
-                match !(strategy == StateTransitionStrategy::Nested
-                    && behavior == ExitTransitionBehavior::Death)
+
+                if next_hsm_state.strategy == StateTransitionStrategy::Nested
+                    && next_hsm_state.behavior == ExitTransitionBehavior::Death
                 {
-                    true => {
-                        transition_queue.extend(build_exit_transition_plan(
-                            world,
-                            state_tree_id,
-                            state_id,
-                            strategy,
-                            behavior,
-                        )?);
-                        return Ok(transition_queue);
-                    }
-                    false => {
-                        transition_queue.push(Transition::Exit(state_id));
-                    }
+                    transition_queue.push(Transition::Exit(super_state));
+                    state_id = super_state;
+                    continue;
                 }
+
+                transition_queue.extend(build_exit_transition_plan(
+                    world,
+                    state_tree_id,
+                    super_state,
+                    next_hsm_state.strategy,
+                    next_hsm_state.behavior,
+                )?);
+                return Ok(transition_queue);
             }
+
             Ok(transition_queue)
         }
         (StateTransitionStrategy::Parallel, ExitTransitionBehavior::Death) => {
-            let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
-                return Err(format!(
-                    "The entity<{}> does not contain [StateTree]",
-                    state_id
-                ));
-            };
+            let state_tree = get_state_tree(world, state_tree_id)?;
 
-            while let Some(state) = state_tree.get_super_state(state_id)
-                && let Some(HsmState {
-                    strategy,
-                    behavior: new_behavior,
-                    ..
-                }) = world.get::<HsmState>(state).copied()
-            {
-                let new_state_id = state;
-                if !(strategy == StateTransitionStrategy::Parallel
-                    && new_behavior == ExitTransitionBehavior::Death)
+            while let Some(super_state) = state_tree.get_super_state(state_id) {
+                let next_hsm_state = get_hsm_state(world, super_state)?;
+
+                if !(next_hsm_state.strategy == StateTransitionStrategy::Parallel
+                    && next_hsm_state.behavior == ExitTransitionBehavior::Death)
                 {
                     return build_exit_transition_plan(
                         world,
                         state_tree_id,
-                        new_state_id,
-                        strategy,
-                        new_behavior,
+                        super_state,
+                        next_hsm_state.strategy,
+                        next_hsm_state.behavior,
                     );
                 }
-                state_id = new_state_id;
-                behavior = new_behavior;
+
+                state_id = super_state;
+                behavior = next_hsm_state.behavior;
             }
+
             match behavior {
                 ExitTransitionBehavior::Rebirth => Ok(vec![Transition::Enter(state_id)]),
                 ExitTransitionBehavior::Resurrection => Ok(vec![Transition::Update(state_id)]),
@@ -709,7 +704,10 @@ mod tests {
             for _ in 0..expected.len() {
                 app.update();
             }
-            let collector = app.world().get_resource::<DebugInfoCollector>().unwrap();
+            let collector = app
+                .world()
+                .get_resource::<DebugInfoCollector>()
+                .expect("DebugInfoCollector missing in test app world");
             assert_eq!(expected, collector.0, "error in strategy<{i}>: {}", binary);
         }
     }
