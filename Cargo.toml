@@ -1,6 +1,6 @@
 [package]
 name = "bevy_hsm"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A hierarchical and finite state machine library for the Bevy game engine."
@@ -29,7 +29,7 @@ hsm = ["bevy_hsm_macros/hsm"]
 
 [dependencies]
 bevy_hsm_macros = { version = "0.1.0", path = "crates/bevy_hsm_macros", optional = true }
-bevy = { version = "~0.18.1", default-features = false, features = [
+bevy = { git = "https://github.com/bevyengine/bevy", branch = "main", default-features = false, features = [
   "bevy_log",
 ] }
 smallvec = "1.15.1"
@@ -39,8 +39,8 @@ dyn-hash = { version = "1.0.0", optional = true }
 bimap = { version = "0.6.3", optional = true }
 
 [dev-dependencies]
-bevy = { version = "~0.18.1", default-features = false, features = [
-  "experimental_bevy_feathers",
+bevy = { git = "https://github.com/bevyengine/bevy", branch = "main", default-features = false, features = [
+  "bevy_feathers",
   "bevy_log",
   "ui",
 ] }
@@ -99,6 +99,6 @@ path = "tests/action_system.rs"
 required-features = ["hybrid", "history"]
 
 [[test]]
-name ="event"
+name = "event"
 path = "tests/event.rs"
-required-features = ["fsm","hsm"]
+required-features = ["fsm", "hsm"]

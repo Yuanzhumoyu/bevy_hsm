@@ -375,7 +375,7 @@ pub(super) fn handle_enter_transition(
     curr_state_id: Entity,
     enter_state_id: Entity,
     strategy: StateTransitionStrategy,
-) -> impl Command<Result<()>> {
+) -> impl Command<Out = Result<()>> {
     move |world: &mut World| {
         world
             .resource_mut::<CheckOnTransitionStates>()
@@ -490,7 +490,7 @@ pub(super) fn handle_exit_transition(
     state_tree_id: Entity,
     curr_state_id: Entity,
     exit_state_id: Entity,
-) -> impl Command<Result<()>> {
+) -> impl Command<Out = Result<()>> {
     move |world: &mut World| -> Result<()> {
         world
             .resource_mut::<CheckOnTransitionStates>()

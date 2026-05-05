@@ -403,10 +403,10 @@ impl HsmStateMachine {
         guard: CompiledGuard,
         context: GuardContext,
         handle_transition: F,
-    ) -> impl Command<Result<()>>
+    ) -> impl Command<Out = Result<()>>
     where
         F: FnOnce() -> C + Send + Sync + 'static,
-        C: Command<Result<()>> + 'static,
+        C: Command<Out = Result<()>> + 'static,
     {
         move |world: &mut World| -> Result<()> {
             if guard.run(world, context)? {

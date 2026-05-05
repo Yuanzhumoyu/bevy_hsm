@@ -104,7 +104,7 @@ impl<T: context_type::ContextRelationship> StateContext<T> {
     pub(crate) fn queue_system_command<O>(
         self,
         id: SystemId<In<Self>, O>,
-    ) -> impl Command<Result<O, RegisteredSystemError<In<Self>, O>>>
+    ) -> impl Command<Out = Result<O, RegisteredSystemError<In<Self>, O>>>
     where
         Self: Send + 'static,
         O: 'static,

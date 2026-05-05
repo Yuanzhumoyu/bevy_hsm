@@ -2,14 +2,11 @@ use bevy::{
     color::palettes::css::NAVY,
     ecs::system::EntityCommands,
     feathers::{
-        FeathersPlugins,
-        controls::{ButtonProps, button},
-        dark_theme::create_dark_theme,
-        theme::UiTheme,
+        FeathersPlugins, controls::FeathersButton, dark_theme::create_dark_theme, theme::UiTheme,
     },
     input_focus::tab_navigation::TabGroup,
     prelude::*,
-    text::TextSpanAccess,
+    text::TextSection,
     ui_widgets::Activate,
 };
 use bevy_hsm::{prelude::*, system_registry};
@@ -574,64 +571,76 @@ fn setup_ui(mut commands: Commands) {
         vec![("=", ButtonType::Command(Command::Equals))],
     ];
 
-    commands.spawn((
-        Node {
+    fn virtual_keyboard<const N: usize>(buttons: [Vec<(&str, ButtonType)>; N]) -> impl Scene {
+        let keys = Vec::from_iter(buttons.map(move |row| {
+            let key_row = Vec::from_iter(row.into_iter().map(move |key| {
+                let (key, button_type) = key;
+                bsn! {
+                    :FeathersButton
+                    Node {
+                        flex_grow: 1.0,
+                    }
+                    on(
+                        move |_activate: On<Activate>,
+                            mut buttons_writer: MessageWriter<ButtonType>|
+                              -> Result {
+                            buttons_writer.write(button_type);
+                            Ok(())
+                        },
+                    )
+                    Children [
+                        Text(key)
+                    ]
+                }
+            }));
+            bsn! {
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(4),
+                }
+                Children [
+                    {key_row}
+                ]
+            }
+        }));
+        bsn! {
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+            }
+            TabGroup::new(0)
+            Children [
+                {keys}
+            ]
+        }
+    }
+
+    commands.spawn_scene(bsn! {
+        Node{
             width: percent(100),
             height: percent(100),
             align_items: AlignItems::End,
             justify_content: JustifyContent::Center,
-            ..default()
-        },
-        children![(
+        }
+        Children[(
             Node {
                 flex_direction: FlexDirection::Column,
-                border: px(5).into(),
+                border: px(5),
                 row_gap: px(5),
-                padding: px(5).into(),
+                padding: px(5),
                 align_items: AlignItems::Center,
-                margin: px(50).into(),
+                margin: px(50),
                 border_radius: BorderRadius::all(px(10)),
-                ..Default::default()
-            },
-            BackgroundColor(NAVY.into()),
-            BorderColor::all(Color::WHITE),
-            children![
-                Text::new("virtual keyboard"),
-                (
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.),
-                        ..Default::default()
-                    },
-                    TabGroup::new(0),
-                    Children::spawn(SpawnIter(buttons.into_iter().map(move |row| {
-                        (
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                column_gap: Val::Px(4.),
-                                ..Default::default()
-                            },
-                            Children::spawn(SpawnIter(row.into_iter().map(
-                                move |(key, button_type)| {
-                                    (
-                                    button(ButtonProps::default(), (), Spawn(Text::new(key))),
-                                    bevy::ui_widgets::observe(
-                                        move |_activate: On<Activate>,
-                                              mut buttons_writer: MessageWriter<ButtonType>|
-                                              -> Result {
-                                            buttons_writer.write(button_type);
-                                            Ok(())
-                                        },
-                                    ),
-                                )
-                                },
-                            ))),
-                        )
-                    })))
-                )
+            }
+            BackgroundColor(NAVY)
+            BorderColor::all(Color::WHITE)
+            Children[
+                Text("virtual keyboard"),
+                :virtual_keyboard(buttons),
             ]
-        )],
-    ));
+            )
+        ]
+    });
 }
 
 fn handle_button_message(
@@ -684,9 +693,9 @@ fn update_display(
             let is_output = selector.1.is_some();
 
             if is_input {
-                *text.write_span() = calculator.current_display.clone();
+                *text.get_text_mut() = calculator.current_display.clone();
             } else if is_output {
-                *text.write_span() = calculator.history_display.clone();
+                *text.get_text_mut() = calculator.history_display.clone();
             }
         }
     }
