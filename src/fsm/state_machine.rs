@@ -1,9 +1,10 @@
+#[cfg(feature = "hybrid")]
+use bevy::platform::collections::HashMap;
 use bevy::{
     ecs::{
         lifecycle::HookContext, relationship::Relationship, system::SystemParam,
         world::DeferredWorld,
     },
-    platform::collections::HashMap,
     prelude::*,
 };
 
@@ -18,10 +19,105 @@ use crate::{
 };
 
 #[cfg(feature = "state_data")]
-use crate::state_data::{StateScenePatch, StateSceneReclaimer};
+use crate::state_data::StateScenePatch;
 
-#[cfg(feature = "history")]
-use crate::fsm::history::*;
+use crate::fsm::history::FsmStateHistory;
+
+/// Holds pre-resolved system IDs and context for executing a state transition.
+struct ResolvedTransition {
+    remove_buffer: Option<(GetBufferId, ActionContext)>,
+    exit_action: Option<(ActionId, ActionContext)>,
+    after_exit: Option<(TransitionId, TransitionContext)>,
+    before_enter: Option<(TransitionId, TransitionContext)>,
+    enter_action: Option<(ActionId, ActionContext)>,
+    add_buffer: Option<(GetBufferId, ActionContext)>,
+    to: Entity,
+    state_machine_id: Entity,
+    service_target: Entity,
+}
+
+/// Executes all transition lifecycle steps on a [`World`].
+///
+/// The steps are:
+/// 1. Remove from update buffer (from_state)
+/// 2. Run exit action (from_state)
+/// 3. Reclaim state scene (from_state, if `state_data` feature)
+/// 4. Run after_exit transition (from_state)
+/// 5. Set current state to `to`
+/// 6. Run before_enter transition (to_state)
+/// 7. Apply state scene (to_state, if `state_data` feature)
+/// 8. Run enter action (to_state)
+/// 9. Add to update buffer (to_state)
+fn execute_transition_steps(
+    world: &mut World,
+    resolved: ResolvedTransition,
+) -> bevy::prelude::Result<()> {
+    let ResolvedTransition {
+        remove_buffer,
+        exit_action,
+        after_exit,
+        before_enter,
+        enter_action,
+        add_buffer,
+        to,
+        state_machine_id,
+        service_target,
+    } = resolved;
+    if let Some((get_buff_id, ctx)) = remove_buffer {
+        (get_buff_id)(
+            world,
+            Box::new({
+                move |buffer: &mut StateActionBuffer| {
+                    buffer.remove_interceptor(ctx);
+                    buffer.add_filter(ctx);
+                }
+            }),
+        );
+    }
+
+    if let Some((id, ref ctx)) = exit_action {
+        ctx.queue_system_command(id).apply(world)?;
+
+        #[cfg(feature = "state_data")]
+        StateScenePatch::reclaim_state_scene_command(ctx.state(), state_machine_id, service_target)
+            .apply(world);
+    }
+
+    if let Some((id, ctx)) = after_exit {
+        ctx.queue_system_command(id).apply(world)?;
+    }
+
+    if let Some(mut sm) = world.get_mut::<FsmStateMachine>(state_machine_id) {
+        sm.set_curr_state(to);
+    }
+
+    if let Some((id, ctx)) = before_enter {
+        ctx.queue_system_command(id).apply(world)?;
+    }
+
+    if let Some((id, ref ctx)) = enter_action {
+        #[cfg(feature = "state_data")]
+        if let Some(patch) = world.get::<StateScenePatch>(ctx.state()).cloned() {
+            patch
+                .apply_state_scene_command(ctx.state(), state_machine_id, service_target)
+                .apply(world);
+        }
+        ctx.queue_system_command(id).apply(world)?;
+    }
+
+    if let Some((get_buff_id, ctx)) = add_buffer {
+        (get_buff_id)(
+            world,
+            Box::new({
+                move |buffer: &mut StateActionBuffer| {
+                    buffer.add(ctx);
+                }
+            }),
+        );
+    }
+
+    Ok(())
+}
 
 /// # FSM 状态机
 /// * 一个有限状态机（FSM）的运行时实例。
@@ -29,7 +125,7 @@ use crate::fsm::history::*;
 /// 该组件负责跟踪一个具体状态机的当前状态 (`curr_state`)。每个 [`FsmStateMachine`] 都必须关联到一个
 /// 定义了其拓扑结构的 [`FsmGraph`]。
 ///
-/// 多个 [`FsmStateMachine`] 实例可以共享同一个 [[`FsmGraph`]]，从而允许创建多个行为相同但状态独立的“智能体”。
+/// 多个 [`FsmStateMachine`] 实例可以共享同一个 [`FsmGraph`]，从而允许创建多个行为相同但状态独立的"智能体"。
 ///
 /// 它的 `on_insert` 和 `on_remove` 钩子负责处理进入初始状态和在状态机被销毁时进行清理的逻辑。
 ///
@@ -37,7 +133,7 @@ use crate::fsm::history::*;
 /// * A runtime instance of a Finite State Machine (FSM).
 ///
 /// This component is responsible for tracking the current state (`curr_state`) of a specific state machine.
-/// Each [`FsmStateMachine`] must be associated with an [[`FsmGraph`]] that defines its topology.
+/// Each [`FsmStateMachine`] must be associated with a [`FsmGraph`] that defines its topology.
 ///
 /// Multiple [`FsmStateMachine`] instances can share the same [`FsmGraph`], allowing for the creation of
 /// multiple "agents" that have the same behavior but independent states.
@@ -118,20 +214,6 @@ impl FsmStateMachine {
         self.history.clear();
     }
 
-    fn get_service_target(world: &DeferredWorld, entity: Entity) -> Entity {
-        let entity_ref = world.entity(entity);
-
-        #[cfg(feature = "hybrid")]
-        if let Some(s) = entity_ref.get::<NestedFsm>() {
-            return s.state_machine;
-        }
-
-        match entity_ref.get::<ServiceTarget>() {
-            Some(service_target) => service_target.0,
-            None => entity,
-        }
-    }
-
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         #[cfg(feature = "history")]
         let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
@@ -143,10 +225,12 @@ impl FsmStateMachine {
             error!("{}", StateMachineError::FsmStateMachineMissing(entity));
             return;
         };
+
         let curr_state = fsm_state_machine.curr_state_id();
+
         #[cfg(feature = "history")]
         fsm_state_machine.history.push(curr_state);
-        let service_target = Self::get_service_target(&world, entity);
+        let service_target = get_service_target(&world, entity);
 
         if let Some(id) =
             TransitionRegistry::get_transition_id::<BeforeEnterSystem>(&world, curr_state)
@@ -164,7 +248,6 @@ impl FsmStateMachine {
             context.run_system(&mut world, id);
         }
 
-        info!("after enter");
         StateActionBuffer::buffer_scope(
             world.as_unsafe_world_cell(),
             curr_state,
@@ -181,7 +264,7 @@ impl FsmStateMachine {
         };
 
         let curr_state = fsm_state_machine.curr_state_id();
-        let service_target = Self::get_service_target(&world, entity);
+        let service_target = get_service_target(&world, entity);
 
         let context = ActionContext::new(service_target, entity, curr_state);
 
@@ -216,15 +299,7 @@ impl FsmStateMachine {
         action_systems: ActionSystems,
         guard_registry: Res<GuardRegistry>,
         fsm_graph: Query<&FsmGraph>,
-        mut query: Query<&mut FsmStateMachine, Without<Paused>>,
-        #[cfg(feature = "state_data")] query_state_scene_patch: Query<
-            &StateScenePatch,
-            With<FsmState>,
-        >,
-        #[cfg(feature = "state_data")] query_state_scene_reclaim: Query<
-            &mut StateSceneReclaimer,
-            With<FsmStateMachine>,
-        >,
+        query: Query<&FsmStateMachine, Without<Paused>>,
     ) {
         let FsmTrigger {
             state_machine,
@@ -232,7 +307,7 @@ impl FsmStateMachine {
         } = on.event_mut();
         let state_machine_id = *state_machine;
 
-        let Ok(mut state_machine) = query.get_mut(state_machine_id) else {
+        let Ok(state_machine) = query.get(state_machine_id) else {
             error!(
                 "{}",
                 StateMachineError::FsmStateMachineMissing(state_machine_id)
@@ -264,7 +339,7 @@ impl FsmStateMachine {
                         &mut commands,
                         &action_systems,
                         &guard_registry,
-                        &state_machine,
+                        state_machine,
                         state_machine_id,
                         guard,
                         *target,
@@ -287,10 +362,6 @@ impl FsmStateMachine {
                         &action_systems,
                         state_machine_id,
                         *target,
-                        #[cfg(feature = "state_data")]
-                        query_state_scene_patch,
-                        #[cfg(feature = "state_data")]
-                        query_state_scene_reclaim,
                     );
                 } else {
                     trace!(
@@ -310,93 +381,27 @@ impl FsmStateMachine {
                         &action_systems,
                         state_machine_id,
                         target,
-                        #[cfg(feature = "state_data")]
-                        query_state_scene_patch,
-                        #[cfg(feature = "state_data")]
-                        query_state_scene_reclaim,
                     );
                 }
             }
         };
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn handle_direct_transition(
-        &mut self,
+        &self,
         commands: &mut Commands,
         action_systems: &ActionSystems,
         state_machine_id: Entity,
         to: Entity,
-        #[cfg(feature = "state_data")] query_state_scene_patch: Query<
-            &StateScenePatch,
-            With<FsmState>,
-        >,
-        #[cfg(feature = "state_data")] mut query_state_scene_reclaim: Query<
-            &mut StateSceneReclaimer,
-            With<FsmStateMachine>,
-        >,
     ) {
         let from = self.curr_state_id();
-        let service_target = action_systems.service_target(state_machine_id);
+        let resolved = action_systems.resolve_transition(from, to, state_machine_id);
 
-        let context = ActionContext::new(service_target, state_machine_id, from);
-
-        if let Some(get_buff_id) = action_systems.get_buffer_id(from) {
-            commands.queue(move |world: &mut World| {
-                (get_buff_id)(
-                    world,
-                    Box::new(move |buffer| {
-                        buffer.remove_interceptor(context);
-                        buffer.add_filter(context);
-                    }),
-                )
-            });
-        }
-
-        action_systems.run_exit_action(from, context, commands);
-
-        #[cfg(feature = "state_data")]
-        if let Ok(mut reclaimer) = query_state_scene_reclaim.get_mut(state_machine_id)
-            && let Some(patch_result) = reclaimer.remove(from)
-        {
-            commands.queue(patch_result.reclaim_command(service_target));
-        }
-
-        let transition_context =
-            TransitionContext::with_transition(service_target, state_machine_id, from, to);
-
-        action_systems.run_after_exit(from, transition_context, commands);
-
-        self.set_curr_state(to);
-
-        action_systems.run_before_enter(to, transition_context, commands);
-
-        #[cfg(feature = "state_data")]
-        if let Ok(state_scene_patch) = query_state_scene_patch.get(to).cloned() {
-            commands.queue(state_scene_patch.apply_state_scene_command(
-                to,
-                state_machine_id,
-                service_target,
-            ))
-        }
-
-        let context = ActionContext::new(service_target, state_machine_id, to);
-
-        action_systems.run_enter_action(to, context, commands);
-
-        if let Some(get_buff_id) = action_systems.get_buffer_id(to) {
-            commands.queue(move |world: &mut World| {
-                (get_buff_id)(
-                    world,
-                    Box::new(move |buffer| {
-                        buffer.add(context);
-                    }),
-                )
-            });
-        }
+        commands.queue(move |world: &mut World| -> bevy::prelude::Result<()> {
+            execute_transition_steps(world, resolved)
+        });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn handle_guard_transition(
         commands: &mut Commands,
         action_systems: &ActionSystems,
@@ -417,116 +422,16 @@ impl FsmStateMachine {
             }
         };
 
-        let service_target = action_systems.service_target(state_machine_id);
         let from = state_machine.curr_state_id();
+        let service_target = action_systems.service_target(state_machine_id);
         let context = GuardContext::new(service_target, state_machine_id, from, target);
-
-        let remove_buffer_id = action_systems.get_buffer_id(from).map(|id| {
-            (
-                id,
-                ActionContext::new(service_target, state_machine_id, from),
-            )
-        });
-
-        let on_exit_system_id = action_systems.get_exit_action_id(from).map(|id| {
-            (
-                id,
-                ActionContext::new(service_target, state_machine_id, from),
-            )
-        });
-
-        let after_exit_system_id = action_systems.get_exit_transition_id(from);
-
-        let before_enter_system_id = action_systems.get_enter_transition_id(target);
-
-        let on_enter_system_id = action_systems.get_enter_action_id(target).map(|id| {
-            (
-                id,
-                ActionContext::new(service_target, state_machine_id, target),
-            )
-        });
-
-        let add_buffer_id = action_systems.get_buffer_id(target).map(|id| {
-            (
-                id,
-                ActionContext::new(service_target, state_machine_id, target),
-            )
-        });
+        let resolved = action_systems.resolve_transition(from, target, state_machine_id);
 
         commands.queue(move |world: &mut World| -> bevy::prelude::Result<()> {
             if !id.run(world, context)? {
                 return Ok(());
             }
-            if let Some((system, action_context)) = remove_buffer_id {
-                (system)(
-                    world,
-                    Box::new(move |buffer| {
-                        buffer.remove_interceptor(action_context);
-                        buffer.add_filter(action_context);
-                    }),
-                );
-            }
-            if let Some((id, context)) = on_exit_system_id {
-                context.queue_system_command(id).apply(world)?;
-
-                #[cfg(feature = "state_data")]
-                StateScenePatch::reclaim_state_scene_command(
-                    context.state(),
-                    state_machine_id,
-                    service_target,
-                )
-                .apply(world);
-            }
-
-            if let Some(id) = after_exit_system_id {
-                let context = TransitionContext::with_transition(
-                    service_target,
-                    state_machine_id,
-                    from,
-                    target,
-                );
-                context.queue_system_command(id).apply(world)?;
-            }
-
-            if let Some(mut state_machine) = world.get_mut::<FsmStateMachine>(state_machine_id) {
-                state_machine.set_curr_state(target);
-            }
-
-            if let Some(id) = before_enter_system_id {
-                let context = TransitionContext::with_transition(
-                    service_target,
-                    state_machine_id,
-                    from,
-                    target,
-                );
-                context.queue_system_command(id).apply(world)?;
-            }
-
-            if let Some((id, context)) = on_enter_system_id {
-                #[cfg(feature = "state_data")]
-                if let Some(state_scene_patch) =
-                    world.get::<StateScenePatch>(context.state()).cloned()
-                {
-                    state_scene_patch
-                        .apply_state_scene_command(
-                            context.state(),
-                            state_machine_id,
-                            context.service_target,
-                        )
-                        .apply(world);
-                }
-                context.queue_system_command(id).apply(world)?;
-            }
-
-            if let Some((system, action_context)) = add_buffer_id {
-                (system)(
-                    world,
-                    Box::new(move |buffer| {
-                        buffer.add(action_context);
-                    }),
-                )
-            }
-            Ok(())
+            execute_transition_steps(world, resolved)
         });
     }
 }
@@ -597,61 +502,50 @@ impl<'w, 's> ActionSystems<'w, 's> {
         })
     }
 
-    pub fn run_before_enter(
+    /// Pre-resolves all system IDs needed for a transition from `from` to `to`.
+    fn resolve_transition(
         &self,
-        state: Entity,
-        context: TransitionContext,
-        commands: &mut Commands,
-    ) {
-        let Ok(enter) = self.query_before_enter_system.get(state) else {
-            return;
-        };
-        if let Some(id) = self.get_enter_transition_id(state) {
-            commands.queue(context.queue_system_command(id));
-            return;
+        from: Entity,
+        to: Entity,
+        state_machine_id: Entity,
+    ) -> ResolvedTransition {
+        let service_target = self.service_target(state_machine_id);
+
+        ResolvedTransition {
+            remove_buffer: self.get_buffer_id(from).map(|id| {
+                (
+                    id,
+                    ActionContext::new(service_target, state_machine_id, from),
+                )
+            }),
+            exit_action: self.get_exit_action_id(from).map(|id| {
+                (
+                    id,
+                    ActionContext::new(service_target, state_machine_id, from),
+                )
+            }),
+            after_exit: self.get_exit_transition_id(from).map(|id| {
+                (
+                    id,
+                    TransitionContext::with_transition(service_target, state_machine_id, from, to),
+                )
+            }),
+            before_enter: self.get_enter_transition_id(to).map(|id| {
+                (
+                    id,
+                    TransitionContext::with_transition(service_target, state_machine_id, from, to),
+                )
+            }),
+            enter_action: self
+                .get_enter_action_id(to)
+                .map(|id| (id, ActionContext::new(service_target, state_machine_id, to))),
+            add_buffer: self
+                .get_buffer_id(to)
+                .map(|id| (id, ActionContext::new(service_target, state_machine_id, to))),
+            to,
+            state_machine_id,
+            service_target,
         }
-        warn!("{}", enter.not_found_error(state));
-    }
-
-    #[inline]
-    pub fn run_enter_action(&self, state: Entity, context: ActionContext, commands: &mut Commands) {
-        let Ok(enter) = self.query_on_enter_system.get(state) else {
-            return;
-        };
-        if let Some(id) = self.action_registry.get(enter) {
-            commands.queue(context.queue_system_command(id));
-            return;
-        };
-        warn!("{}", enter.not_found_error(state));
-    }
-
-    #[inline]
-    pub fn run_exit_action(&self, state: Entity, context: ActionContext, commands: &mut Commands) {
-        let Ok(exit) = self.query_on_exit_system.get(state) else {
-            return;
-        };
-
-        if let Some(id) = self.action_registry.get(exit) {
-            commands.queue(context.queue_system_command(id));
-            return;
-        }
-        warn!("{}", exit.not_found_error(state));
-    }
-
-    pub fn run_after_exit(
-        &self,
-        state: Entity,
-        context: TransitionContext,
-        commands: &mut Commands,
-    ) {
-        let Ok(exit) = self.query_after_exit_system.get(state) else {
-            return;
-        };
-        if let Some(id) = self.transition_registry.get(exit) {
-            commands.queue(context.queue_system_command(id));
-            return;
-        }
-        warn!("{}", exit.not_found_error(state));
     }
 }
 

@@ -70,18 +70,22 @@ fn test_fsm_event() {
 
     // A -> B true
     world.trigger(FsmTrigger::with_next(state_machine, ids[1]));
+    world.flush();
     assert_eq!(get_curr_state(world, state_machine), ids[1]);
 
     // A -> D false
     world.trigger(FsmTrigger::with_next(state_machine, ids[3]));
+    world.flush();
     assert_eq!(get_curr_state(world, state_machine), ids[1]);
 
     // B -> ? event=false false
     world.trigger(FsmTrigger::with_event(state_machine, EventData::new(false)));
+    world.flush();
     assert_eq!(get_curr_state(world, state_machine), ids[1]);
 
     // B -event(true)-> C true
     world.trigger(FsmTrigger::with_event(state_machine, EventData::new(true)));
+    world.flush();
     assert_eq!(get_curr_state(world, state_machine), ids[2]);
 
     // C -guard(false)-> B false

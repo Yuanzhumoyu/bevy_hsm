@@ -235,12 +235,12 @@ impl StateTree {
     pub fn traversal_iter(&self, world: &World, state: Entity) -> Vec<Entity> {
         match self.tree.get(&state) {
             Some(StateTreeNode {
-                super_state: _,
                 traversal,
                 sub_states,
+                ..
             }) => match traversal {
-                Some(traversal) => traversal.0.traverse(world, sub_states.as_slice()),
-                None => sub_states.to_vec(),
+                Some(t) => t.0.traverse(world, sub_states.clone()),
+                None => sub_states.clone(),
             },
             None => Vec::new(),
         }
@@ -257,20 +257,20 @@ impl StateTree {
     ) -> Vec<Entity> {
         match self.tree.get(&state) {
             Some(StateTreeNode {
-                super_state: _,
                 traversal,
                 sub_states,
+                ..
             }) => {
-                let sub_states = world
-                    .entity(sub_states.as_slice())
-                    .into_iter()
-                    .filter(|e| f(e))
-                    .map(|e| e.id())
-                    .collect::<Vec<_>>();
+                let mut filtered = Vec::with_capacity(sub_states.len());
+                for e in world.entity(sub_states.as_slice()).into_iter() {
+                    if f(&e) {
+                        filtered.push(e.id());
+                    }
+                }
 
                 match traversal {
-                    Some(traversal) => traversal.0.traverse(world, sub_states.as_slice()),
-                    None => sub_states,
+                    Some(t) => t.0.traverse(world, filtered),
+                    None => filtered,
                 }
             }
             None => Vec::new(),

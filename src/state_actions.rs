@@ -354,3 +354,14 @@ pub struct ServiceTarget(pub Entity);
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref)]
 #[relationship_target(relationship = ServiceTarget)]
 pub struct StateMachineForest(Vec<Entity>);
+
+/// Resolves the service target for a state machine entity.
+///
+/// If the state machine has a [`ServiceTarget`] component, returns the target entity.
+/// Otherwise returns the state machine entity itself.
+#[inline]
+pub(crate) fn get_service_target(world: &World, state_machine: Entity) -> Entity {
+    world
+        .get::<ServiceTarget>(state_machine)
+        .map_or(state_machine, |st| st.0)
+}

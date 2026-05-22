@@ -167,9 +167,9 @@ impl Default for StateMachinePlugin {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use bevy::prelude::*;
-/// use bevy_hsm::prelude::*;
+/// use bevy_hsm::{prelude::*, system_registry};
 ///
 /// fn my_action(context: In<ActionContext>) { /* ... */ }
 /// fn another_action(context: In<ActionContext>) { /* ... */ }

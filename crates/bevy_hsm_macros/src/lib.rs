@@ -136,7 +136,7 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 ///
 /// ```rust,ignore
 /// use bevy::prelude::*;
-/// use bevy_hsm::prelude::*;
+/// use bevy_hsm::{prelude::*, system_registry};
 ///
 /// fn on_enter_a(context: In<ActionContext>) {
 ///     info!("Entering state A");

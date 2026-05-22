@@ -209,142 +209,165 @@ impl StateLifecycle {
 
         match hsm_state {
             StateLifecycle::Enter => {
-                let Some(relationship) = prev_transition.to_transition(curr_transition) else {
-                    return;
-                };
-
-                // 运行进入之前的系统
-                Self::run_transition_action_system::<BeforeEnterSystem>(
+                Self::handle_enter(
                     &mut world,
-                    curr_state_id,
-                    TransitionContext::with(
-                        state_context.service_target,
-                        state_machine_id,
-                        relationship,
-                    ),
-                );
-
-                #[cfg(feature = "hybrid")]
-                if let Err(e) =
-                    Self::handle_hybrid_entry(&mut world, state_machine_id, curr_state_id)
-                {
-                    error!("{}", e);
-                }
-
-                #[cfg(feature = "state_data")]
-                StateScenePatch::spawn_state_scene(
-                    &mut world,
-                    curr_state_id,
                     state_machine_id,
-                    state_context.service_target,
-                );
-
-                // 运行进入后的系统
-                Self::run_state_action_system::<AfterEnterSystem>(
-                    &mut world,
                     curr_state_id,
+                    prev_transition,
+                    curr_transition,
                     state_context,
                 );
-
-                world
-                    .commands()
-                    .entity(state_machine_id)
-                    .insert(StateLifecycle::Update);
             }
             StateLifecycle::Update => {
-                // 添加过渡条件检查系统
-                let mut check_on_transition_states =
-                    world.resource_mut::<CheckOnTransitionStates>();
-                check_on_transition_states.insert(state_machine_id);
-
-                // 运行更新系统
-                if world.entity(curr_state_id).contains::<OnUpdateSystem>() {
-                    StateActionBuffer::buffer_scope(
-                        world.as_unsafe_world_cell(),
-                        curr_state_id,
-                        move |buff| {
-                            buff.remove_filter(state_context);
-                            buff.add(state_context);
-                        },
-                    );
-                }
+                Self::handle_update(&mut world, state_machine_id, curr_state_id, state_context);
             }
             StateLifecycle::Exit => {
-                // 过滤条件
-                StateActionBuffer::buffer_scope(
-                    world.as_unsafe_world_cell(),
-                    curr_state_id,
-                    move |buff| {
-                        buff.remove_interceptor(state_context);
-                        buff.add_filter(state_context);
-                    },
-                );
-
-                // 运行退出之前的系统
-                Self::run_state_action_system::<BeforeExitSystem>(
+                Self::handle_exit(
                     &mut world,
+                    state_machine_id,
                     curr_state_id,
+                    prev_transition,
+                    curr_transition,
                     state_context,
                 );
-
-                #[cfg(feature = "hybrid")]
-                Self::handle_hybrid_exit(&mut world, state_machine_id, curr_state_id);
-
-                #[cfg(feature = "state_data")]
-                StateScenePatch::reclaim_state_scene(
-                    &mut world,
-                    curr_state_id,
-                    state_machine_id,
-                    state_context.service_target,
-                );
-
-                world.commands().queue(move |world: &mut World| {
-                    let Some(mut state_machine) =
-                        world.get_mut::<HsmStateMachine>(state_machine_id)
-                    else {
-                        warn!(
-                            "{}",
-                            StateMachineError::HsmStateMachineMissing(state_machine_id)
-                        );
-                        return;
-                    };
-                    let next_transition = state_machine.pop_next_state();
-
-                    let Some(relationship) = curr_transition.to_transition(next_transition) else {
-                        return;
-                    };
-
-                    match next_transition.to() {
-                        Some((curr_state, on_state)) => {
-                            state_machine.set_curr_state(curr_state);
-                            Self::run_transition_action_system::<AfterExitSystem>(
-                                &mut world.into(),
-                                curr_state_id,
-                                TransitionContext::with(
-                                    state_context.service_target,
-                                    state_machine_id,
-                                    relationship,
-                                ),
-                            );
-                            world.entity_mut(state_machine_id).insert(on_state);
-                        }
-                        None => {
-                            Self::run_transition_action_system::<AfterExitSystem>(
-                                &mut world.into(),
-                                curr_state_id,
-                                TransitionContext::with(
-                                    state_context.service_target,
-                                    state_machine_id,
-                                    relationship,
-                                ),
-                            );
-                            world.entity_mut(state_machine_id).insert(Terminated);
-                        }
-                    };
-                });
             }
         };
 
+        Self::process_transition_queue(&mut world, state_machine_id);
+    }
+
+    fn handle_enter(
+        world: &mut DeferredWorld,
+        state_machine_id: Entity,
+        curr_state_id: Entity,
+        prev_transition: Transition,
+        curr_transition: Transition,
+        state_context: ActionContext,
+    ) {
+        let Some(relationship) = prev_transition.to_transition(curr_transition) else {
+            return;
+        };
+
+        Self::run_transition_action_system::<BeforeEnterSystem>(
+            world,
+            curr_state_id,
+            TransitionContext::with(state_context.service_target, state_machine_id, relationship),
+        );
+
+        #[cfg(feature = "hybrid")]
+        if let Err(e) = Self::handle_hybrid_entry(world, state_machine_id, curr_state_id) {
+            error!("{}", e);
+        }
+
+        #[cfg(feature = "state_data")]
+        StateScenePatch::spawn_state_scene(
+            world,
+            curr_state_id,
+            state_machine_id,
+            state_context.service_target,
+        );
+
+        Self::run_state_action_system::<AfterEnterSystem>(world, curr_state_id, state_context);
+
+        world
+            .commands()
+            .entity(state_machine_id)
+            .insert(StateLifecycle::Update);
+    }
+
+    fn handle_update(
+        world: &mut DeferredWorld,
+        state_machine_id: Entity,
+        curr_state_id: Entity,
+        state_context: ActionContext,
+    ) {
+        let mut check_on_transition_states = world.resource_mut::<CheckOnTransitionStates>();
+        check_on_transition_states.insert(state_machine_id);
+
+        if world.entity(curr_state_id).contains::<OnUpdateSystem>() {
+            StateActionBuffer::buffer_scope(
+                world.as_unsafe_world_cell(),
+                curr_state_id,
+                move |buff| {
+                    buff.remove_filter(state_context);
+                    buff.add(state_context);
+                },
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_exit(
+        world: &mut DeferredWorld,
+        state_machine_id: Entity,
+        curr_state_id: Entity,
+        _prev: Transition,
+        curr_transition: Transition,
+        state_context: ActionContext,
+    ) {
+        StateActionBuffer::buffer_scope(world.as_unsafe_world_cell(), curr_state_id, move |buff| {
+            buff.remove_interceptor(state_context);
+            buff.add_filter(state_context);
+        });
+
+        Self::run_state_action_system::<BeforeExitSystem>(world, curr_state_id, state_context);
+
+        #[cfg(feature = "hybrid")]
+        Self::handle_hybrid_exit(world, state_machine_id, curr_state_id);
+
+        #[cfg(feature = "state_data")]
+        StateScenePatch::reclaim_state_scene(
+            world,
+            curr_state_id,
+            state_machine_id,
+            state_context.service_target,
+        );
+
+        world.commands().queue(move |world: &mut World| {
+            let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(state_machine_id) else {
+                warn!(
+                    "{}",
+                    StateMachineError::HsmStateMachineMissing(state_machine_id)
+                );
+                return;
+            };
+            let next_transition = state_machine.pop_next_state();
+
+            let Some(relationship) = curr_transition.to_transition(next_transition) else {
+                return;
+            };
+
+            match next_transition.to() {
+                Some((curr_state, on_state)) => {
+                    state_machine.set_curr_state(curr_state);
+                    Self::run_transition_action_system::<AfterExitSystem>(
+                        &mut world.into(),
+                        curr_state_id,
+                        TransitionContext::with(
+                            state_context.service_target,
+                            state_machine_id,
+                            relationship,
+                        ),
+                    );
+                    world.entity_mut(state_machine_id).insert(on_state);
+                }
+                None => {
+                    Self::run_transition_action_system::<AfterExitSystem>(
+                        &mut world.into(),
+                        curr_state_id,
+                        TransitionContext::with(
+                            state_context.service_target,
+                            state_machine_id,
+                            relationship,
+                        ),
+                    );
+                    world.entity_mut(state_machine_id).insert(Terminated);
+                }
+            };
+        });
+    }
+
+    fn process_transition_queue(world: &mut DeferredWorld, state_machine_id: Entity) {
         world.commands().queue(move |world: &mut World| {
             let (mut entities, mut commands) = world.entities_and_commands();
             let Ok(mut state_machine_ref) = entities.get_mut(state_machine_id) else {

@@ -173,9 +173,9 @@ impl HistoricalNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HsmStateLifecycleRecord {
     Enter,
-    #[cfg(feature = "fsm")]
+    #[cfg(all(feature = "history", feature = "hybrid"))]
     Update(Option<crate::fsm::history::FsmStateHistory>),
-    #[cfg(not(feature = "fsm"))]
+    #[cfg(not(all(feature = "history", feature = "hybrid")))]
     Update,
     Exit,
 }
@@ -184,9 +184,9 @@ impl From<HsmStateLifecycleRecord> for StateLifecycle {
     fn from(value: HsmStateLifecycleRecord) -> Self {
         match value {
             HsmStateLifecycleRecord::Enter => StateLifecycle::Enter,
-            #[cfg(feature = "fsm")]
+            #[cfg(all(feature = "history", feature = "hybrid"))]
             HsmStateLifecycleRecord::Update(_) => StateLifecycle::Update,
-            #[cfg(not(feature = "fsm"))]
+            #[cfg(not(all(feature = "history", feature = "hybrid")))]
             HsmStateLifecycleRecord::Update => StateLifecycle::Update,
             HsmStateLifecycleRecord::Exit => StateLifecycle::Exit,
         }
@@ -197,9 +197,9 @@ impl From<StateLifecycle> for HsmStateLifecycleRecord {
     fn from(value: StateLifecycle) -> Self {
         match value {
             StateLifecycle::Enter => HsmStateLifecycleRecord::Enter,
-            #[cfg(feature = "fsm")]
+            #[cfg(all(feature = "history", feature = "hybrid"))]
             StateLifecycle::Update => HsmStateLifecycleRecord::Update(None),
-            #[cfg(not(feature = "fsm"))]
+            #[cfg(not(all(feature = "history", feature = "hybrid")))]
             StateLifecycle::Update => HsmStateLifecycleRecord::Update,
             StateLifecycle::Exit => HsmStateLifecycleRecord::Exit,
         }

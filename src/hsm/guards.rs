@@ -62,26 +62,7 @@ pub(crate) struct GuardEnterCache(HashMap<Entity, CompiledGuard>);
 
 impl FromWorld for GuardEnterCache {
     fn from_world(world: &mut World) -> Self {
-        let collect = world.resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
-            let mut query = world.query_filtered::<(Entity, &GuardEnter), With<HsmState>>();
-            query
-                .iter(world)
-                .filter_map(|(id, condition)| {
-                    match conditions.to_combinator_condition_id(condition) {
-                        Ok(condition_id) => Some((id, condition_id)),
-                        Err(e) => {
-                            warn!(
-                                "[GuardRegistry] This condition<{:?}> does not exist: {}",
-                                condition.0, e
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-        });
-
-        Self(HashMap::from_iter(collect))
+        Self(collect_guard_cache::<GuardEnter>(world))
     }
 }
 
@@ -140,8 +121,17 @@ pub(crate) struct GuardExitCache(HashMap<Entity, CompiledGuard>);
 
 impl FromWorld for GuardExitCache {
     fn from_world(world: &mut World) -> Self {
-        let collect = world.resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
-            let mut query = world.query_filtered::<(Entity, &GuardExit), With<HsmState>>();
+        Self(collect_guard_cache::<GuardExit>(world))
+    }
+}
+
+fn collect_guard_cache<G>(world: &mut World) -> HashMap<Entity, CompiledGuard>
+where
+    G: Component + std::ops::Deref<Target = GuardCondition>,
+{
+    world
+        .resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
+            let mut query = world.query_filtered::<(Entity, &G), With<HsmState>>();
             query
                 .iter(world)
                 .filter_map(|(id, condition)| {
@@ -150,15 +140,14 @@ impl FromWorld for GuardExitCache {
                         Err(e) => {
                             warn!(
                                 "[GuardRegistry] This condition<{:?}> does not exist: {}",
-                                condition.0, e
+                                &**condition, e
                             );
                             None
                         }
                     }
                 })
                 .collect::<Vec<_>>()
-        });
-
-        Self(HashMap::from_iter(collect))
-    }
+        })
+        .into_iter()
+        .collect()
 }

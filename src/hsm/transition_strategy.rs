@@ -104,8 +104,8 @@ impl From<StateLifecycle> for ExitTransitionBehavior {
 ///
 /// 此 trait 的实现将决定子状态在激活或其他操作中被考虑的顺序。
 pub trait StateTraversalStrategy: Send + Sync + 'static {
-    /// 给定一个子状态实体列表，按照期望的遍历顺序返回它们。
-    fn traverse(&self, world: &World, children: &[Entity]) -> Vec<Entity>;
+    /// 给定一个子状态实体列表，按照期望的遍历顺序返回它们（取得所有权）。
+    fn traverse(&self, world: &World, children: Vec<Entity>) -> Vec<Entity>;
 
     /// 返回遍历策略的名称。
     fn name(&self) -> &'static str {
@@ -141,7 +141,9 @@ impl Clone for TraversalStrategy {
 
 impl Default for TraversalStrategy {
     fn default() -> Self {
-        Self(Arc::new(SequentialTraversal))
+        static SEQUENTIAL: std::sync::LazyLock<TraversalStrategy> =
+            std::sync::LazyLock::new(|| TraversalStrategy(Arc::new(SequentialTraversal)));
+        SEQUENTIAL.clone()
     }
 }
 
@@ -153,12 +155,12 @@ impl Debug for TraversalStrategy {
 
 /// 一个基本的顺序遍历策略。
 ///
-/// 此策略简单地按照提供的顺序返回子状态。
+/// 此策略是零开销的透传——直接按提供的顺序返回子状态。
 pub struct SequentialTraversal;
 
 impl StateTraversalStrategy for SequentialTraversal {
-    fn traverse(&self, _world: &World, children: &[Entity]) -> Vec<Entity> {
-        children.to_vec()
+    fn traverse(&self, _world: &World, children: Vec<Entity>) -> Vec<Entity> {
+        children
     }
 }
 
@@ -168,8 +170,8 @@ impl StateTraversalStrategy for SequentialTraversal {
 pub struct ReverseTraversal;
 
 impl StateTraversalStrategy for ReverseTraversal {
-    fn traverse(&self, _world: &World, children: &[Entity]) -> Vec<Entity> {
-        children.iter().rev().cloned().collect()
+    fn traverse(&self, _world: &World, children: Vec<Entity>) -> Vec<Entity> {
+        children.into_iter().rev().collect()
     }
 }
 
@@ -186,13 +188,22 @@ fn get_hsm_state(world: &World, state: Entity) -> Result<HsmState, StateMachineE
         .ok_or(StateMachineError::HsmStateMissing(state))
 }
 
-fn build_exit_transition_plan(
+/// Builds the exit transition plan for a state given its strategy and behavior.
+///
+/// The optional `stop_at` parameter limits how far up the tree the exit cascade
+/// can propagate. When `Some(lca)`, the recursion stops before exiting `lca`.
+/// When `None` (used by `handle_exit_transition`), the cascade runs to the root.
+pub(crate) fn build_exit_transition_plan(
     world: &World,
     state_tree_id: Entity,
     mut state_id: Entity,
     strategy: StateTransitionStrategy,
     mut behavior: ExitTransitionBehavior,
+    stop_at: Option<Entity>,
 ) -> Result<Vec<Transition>, StateMachineError> {
+    // Helper: check if we've hit the boundary.
+    let at_boundary = |id: Entity| stop_at.is_some_and(|b| b == id);
+
     match (strategy, behavior) {
         (
             StateTransitionStrategy::Nested | StateTransitionStrategy::Parallel,
@@ -206,14 +217,14 @@ fn build_exit_transition_plan(
             let state_tree = get_state_tree(world, state_tree_id)?;
             let mut transition_queue = vec![Transition::Exit(state_id)];
 
-            if state_tree.get_root() == state_id {
+            if state_tree.get_root() == state_id || at_boundary(state_id) {
                 return Ok(transition_queue);
             }
 
             while let Some(super_state) = state_tree.get_super_state(state_id) {
                 let next_hsm_state = get_hsm_state(world, super_state)?;
 
-                if state_tree.get_root() == super_state {
+                if state_tree.get_root() == super_state || at_boundary(super_state) {
                     transition_queue.push(Transition::with_behavior(
                         super_state,
                         next_hsm_state.behavior,
@@ -235,6 +246,7 @@ fn build_exit_transition_plan(
                     super_state,
                     next_hsm_state.strategy,
                     next_hsm_state.behavior,
+                    stop_at,
                 )?);
                 return Ok(transition_queue);
             }
@@ -245,6 +257,16 @@ fn build_exit_transition_plan(
             let state_tree = get_state_tree(world, state_tree_id)?;
 
             while let Some(super_state) = state_tree.get_super_state(state_id) {
+                if at_boundary(super_state) {
+                    return match behavior {
+                        ExitTransitionBehavior::Rebirth => Ok(vec![Transition::Enter(state_id)]),
+                        ExitTransitionBehavior::Resurrection => {
+                            Ok(vec![Transition::Update(state_id)])
+                        }
+                        ExitTransitionBehavior::Death => Ok(vec![Transition::End]),
+                    };
+                }
+
                 let next_hsm_state = get_hsm_state(world, super_state)?;
 
                 if !(next_hsm_state.strategy == StateTransitionStrategy::Parallel
@@ -256,6 +278,7 @@ fn build_exit_transition_plan(
                         super_state,
                         next_hsm_state.strategy,
                         next_hsm_state.behavior,
+                        stop_at,
                     );
                 }
 
@@ -270,6 +293,35 @@ fn build_exit_transition_plan(
             }
         }
     }
+}
+
+/// Builds the enter transition plan from an LCA-to-target path.
+///
+/// `enter_path` is `[target, parent_of_target, ..., LCA]` as returned by
+/// [`StateTree::find_lca_and_paths`]. Returns transitions in execution order:
+/// first the LCA is entered, then each intermediate state, ending with the target.
+pub(crate) fn build_enter_transition_plan(
+    world: &World,
+    enter_path: &[Entity],
+) -> bevy::prelude::Result<Vec<Transition>> {
+    use crate::prelude::StateTransitionStrategy::*;
+
+    let mut transitions = Vec::with_capacity(enter_path.len() * 2);
+
+    // enter_path = [target, ..., child_of_lca, LCA]
+    // Reverse → [LCA, child_of_lca, ..., target], then slide windows
+    for (i, [sub_state_id, curr_state_id]) in
+        enter_path.array_windows::<2>().rev().copied().enumerate()
+    {
+        let hsm = get_hsm_state(world, curr_state_id)?;
+
+        if hsm.strategy == Parallel && i != 0 {
+            transitions.push(Transition::Exit(curr_state_id));
+        }
+        transitions.push(Transition::Enter(sub_state_id));
+    }
+
+    Ok(transitions)
 }
 
 /// 检查能否过渡状态的实体
@@ -504,8 +556,14 @@ pub(super) fn handle_exit_transition(
             return Ok(());
         };
 
-        let transition_queue =
-            build_exit_transition_plan(world, state_tree_id, exit_state_id, strategy, behavior)?;
+        let transition_queue = build_exit_transition_plan(
+            world,
+            state_tree_id,
+            exit_state_id,
+            strategy,
+            behavior,
+            None,
+        )?;
 
         let mut service_target = world.entity_mut(state_machine_id);
         let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
