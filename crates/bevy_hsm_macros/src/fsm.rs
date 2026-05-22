@@ -1,3 +1,8 @@
+//! Proc-macro implementation for the [`fsm!`] macro.
+//!
+//! Composes an [`FsmGraph`](super::fsm_graph::FsmGraph) with an optional
+//! `init(...)` config, a `components: { ... }` block, and a `:config_fn`.
+
 use std::collections::HashMap;
 
 use proc_macro::TokenStream;
@@ -11,7 +16,7 @@ use syn::{
 use crate::{
     fsm_graph::FsmGraph,
     kw,
-    machine_config::{ConfigFn, StateMachineConfig, StateMachineConfigImpl},
+    machine_config::{ConfigFn, ResolvedStateMachineConfig, StateMachineConfig},
 };
 
 // 宏入口
@@ -23,7 +28,7 @@ pub fn fsm_impl(item: TokenStream) -> TokenStream {
 #[derive(Debug)]
 struct Fsm {
     components: Punctuated<Expr, Token![,]>,
-    machine_config: StateMachineConfigImpl,
+    machine_config: ResolvedStateMachineConfig,
     config_fn: Option<ConfigFn>,
     fsm_graph: FsmGraph,
 }
@@ -46,17 +51,21 @@ impl Parse for Fsm {
                 input.parse::<Token![:]>()?;
                 let content;
                 braced!(content in input);
-                content.parse_terminated(Expr::parse, Token![,])?
+                let components = content.parse_terminated(Expr::parse, Token![,])?;
+                input.parse::<Option<Token![,]>>()?;
+                components
             }
             false => Punctuated::new(),
         };
-        input.parse::<Option<Token![,]>>()?;
 
         let config_fn = match input.peek(Token![:]) {
-            true => Some(input.parse::<ConfigFn>()?),
+            true => {
+                let config_fn = input.parse::<ConfigFn>()?;
+                input.parse::<Option<Token![,]>>()?;
+                Some(config_fn)
+            }
             false => None,
         };
-        input.parse::<Option<Token![,]>>()?;
 
         let machine_config = match machine_config {
             Some(sm) => {
@@ -92,12 +101,11 @@ impl quote::ToTokens for Fsm {
         let fsm_state_machine = machine_config.fsm_config();
 
         tokens.extend(quote! {
-            bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands| {
+            bevy_hsm::markers::SpawnStateMachine::new(move |entity_mut:&mut EntityWorldMut| {
                 use bevy_hsm::prelude::*;
-                let mut commands = entity_commands.commands();
                 #fsm_graph
-                let structure_id = entity_commands.id();
-                entity_commands.insert((#fsm_state_machine,graph,(#components)));
+                let structure_id = entity_mut.id();
+                entity_mut.insert((#fsm_state_machine,graph,(#components)));
                 #config_fn
             })
         });

@@ -49,7 +49,12 @@ impl Terminated {
             }
 
             #[cfg(feature = "state_data")]
-            crate::state_data::StateData::remove_components(&mut world, curr_state, service_target);
+            crate::state_data::StateScenePatch::reclaim_state_scene(
+                &mut world,
+                curr_state,
+                entity,
+                service_target,
+            );
 
             let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
                 break 'fsm;
@@ -59,7 +64,12 @@ impl Terminated {
             fsm_state_machine.set_curr_state(init_state);
 
             #[cfg(feature = "state_data")]
-            crate::state_data::StateData::clone_components(&mut world, init_state, service_target);
+            crate::state_data::StateScenePatch::spawn_state_scene(
+                &mut world,
+                init_state,
+                entity,
+                service_target,
+            );
 
             'after_enter: {
                 let Some(after_enter) = world.get::<AfterEnterSystem>(init_state) else {
@@ -178,12 +188,14 @@ impl Paused {
 
 #[derive(Component, Clone)]
 #[component(on_insert=Self::on_insert)]
-pub struct SpawnStateMachine(Arc<dyn Fn(EntityCommands) + 'static + Send + Sync>);
+pub struct SpawnStateMachine(
+    Arc<dyn for<'w> Fn(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync>,
+);
 
 impl SpawnStateMachine {
     pub fn new<F>(f: F) -> Self
     where
-        F: Fn(EntityCommands) + 'static + Send + Sync,
+        F: for<'w> Fn(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync,
     {
         Self(Arc::new(f))
     }
@@ -193,8 +205,8 @@ impl SpawnStateMachine {
         let Ok(entity_ref) = entitys.get(entity) else {
             return;
         };
-        if let Some(f) = entity_ref.get::<Self>() {
-            (f.0)(commands.entity(entity))
+        if let Some(f) = entity_ref.get::<Self>().cloned() {
+            commands.queue(move |world: &mut World| (f.0)(&mut world.entity_mut(entity)));
         }
         commands.entity(entity).remove::<Self>();
     }

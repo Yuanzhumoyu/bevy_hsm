@@ -1,29 +1,34 @@
+//! Proc-macro implementation for the [`hsm!`] macro.
+//!
+//! Parses a root state node, optional `init(...)` config, free components,
+//! and an optional `:config_fn` callback.
+
 use std::collections::HashMap;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::ToTokens;
 use syn::{Expr, Token, parse::Parse, punctuated::Punctuated};
 
 use crate::{
     hsm_tree::{HsmTree, StateNode},
     kw,
-    machine_config::{ConfigFn, StateMachineConfig, StateMachineConfigImpl},
+    machine_config::{ConfigFn, ResolvedStateMachineConfig, StateMachineConfig},
 };
 
 pub fn hsm_impl(item: TokenStream) -> TokenStream {
-    let hsm_impl: HsmImpl = syn::parse_macro_input!(item as HsmImpl);
-    quote! {#hsm_impl}.into()
+    let hsm_impl: Hsm = syn::parse_macro_input!(item as Hsm);
+    hsm_impl.to_token_stream().into()
 }
 
 #[derive(Debug)]
-struct HsmImpl {
+struct Hsm {
     state_tree: HsmTree,
     config_fn: Option<ConfigFn>,
-    machine_config: StateMachineConfigImpl,
+    machine_config: ResolvedStateMachineConfig,
     components: Punctuated<Expr, Token![,]>,
 }
 
-impl quote::ToTokens for HsmImpl {
+impl quote::ToTokens for Hsm {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let Self {
             state_tree,
@@ -34,19 +39,18 @@ impl quote::ToTokens for HsmImpl {
         let hsm_state_machine = machine_config.hsm_config();
 
         tokens.extend(quote::quote! {
-            bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands|{
+            bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_mut:&mut EntityWorldMut|{
                 use bevy_hsm::prelude::*;
-                let mut commands = entity_commands.commands();
                 #state_tree
-                let structure_id = entity_commands.id();
-                entity_commands.insert((#hsm_state_machine,state_tree,#components));
+                let structure_id = entity_mut.id();
+                entity_mut.insert((#hsm_state_machine,state_tree,#components));
                 #config_fn
             })
         });
     }
 }
 
-impl Parse for HsmImpl {
+impl Parse for Hsm {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut components = Punctuated::<Expr, Token![,]>::new();
         let mut root_state: Option<StateNode> = None;
@@ -105,7 +109,7 @@ impl Parse for HsmImpl {
             None => Default::default(),
         };
 
-        Ok(HsmImpl {
+        Ok(Hsm {
             state_tree,
             components,
             config_fn,

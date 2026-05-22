@@ -23,11 +23,8 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     let id = commands.register_system(debug_on_state("exit"));
     action_registry.insert("debug_on_exit", id);
 
-    fn trigger_event(mut entity_commands: EntityCommands, states: &[Entity]) {
-        let id = entity_commands.id();
-        entity_commands
-            .commands()
-            .trigger(HsmTrigger::chain(id, states[3]));
+    fn trigger_event(entity_mut: &mut EntityWorldMut, states: &[Entity]) {
+        entity_mut.trigger(|id| HsmTrigger::chain(id, states[3]));
     }
 
     commands.spawn(hsm! {

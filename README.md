@@ -124,40 +124,71 @@ FSM 的运行完全由外部事件驱动，其生命周期管理是**同步的�
 
 ## 宏语法 (EBNF)
 
+为了精确地定义宏的结构，我们使用 EBNF 范式。
+
+### 通用定义
+
+这些是在多个状态机宏之间共享的基础构建块。
+
+```ebnf
+(* ---- 通用定义 ---- *)
+
+machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')'
+machine_config_param ::= ( 'init_state' | 'curr_state' ), '=', state_ref
+                       | 'history_capacity', '=', integer_literal (* "history" 特性 *)
+
+config_fn ::= ':', ( fn_identifier | expr_closure | expr_call )
+
+state_ref ::= identifier | integer_literal
+
+component ::= (* 任何解析为组件的有效 Rust 表达式 *)
+
+state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
+state_attribute_param ::= ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
+                        | 'on_update', '=', lit_str
+                        | ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
+                        | 'strategy', '=', ( 'Nested' | 'Parallel' )
+                        | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
+                        | 'state_scene', '=', expr_bsn
+                        | 'fsm_blueprint', '=', rust_expression (* "hybrid" 特性 *)
+                        | 'minimal'
+
+action_id ::= lit_str
+            | fn_identifier
+            | action_name, ':', ( expr_closure | expr_call | fn_identifier )
+
+guard_expression ::= (* 详细语法请参见 combination_condition! 宏 *)
+
+expr_bsn ::= '{' bsn '}' | '[' bsn_list ']'
+
+(* ---- 共享原语 ---- *)
+
+fn_identifier ::= (* Rust 函数路径, e.g., my_function *)
+expr_closure ::= (* Rust 闭包, e.g., |...| { ... } *)
+expr_call ::= (* Rust 函数调用, e.g., my_function(a, b) *)
+action_name ::= identifier
+identifier ::= (* Rust 标识符, e.g., MyState, StateA *)
+integer_literal ::= (* Rust 整数, e.g., 0, 42 *)
+lit_str ::= (* Rust 字符串, e.g., "my_system" *)
+rust_expression ::= (* 任何有效的 Rust 表达式 *)
+```
+
 ### `hsm!`
 
 `hsm!` 宏用于构建一个层级状态机（Hierarchical State Machine）。它定义了一个树状结构，其中包含一个根状态，以及可选的、附加到状态机实体上的额外 Bevy 组件。
 
 ```ebnf
-hsm ::= [ machine_config, ',', ], state_node, { ',', component }, [ ',', config_fn ];
-machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
-machine_config_param ::= 'history_capacity', '=', integer_literal
-                       | ( 'init_state' | 'curr_state' ), '=', state_ref;
-state_node ::= state_attribute, [ ':', state_name ], [ '(', { state_content }, ')' ];
-state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
-state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']' 
-                  | '#[state_data(', component, { ',', component }, ')]';
-state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
-                        | ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
-                        | 'on_update', '=', lit_str
-                        | 'strategy', '=', ( 'Nested' | 'Parallel' )
-                        | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
-                        | 'fsm_blueprint', '=', rust_expression
-                        | 'minimal';
-config_fn ::= ':', ( expr_closure | fn_identifier | expr_call );
-component ::= rust_expression; (* 任何有效的 Bevy 组件 *)
-state_name ::= identifier; (* 状态的名称 *)
-state_ref ::= identifier | integer_literal;
-action_id ::= lit_str
-            | fn_identifier
-            | action_name, ':', ( expr_closure | expr_call | fn_identifier );
-action_name ::= identifier;
-identifier ::= (* Rust 标识符, e.g., MyState, StateA *) ;
-lit_str ::= (* Rust 字符串字面量, e.g., "my_system" *) ;
-rust_expression ::= (* 任何有效的 Rust 表达式 *) ;
-expr_closure ::= (* Rust 闭包, e.g., 签名需为 `|EntityCommands, &[Entity]|{...}` *) ;
-fn_identifier ::= (* Rust 函数标识符, e.g., my_function *, 签名需为 `fn(EntityCommands, &[Entity])` *) ;
-expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a, b) *) ;
+(*
+ * hsm! 宏非常灵活。它需要一个根 state_node，并最多允许一个
+ * machine_config 和一个 config_fn。组件可以自由地散布其中。
+ * 一个典型的结构如下所示。
+ *)
+hsm ::= [ machine_config, ',' ], state_node, { ',', component }, [ ',', config_fn ]
+
+state_node ::= state_attribute, [ ':', identifier ], [ '(', { hsm_state_content }, ')' ]
+hsm_state_content ::= ( state_node | component ), { ',', ( state_node | component ) }
+
+(* `machine_config`, `state_attribute`, `component`, `config_fn` 的定义见“通用定义”。 *)
 ```
 
 **关键点**:
@@ -165,7 +196,6 @@ expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a
 - `hsm!` 宏的核心是一个 `state_node`，它代表状态树的根。
 - 在根状态之后，您可以附加任意数量的 Bevy `component`，它们会和状态机一起被添加到同一个实体上。
 - `state_node` 可以通过 `#[state(...)]` 属性进行配置。除了通用的生命周期钩子（如 `on_update`, `after_enter`）外，它还支持 HSM 独有的属性，包括用于自动转换的守卫（`guard_enter`, `guard_exit`）和用于控制层级行为的 `strategy`、`behavior` 等。
-- `#[state_data(...)]` 属性用于附加只在该状态激活时才存在的组件。
 - 状态可以嵌套。子状态和子组件都定义在父状态的 `()` 内部。
 
 ### `fsm!`
@@ -173,39 +203,32 @@ expr_call ::= (* 任何有效的 Rust 函数调用表达式, e.g., my_function(a
 `fsm!` 宏用于构建一个扁平的有限状态机（Finite State Machine）。它定义了一组状态、一组转换规则，以及可选的附加组件。
 
 ```ebnf
-fsm ::= [ machine_config, ',' ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
-fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}', ',',
-              'transitions', ':', '{', transition, { ',', transition }, '}';
-state_definition ::= state_attribute, [ ':', state_name ], [ '(', { component }, ')' ];
-transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
-transition_condition ::= 'event', '(', rust_expression ')' (* 事件 *)
-                       | 'guard', '(', guard_expression ')'; (* 条件守卫 *)
-state_ref ::= identifier | integer_literal; (* 状态名称或索引 *)
-(* `state_attribute`, `component`, `state_name`, `identifier`, `lit_str`, `rust_expression`, `config_fn`, `action_id`, `machine_config`, `state_ref`, `fsm_graph` 的定义与 hsm! 宏相同 *)
+fsm ::= [ machine_config, ',' ], fsm_graph_content, [ ',', components_block ], [ ',', config_fn ]
 
+components_block ::= 'components', ':', '{', [ component, { ',', component } ], '}'
+
+(* `machine_config`, `config_fn`, `component` 的定义见“通用定义”。 *)
+(* `fsm_graph_content` 的定义见 `fsm_graph!` 宏。 *)
 ```
 
 **关键点**:
 
-- `fsm!` 宏由三个部分组成：`fsm_graph` 一个可选的 `components` 块和一个可选的 `config_fn`。
-- `fsm_graph` 是必需的，它包含 `states` 和 `transitions` 两个块。
-- `state_definition` 的语法与 `hsm!` 中的 `state_node` 类似，但它不能嵌套其他状态。
-- `state_definition` 同样支持 `#[state(...)]` 和 `#[state_data(...)]` 属性。但请注意，由于 FSM 是扁平且完全由事件驱动的结构，`#[state(...)]` 中与 HSM 自动转换和层级相关的参数（如 `guard_enter`, `guard_exit`, `strategy`, `behavior`）在此处是无效的。(*FSM 的转换必须由 `FsmTrigger` 事件显式触发，因此不支持自动守卫。*)
-- `transition` 定义了状态之间的转换规则，可以是有条件的（通过事件或 `guard`）或无条件的。
-  - 箭头定义了转换的方向。存在三种有效的模式：
-    - A => B: 表示从 A 到 B 的单向转换。
-    - A <= B: 表示从 B 到 A 的单向转换。
-    - A <=> B: 表示 A 和 B 之间的双向转换。
-  - 请注意，转换条件两侧的箭头必须匹配。
+- `fsm!` 宏由 `fsm_graph_content`、一个可选的 `components` 块和一个可选的 `config_fn` 组成。
+- `fsm_graph_content` 是必需的，它包含 `states` 和 `transitions` 两个块。
+- `fsm_state` 的语法与 `hsm!` 中的 `state_node` 类似，但它不能嵌套其他状态。
+- `fsm_state` 同样支持 `#[state(...)]` 属性。但请注意，由于 FSM 是扁平且完全由事件驱动的结构，`#[state(...)]` 中与 HSM 自动转换和层级相关的参数（如 `guard_enter`, `guard_exit`, `strategy`, `behavior`）在此处是无效的。(*FSM 的转换必须由 `FsmTrigger` 事件显式触发，因此不支持自动守卫。*)
+- `transition` 定义了状态之间的转换规则。
+  - 箭头定义了转换的方向：`=>` (单向), `<=` (单向), `<=>` (双向)。
+  - 转换可以通过 `event` 或 `guard` 附加条件。
 
 ### `hsm_tree!`
 
 `hsm_tree!` 是一个工具宏，用于单独构建一个状态树（`StateTree`）。它的语法是 `hsm!` 宏的一个子集，只接受一个根 `state_node`。
 
 ```ebnf
-hsm_tree ::= state_node, [ ',', config_fn ];
+hsm_tree ::= state_node, [ ',', config_fn ]
 
-(* `state_node` 和 `config_fn` 的定义与 `hsm!` 宏相同。 *)
+(* `state_node` 和 `config_fn` 的定义见“通用定义”。 *)
 ```
 
 ### `fsm_graph!`
@@ -213,9 +236,19 @@ hsm_tree ::= state_node, [ ',', config_fn ];
 `fsm_graph!` 是一个工具宏，用于单独构建一个状态图（`FsmGraph`）。它的语法是 `fsm!` 宏的一个子集。
 
 ```ebnf
-fsm_graph! ::= fsm_graph, [ ',', config_fn ];
+fsm_graph ::= fsm_graph_content, [ ',', config_fn ]
 
-(* `fsm_graph` 和 `config_fn` 的定义与 `fsm!` 宏相同。 *)
+fsm_graph_content ::= 'states', ':', '{', [ fsm_state, { ',', fsm_state } ], '}',
+                      [ ',' ],
+                      'transitions', ':', '{', [ transition, { ',', transition } ], '}'
+
+fsm_state ::= state_attribute, [ ':', identifier ], [ '(', { component }, ')' ]
+
+transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ]
+transition_condition ::= 'event', '(', rust_expression, ')'
+                       | 'guard', '(', guard_expression, ')'
+
+(* 其他定义见“通用定义”。 *)
 ```
 
 ### `system_registry!`

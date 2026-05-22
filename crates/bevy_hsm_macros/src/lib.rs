@@ -1,19 +1,26 @@
+// --- Always available ---
+mod guard_condition;
+mod kw;
+
+// --- Available when either FSM or HSM is enabled ---
 #[cfg(any(feature = "fsm", feature = "hsm"))]
 mod action_id;
-#[cfg(feature = "fsm")]
-mod fsm;
-#[cfg(feature = "fsm")]
-mod fsm_graph;
-mod guard_condition;
-#[cfg(feature = "hsm")]
-mod hsm;
-#[cfg(feature = "hsm")]
-mod hsm_tree;
-mod kw;
 #[cfg(any(feature = "fsm", feature = "hsm"))]
 mod machine_config;
 #[cfg(any(feature = "fsm", feature = "hsm"))]
 mod state_config;
+
+// --- FSM-only modules ---
+#[cfg(feature = "fsm")]
+mod fsm;
+#[cfg(feature = "fsm")]
+mod fsm_graph;
+
+// --- HSM-only modules ---
+#[cfg(feature = "hsm")]
+mod hsm;
+#[cfg(feature = "hsm")]
+mod hsm_tree;
 
 use proc_macro::TokenStream;
 
@@ -68,36 +75,61 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 ///
 /// # EBNF Syntax
 ///
+/// The syntax for the state machine macros shares many common definitions.
+///
 /// ```ebnf
-/// hsm ::= [ machine_config, ',', ], state_node, { ',', component }, [ ',', config_fn ];
-/// machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')';
-/// machine_config_param ::= 'history_capacity', '=', integer_literal
-///                        | ( 'init_state' | 'curr_state' ), '=', state_ref;
-/// state_node ::= state_attribute, [ ':', state_name ], [ '(', { state_content }, ')' ];
-/// state_content ::= ( state_node | component ), { ',', ( state_node | component ) };
+/// (* ---- Common Definitions ---- *)
+///
+/// machine_config ::= 'init', '(', [ machine_config_param, { ',', machine_config_param } ], ')'
+/// machine_config_param ::= ( 'init_state' | 'curr_state' ), '=', state_ref
+///                        | 'history_capacity', '=', integer_literal (* "history" feature *)
+///
+/// config_fn ::= ':', ( fn_identifier | expr_closure | expr_call )
+///
+/// state_ref ::= identifier | integer_literal
+///
+/// component ::= (* Any valid Rust expression that resolves to a component *)
+///
 /// state_attribute ::= '#[state', [ '(', state_attribute_param, { ',', state_attribute_param }, ')' ], ']'
-///                   | '#[state_data(', component, { ',', component }, ')]';
-/// state_attribute_param ::= ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
-///                         | ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
+/// state_attribute_param ::= ( 'before_enter' | 'after_enter' | 'before_exit' | 'after_exit' ), '=', action_id
 ///                         | 'on_update', '=', lit_str
+///                         | ( 'guard_enter' | 'guard_exit' ), '=', guard_expression
 ///                         | 'strategy', '=', ( 'Nested' | 'Parallel' )
 ///                         | 'behavior', '=', ( 'Rebirth' | 'Resurrection' | 'Death' )
-///                         | 'fsm_blueprint', '=', rust_expression
-///                         | 'minimal';
-/// config_fn ::= ':', ( expr_closure | fn_identifier | expr_call );
-/// component ::= rust_expression; (* Any valid Bevy component *)
-/// state_name ::= identifier; (* The name of the state *)
-/// state_ref ::= identifier | integer_literal;
+///                         | 'state_scene', '=', expr_bsn
+///                         | 'fsm_blueprint', '=', rust_expression (* "hybrid" feature *)
+///                         | 'minimal'
+///
 /// action_id ::= lit_str
 ///             | fn_identifier
-///             | action_name, ':', ( expr_closure | expr_call | fn_identifier );
-/// action_name ::= identifier;
-/// identifier ::= (* Rust identifier, e.g., MyState, StateA *);
-/// lit_str ::= (* Rust string literal, e.g., "my_system" *);
-/// rust_expression ::= (* Any valid Rust expression *);
-/// expr_closure ::= (* Rust closure, e.g., |entity_commands: EntityCommands, states: &[Entity]| { ... } *);
-/// fn_identifier ::= (* Rust function identifier, e.g., my_function *, with signature `fn(EntityCommands, &[Entity]){ ... }` *);
-/// expr_call ::= (* Any valid Rust function call expression, e.g., my_function(a, b) *);
+///             | action_name, ':', ( expr_closure | expr_call | fn_identifier )
+///
+/// guard_expression ::= (* See combination_condition! macro for details *)
+///
+/// expr_bsn ::= '{' bsn '}' | '[' bsn_list ']'
+///
+/// (* ---- hsm! Macro ---- *)
+///
+/// (*
+///  * The hsm! macro is flexible. It requires one root state_node, and allows at most one
+///  * machine_config and one config_fn. Components can be freely interspersed.
+///  * A typical structure is shown below.
+///  *)
+/// hsm ::= [ machine_config, ',' ], state_node, { ',', component }, [ ',', config_fn ]
+///
+/// state_node ::= state_attribute, [ ':', identifier ], [ '(', { hsm_state_content }, ')' ]
+/// hsm_state_content ::= ( state_node | component ), { ',', ( state_node | component ) }
+///
+/// (* ---- Shared Primitives ---- *)
+///
+/// fn_identifier ::= (* A Rust path to a function, e.g., my_function *)
+/// expr_closure ::= (* A Rust closure, e.g., |...| { ... } *)
+/// expr_call ::= (* A Rust function call, e.g., my_function(a, b) *)
+/// action_name ::= identifier
+/// identifier ::= (* A Rust identifier, e.g., MyState, StateA *)
+/// integer_literal ::= (* A Rust integer literal, e.g., 0, 42 *)
+/// lit_str ::= (* A Rust string literal, e.g., "my_system" *)
+/// rust_expression ::= (* Any valid Rust expression *)
 /// ```
 ///
 /// # Example
@@ -121,7 +153,7 @@ pub fn combination_condition(item: TokenStream) -> TokenStream {
 ///     ]);
 ///
 ///     commands.spawn(hsm!(
-///         #[state(after_enter=after_enter:on_enter_a, before_exit=on_exit_a)]: A(
+///         #[state(after_enter=on_enter_a, before_exit=on_exit_a)]: A(
 ///             #[state(after_enter="on_enter_b", before_exit="on_exit_b")]: B
 ///         ),
 ///         Name::new("MyHSM")
@@ -143,9 +175,9 @@ pub fn hsm(item: TokenStream) -> TokenStream {
 /// # EBNF Syntax
 ///
 /// ```ebnf
-/// hsm_tree ::= state_node, [ ',', config_fn ];
+/// hsm_tree ::= state_node, [ ',', config_fn ]
 ///
-/// (* The definitions of `state_node` and `config_fn` are identical to those in the `hsm!` macro. *)
+/// (* The definitions for `state_node` and `config_fn` are shared with the `hsm!` macro. *)
 /// ```
 ///
 /// # Example
@@ -178,14 +210,12 @@ pub fn hsm_tree(item: TokenStream) -> TokenStream {
 /// # EBNF Syntax
 ///
 /// ```ebnf
-/// fsm ::= [ machine_config, ',', ], fsm_graph, [ ',', 'components', ':', '{', [ component, { ',', component } ], '}' ], [ ',', config_fn ];
-/// fsm_graph ::= 'states', ':', '{', state_definition, { ',', state_definition }, '}',
-///               'transitions', ':', '{', transition, { ',', transition }, '}';
-/// state_definition ::= state_attribute, [ ':', state_name ], [ '(', { component }, ')' ];
-/// transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ];
-/// transition_condition ::= 'event', '(', rust_expression ')' (* Event *)
-///                        | 'guard', '(', guard_expression ')'; (* Guard condition *)
-/// (* The definitions of `machine_config`, `state_ref`, `state_attribute`, `component`, `state_name`, `identifier`, `lit_str`, `rust_expression`, `config_fn`, `action_id` are the same as in the hsm! macro *)
+/// fsm ::= [ machine_config, ',' ], fsm_graph_content, [ ',', components_block ], [ ',', config_fn ]
+///
+/// components_block ::= 'components', ':', '{', [ component, { ',', component } ], '}'
+///
+/// (* `machine_config`, `config_fn`, and `component` are shared with the `hsm!` macro. *)
+/// (* `fsm_graph_content` is defined below. *)
 /// ```
 ///
 /// # Example
@@ -226,9 +256,19 @@ pub fn fsm(item: TokenStream) -> TokenStream {
 /// # EBNF Syntax
 ///
 /// ```ebnf
-/// fsm_graph! ::= fsm_graph, [ ',', config_fn ];
+/// fsm_graph ::= fsm_graph_content, [ ',', config_fn ]
 ///
-/// (* The definitions for `fsm_graph` and `config_fn` are identical to those in the `fsm!` macro. *)
+/// fsm_graph_content ::= 'states', ':', '{', [ fsm_state, { ',', fsm_state } ], '}',
+///                       [ ',' ],
+///                       'transitions', ':', '{', [ transition, { ',', transition } ], '}'
+///
+/// fsm_state ::= state_attribute, [ ':', identifier ], [ '(', { component }, ')' ]
+///
+/// transition ::= state_ref, ( '<=>' | '=>' | '<=' ), state_ref, [ ':', transition_condition ]
+/// transition_condition ::= 'event', '(', rust_expression, ')'
+///                        | 'guard', '(', guard_expression, ')'
+///
+/// (* Other definitions are shared with the `hsm!` macro. *)
 /// ```
 ///
 /// # Example
@@ -242,7 +282,7 @@ pub fn fsm(item: TokenStream) -> TokenStream {
 ///
 /// fn setup(mut commands: Commands) {
 ///     let graph = fsm_graph!(
-///         states<A>: {
+///         states: {
 ///             #[state]: A,
 ///             #[state]: B
 ///         },

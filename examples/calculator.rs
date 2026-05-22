@@ -87,6 +87,7 @@ struct HsmEntity(Entity);
 struct FsmMark;
 
 // --- 辅助系统和函数 ---
+#[allow(clippy::type_complexity)]
 fn debug_on_state(
     info: &str,
 ) -> impl Fn(In<ActionContext>, Query<&Name, Or<(With<HsmState>, With<FsmState>)>>) {
@@ -96,6 +97,7 @@ fn debug_on_state(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn debug_input_state(
     info: &str,
     f: impl Fn(EntityCommands),
@@ -467,13 +469,15 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
                 RightParenthesis => Operator, // e.g. (1) -> (1)+
                 RightParenthesis => RightParenthesis, // e.g. (1)) -> (1)))
             }
-            :|mut entity_commands: EntityCommands, states: &[Entity]| {
-                entity_commands.commands_mut().insert_resource(FsmStates {
-                    operand: states[1],
-                    operator: states[2],
-                    left_parenthesis: states[3],
-                    right_parenthesis: states[4],
-                });
+            :|entity_mut:&mut EntityWorldMut, states: &[Entity]| {
+                entity_mut.world_scope(|world| {
+                    world.insert_resource(FsmStates {
+                        operand: states[1],
+                        operator: states[2],
+                        left_parenthesis: states[3],
+                        right_parenthesis: states[4],
+                    });
+                })
             }
         })
         .id();
@@ -489,17 +493,18 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
             #[state(after_enter=on_toggle_sign, on_update="Update:hsm_exit_commands")]: ToggleSign,
         ),
         StateLifecycle::default(),
-        :|mut entity_commands:EntityCommands, ids:&[Entity]| {
-            let state_machine_id = entity_commands.id();
-
-            entity_commands.commands_mut().insert_resource(HsmEntity(state_machine_id));
+        :|entity_mut:&mut EntityWorldMut, ids:&[Entity]| {
+            let state_machine_id = entity_mut.id();
             let mut map = StateEntityMap::default();
             map.0.insert("ProcessingInput", ids[0]);
             map.0.insert("Clear", ids[1]);
             map.0.insert("Equals", ids[2]);
             map.0.insert("Backspace", ids[3]);
             map.0.insert("ToggleSign", ids[4]);
-            entity_commands.commands_mut().insert_resource(map);
+            entity_mut.world_scope(|world| {
+                world.insert_resource(HsmEntity(state_machine_id));
+                world.insert_resource(map);
+            })
         }
     });
 }

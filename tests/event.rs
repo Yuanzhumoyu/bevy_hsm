@@ -12,10 +12,10 @@ fn contradiction(_: In<GuardContext>) -> bool {
     false
 }
 
-fn spawn_state_ids(mut entity_commands: EntityCommands, ids: &[Entity]) {
-    entity_commands
-        .commands_mut()
-        .insert_resource(StateIds(ids.to_vec()));
+fn spawn_state_ids(entity_mut: &mut EntityWorldMut, ids: &[Entity]) {
+    entity_mut.world_scope(|world| {
+        world.insert_resource(StateIds(ids.to_vec()));
+    });
 }
 
 fn setup() -> App {

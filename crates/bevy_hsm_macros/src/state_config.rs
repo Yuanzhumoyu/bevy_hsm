@@ -1,4 +1,16 @@
-use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, spanned::Spanned};
+//! Types for parsing `#[state(...)]` attributes and emitting the
+//! corresponding component / scene / guard token streams.
+
+use syn::{
+    Ident, LitStr, Token, braced, bracketed,
+    parse::{self, Parse},
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::{self},
+};
+
+#[cfg(feature = "hybrid")]
+use syn::Expr;
 
 use crate::{
     action_id::ActionId,
@@ -7,6 +19,11 @@ use crate::{
     machine_config::ConfigFn,
 };
 
+/// Parsed content of a `#[state(...)]` attribute.
+///
+/// Each field corresponds to one named parameter inside the attribute.
+/// After parsing, call [`StateConfig::from_attrs`] to collect one or more
+/// `#[state]` attributes into a single config.
 #[derive(Debug, Default)]
 pub(crate) struct StateConfig {
     pub(crate) guard_enter: Option<GuardCondition>,
@@ -18,21 +35,16 @@ pub(crate) struct StateConfig {
     before_exit: Option<ActionId>,
     pub(crate) strategy: Option<Ident>,
     pub(crate) behavior: Option<Ident>,
+    pub(crate) scene: Option<StateScene>,
     #[cfg(feature = "hybrid")]
     pub(crate) fsm_blueprint: Option<Expr>,
     pub(crate) minimal: bool,
-    #[cfg(feature = "state_data")]
-    pub(crate) state_datas: Punctuated<Expr, Token![,]>,
 }
 
 impl StateConfig {
+    /// Whether any FSM-relevant action fields are set.
     #[cfg(feature = "fsm")]
     pub fn is_fsm_any(&self) -> bool {
-        #[cfg(feature = "state_data")]
-        if !self.state_datas.is_empty() {
-            return true;
-        }
-
         self.before_enter.is_some()
             || self.after_exit.is_some()
             || self.on_update.is_some()
@@ -40,14 +52,11 @@ impl StateConfig {
             || self.before_exit.is_some()
     }
 
+    /// Whether any HSM-relevant action/guard/strategy fields are set.
     #[cfg(feature = "hsm")]
     pub fn is_hsm_any(&self) -> bool {
         #[cfg(feature = "hybrid")]
         if self.fsm_blueprint.is_some() {
-            return true;
-        }
-        #[cfg(feature = "state_data")]
-        if !self.state_datas.is_empty() {
             return true;
         }
 
@@ -102,6 +111,11 @@ impl StateConfig {
         }
     }
 
+    #[cfg(feature = "fsm")]
+    pub(crate) fn fsm_state_token_stream(&self) -> proc_macro2::TokenStream {
+        quote::quote! {FsmState::default(),}
+    }
+
     pub(crate) fn to_actions(&self, actions: &mut Vec<(LitStr, ConfigFn)>) {
         if let Some(enter) = &self.after_enter
             && let Some(action) = enter.to_action()
@@ -128,6 +142,8 @@ impl StateConfig {
         }
     }
 
+    /// Builds a [`StateConfig`] by parsing all `#[state(...)]` attributes
+    /// from a set of outer attributes.
     pub(crate) fn from_attrs(attrs: &[syn::Attribute]) -> syn::Result<Self> {
         let mut config: StateConfig = Self::default();
         for attr in attrs {
@@ -221,6 +237,12 @@ impl StateConfig {
                             }
                             config.behavior = Some(behavior);
                         }
+                        StateAttrType::StateScene(scene) => {
+                            if config.scene.is_some() {
+                                return Err(syn::Error::new(scene.span(), "scene already exists"));
+                            }
+                            config.scene = Some(scene);
+                        }
                         #[cfg(feature = "hybrid")]
                         StateAttrType::FsmBlueprint(fsm_blueprint) => {
                             if config.fsm_blueprint.is_some() {
@@ -236,31 +258,6 @@ impl StateConfig {
                         }
                     }
                 }
-            } else if attr.path().is_ident("state_data") {
-                let syn::Meta::List(list) = &attr.meta else {
-                    return Err(syn::Error::new(
-                        attr.span(),
-                        "Invalid state_data attribute format. Expected `#[state_data(...)]`",
-                    ));
-                };
-
-                let components =
-                    list.parse_args_with(Punctuated::<Expr, Token![,]>::parse_terminated)?;
-
-                if components.is_empty() {
-                    return Err(syn::Error::new(
-                        attr.span(),
-                        "state_data attribute must have at least one component",
-                    ));
-                }
-                #[cfg(not(feature = "state_data"))]
-                return Err(syn::Error::new(
-                    components.span(),
-                    "Looking forward to setting up project 'state_data' feature",
-                ));
-
-                #[cfg(feature = "state_data")]
-                config.state_datas.extend(components);
             }
         }
 
@@ -278,8 +275,6 @@ impl quote::ToTokens for StateConfig {
             on_update,
             after_enter,
             before_exit,
-            #[cfg(feature = "state_data")]
-            state_datas,
             ..
         } = self;
         if let Some(guard_enter) = guard_enter {
@@ -303,9 +298,81 @@ impl quote::ToTokens for StateConfig {
         if let Some(before_exit) = before_exit {
             tokens.extend(quote::quote! {BeforeExitSystem::new(#before_exit),});
         }
+    }
+}
+
+/// A `state_scene = bsn!{ ... }` expression parsed from `#[state(...)]`.
+///
+/// Generates a call to `world.create_state_scene_patch(...)` when the
+/// `state_data` feature is active; emits a compile error otherwise.
+#[derive(Debug)]
+pub struct StateScene {
+    #[allow(dead_code)]
+    bsn: ExprBsn,
+    #[allow(dead_code)]
+    span: proc_macro2::Span,
+}
+
+impl Parse for StateScene {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let span = input.span();
+        let bsn = input.parse::<ExprBsn>()?;
+        Ok(Self { bsn, span })
+    }
+}
+
+impl quote::ToTokens for StateScene {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        #[cfg(not(feature = "state_data"))]
+        {
+            tokens.extend(
+                syn::Error::new(
+                    self.span,
+                    "`state_scene` requires the `state_data` feature to be enabled",
+                )
+                .into_compile_error(),
+            );
+        }
         #[cfg(feature = "state_data")]
-        if !state_datas.is_empty() {
-            tokens.extend(quote::quote! {StateDataBundle::new((#state_datas)),});
+        {
+            let bsn = &self.bsn;
+            tokens.extend(quote::quote! {world.create_state_scene_patch(#bsn).unwrap()});
+        }
+    }
+}
+
+/// Wraps either a `bsn!{ ... }` or `bsn_list![ ... ]` scene expression.
+#[derive(Debug)]
+pub struct ExprBsn {
+    is_list: bool,
+    scene: proc_macro2::TokenStream,
+}
+
+impl Parse for ExprBsn {
+    fn parse(input: parse::ParseStream) -> syn::Result<Self> {
+        let content;
+        let lookahead = input.lookahead1();
+        let is_list = if lookahead.peek(token::Bracket) {
+            bracketed!(content in input);
+            true
+        } else if lookahead.peek(token::Brace) {
+            braced!(content in input);
+            false
+        } else {
+            return Err(lookahead.error());
+        };
+        let scene = proc_macro2::TokenStream::parse(&content)?;
+        Ok(Self { is_list, scene })
+    }
+}
+
+impl quote::ToTokens for ExprBsn {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let ExprBsn { is_list, scene } = self;
+        if *is_list {
+            tokens.extend(quote::quote! {bsn_list!(#scene)});
+        } else {
+            tokens.extend(quote::quote! {bsn!(#scene)});
         }
     }
 }
@@ -320,6 +387,7 @@ enum StateAttrType {
     BeforeExit(ActionId),
     Strategy(Ident),
     Behavior(Ident),
+    StateScene(StateScene),
     #[cfg(feature = "hybrid")]
     FsmBlueprint(Expr),
     Minimal,
@@ -379,6 +447,13 @@ impl Parse for StateAttrType {
                 &input,
             )?))
         } else {
+            if lookahead.peek(kw::state_scene) {
+                return Ok(StateAttrType::StateScene(parse_attr::<
+                    kw::state_scene,
+                    StateScene,
+                >(&input)?));
+            }
+
             #[cfg(feature = "hybrid")]
             if lookahead.peek(kw::fsm_blueprint) {
                 return Ok(StateAttrType::FsmBlueprint(parse_attr::<

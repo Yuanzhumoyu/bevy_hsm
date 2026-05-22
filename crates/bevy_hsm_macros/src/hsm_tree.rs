@@ -1,27 +1,22 @@
+//! Proc-macro implementation for the [`hsm_tree!`] macro.
+//!
+//! Parses a tree of `#[state]` nodes and emits a [`StateTree`] component.
+
 use std::ops::Range;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{Expr, Ident, LitStr, Token, parse::Parse, punctuated::Punctuated, token};
 
 use crate::{
-    action_id::{ActionRegistry, TransitionRegistry},
+    action_id::{ActionRegistrationList, TransitionRegistrationList},
     machine_config::ConfigFn,
     state_config::StateConfig,
 };
 
 pub fn hsm_tree_impl(item: TokenStream) -> TokenStream {
-    let HsmTreeImpl { tree, config_fn } = syn::parse_macro_input!(item as HsmTreeImpl);
-    quote! {
-        bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands|{
-            use bevy_hsm::prelude::*;
-            let mut commands = entity_commands.commands();
-            #tree
-            entity_commands.insert(state_tree)
-            #config_fn
-        })
-    }
-    .into()
+    let tree_impl = syn::parse_macro_input!(item as HsmTreeImpl);
+    tree_impl.to_token_stream().into()
 }
 
 struct HsmTreeImpl {
@@ -32,9 +27,11 @@ struct HsmTreeImpl {
 impl Parse for HsmTreeImpl {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let tree = input.parse::<StateNode>()?.into();
+
+        input.parse::<Option<Token![,]>>()?;
+
         let config_fn = if input.peek(Token![:]) {
-            input.parse::<Token![:]>()?;
-            Some(input.parse()?)
+            Some(input.parse::<ConfigFn>()?)
         } else {
             None
         };
@@ -43,11 +40,25 @@ impl Parse for HsmTreeImpl {
     }
 }
 
+impl quote::ToTokens for HsmTreeImpl {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let Self { tree, config_fn } = self;
+        tokens.extend(quote! {
+            bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_mut:&mut EntityWorldMut| {
+                use bevy_hsm::prelude::*;
+                #tree
+                entity_mut.insert(state_tree);
+                #config_fn
+            })
+        });
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct HsmTree {
     pub(crate) states: Vec<StateNodeImpl>,
-    transition_registry: TransitionRegistry,
-    action_registry: ActionRegistry,
+    transition_registry: TransitionRegistrationList,
+    action_registry: ActionRegistrationList,
     transitions: TransitionImpl,
 }
 
@@ -84,8 +95,8 @@ impl From<StateNode> for HsmTree {
         Self {
             states,
             transitions: TransitionImpl(transitions),
-            action_registry: ActionRegistry(action_registry),
-            transition_registry: TransitionRegistry(transition_registry),
+            action_registry: ActionRegistrationList(action_registry),
+            transition_registry: TransitionRegistrationList(transition_registry),
         }
     }
 }
@@ -98,10 +109,13 @@ impl quote::ToTokens for HsmTree {
             action_registry,
             transition_registry,
         } = self;
+        let ids_len = states.len();
         tokens.extend(quote::quote! {
             #action_registry
             #transition_registry
-            let ids = [#(commands.spawn((#states)).id()),*];
+            let ids = entity_mut.world_scope(move|world| -> [Entity; #ids_len] {
+                [#(#states.id()),*]
+            });
             let mut state_tree = StateTree::new(ids[0]);
             #transitions
         });
@@ -196,20 +210,28 @@ impl quote::ToTokens for StateNodeImpl {
             config,
             components,
         } = self;
+        let mut hsm_state = proc_macro2::TokenStream::default();
+
         if let Some(name) = name {
             let str = LitStr::new(name.to_string().as_str(), name.span());
-            tokens.extend(quote::quote! {Name::new(#str),});
+            hsm_state.extend(quote::quote! {Name::new(#str),});
         }
 
-        tokens.extend(config.hsm_state_token_stream());
+        hsm_state.extend(config.hsm_state_token_stream());
 
         if config.is_hsm_any() {
-            tokens.extend(quote::quote! {(#config),});
+            hsm_state.extend(quote::quote! {(#config),});
         }
 
         if !components.is_empty() {
-            tokens.extend(quote::quote! {(#components),});
+            hsm_state.extend(quote::quote! {(#components),});
         }
+
+        if let Some(scene) = &config.scene {
+            hsm_state.extend(quote::quote! {#scene,});
+        }
+
+        tokens.extend(quote::quote! {world.spawn((#hsm_state))});
     }
 }
 

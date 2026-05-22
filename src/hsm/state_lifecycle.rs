@@ -6,7 +6,7 @@ use bevy::{
 #[cfg(feature = "history")]
 use crate::hsm::history::HistoricalNode;
 #[cfg(feature = "state_data")]
-use crate::prelude::StateData;
+use crate::prelude::StateScenePatch;
 use crate::{
     context::{ActionContext, TransitionContext},
     error::StateMachineError,
@@ -232,9 +232,10 @@ impl StateLifecycle {
                 }
 
                 #[cfg(feature = "state_data")]
-                StateData::clone_components(
+                StateScenePatch::spawn_state_scene(
                     &mut world,
                     curr_state_id,
+                    state_machine_id,
                     state_context.service_target,
                 );
 
@@ -290,9 +291,10 @@ impl StateLifecycle {
                 Self::handle_hybrid_exit(&mut world, state_machine_id, curr_state_id);
 
                 #[cfg(feature = "state_data")]
-                StateData::remove_components(
+                StateScenePatch::reclaim_state_scene(
                     &mut world,
                     curr_state_id,
+                    state_machine_id,
                     state_context.service_target,
                 );
 

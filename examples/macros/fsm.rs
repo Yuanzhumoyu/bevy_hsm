@@ -3,13 +3,13 @@ use bevy_hsm::prelude::*;
 
 use bevy_hsm_macros::fsm;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ComponentA;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ComponentB;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ComponentC;
 
 #[derive(Component)]
@@ -37,14 +37,15 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
 
     commands.spawn(fsm!(
         states:{
-            #[state_data(ComponentA,ComponentB)]
-            #[state(after_enter="on_enter_name", before_exit="on_exit_name")]:state(
+            #[state(after_enter="on_enter_name", before_exit="on_exit_name", state_scene={
+                ComponentA
+                ComponentB
+                })]:state(
                 ComponentC,
                 ComponentD,
             ),
             #[state(after_enter="on_enter_name", before_exit="on_exit_name")]ComponentA,
-            #[state(after_enter="on_enter_name", before_exit="on_exit_name")]
-            #[state_data(ComponentC)]
+            #[state(after_enter="on_enter_name", before_exit="on_exit_name",state_scene={ComponentC})]
             (ComponentA,ComponentB),
             #[state(minimal)]:MinimalState
         },

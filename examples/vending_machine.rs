@@ -129,13 +129,13 @@ fn setup(
     let id = commands.register_system(on_enter_idle);
     action_registry.insert("on_enter_idle", id);
 
-    fn create_resource(mut entity_commands: EntityCommands, states: &[Entity]) {
-        entity_commands
-            .commands()
-            .insert_resource(VendingMachineStates {
+    fn create_resource(entity_mut: &mut EntityWorldMut, states: &[Entity]) {
+        entity_mut.world_scope(|world: &mut World| {
+            world.insert_resource(VendingMachineStates {
                 idle: states[0],
                 dispensing: states[1],
             });
+        });
     }
 
     commands.spawn(fsm! {

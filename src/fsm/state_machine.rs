@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[cfg(feature = "state_data")]
-use crate::state_data::StateData;
+use crate::state_data::{StateScenePatch, StateSceneReclaimer};
 
 #[cfg(feature = "history")]
 use crate::fsm::history::*;
@@ -156,7 +156,7 @@ impl FsmStateMachine {
         }
 
         #[cfg(feature = "state_data")]
-        StateData::clone_components(&mut world, curr_state, service_target);
+        StateScenePatch::spawn_state_scene(&mut world, curr_state, entity, service_target);
 
         let context = ActionContext::new(service_target, entity, curr_state);
 
@@ -190,7 +190,7 @@ impl FsmStateMachine {
         }
 
         #[cfg(feature = "state_data")]
-        StateData::remove_components(&mut world, curr_state, service_target);
+        StateScenePatch::reclaim_state_scene(&mut world, curr_state, entity, service_target);
 
         if let Some(id) =
             TransitionRegistry::get_transition_id::<AfterExitSystem>(&world, curr_state)
@@ -217,7 +217,14 @@ impl FsmStateMachine {
         guard_registry: Res<GuardRegistry>,
         fsm_graph: Query<&FsmGraph>,
         mut query: Query<&mut FsmStateMachine, Without<Paused>>,
-        #[cfg(feature = "state_data")] query_state_data: Query<&StateData, With<FsmState>>,
+        #[cfg(feature = "state_data")] query_state_scene_patch: Query<
+            &StateScenePatch,
+            With<FsmState>,
+        >,
+        #[cfg(feature = "state_data")] query_state_scene_reclaim: Query<
+            &mut StateSceneReclaimer,
+            With<FsmStateMachine>,
+        >,
     ) {
         let FsmTrigger {
             state_machine,
@@ -281,7 +288,9 @@ impl FsmStateMachine {
                         state_machine_id,
                         *target,
                         #[cfg(feature = "state_data")]
-                        &query_state_data,
+                        query_state_scene_patch,
+                        #[cfg(feature = "state_data")]
+                        query_state_scene_reclaim,
                     );
                 } else {
                     trace!(
@@ -302,7 +311,9 @@ impl FsmStateMachine {
                         state_machine_id,
                         target,
                         #[cfg(feature = "state_data")]
-                        &query_state_data,
+                        query_state_scene_patch,
+                        #[cfg(feature = "state_data")]
+                        query_state_scene_reclaim,
                     );
                 }
             }
@@ -316,7 +327,14 @@ impl FsmStateMachine {
         action_systems: &ActionSystems,
         state_machine_id: Entity,
         to: Entity,
-        #[cfg(feature = "state_data")] query_state_data: &Query<&StateData, With<FsmState>>,
+        #[cfg(feature = "state_data")] query_state_scene_patch: Query<
+            &StateScenePatch,
+            With<FsmState>,
+        >,
+        #[cfg(feature = "state_data")] mut query_state_scene_reclaim: Query<
+            &mut StateSceneReclaimer,
+            With<FsmStateMachine>,
+        >,
     ) {
         let from = self.curr_state_id();
         let service_target = action_systems.service_target(state_machine_id);
@@ -338,8 +356,10 @@ impl FsmStateMachine {
         action_systems.run_exit_action(from, context, commands);
 
         #[cfg(feature = "state_data")]
-        if let Ok(state_data) = query_state_data.get(from).cloned() {
-            commands.queue(state_data.remove_state_data_command(service_target));
+        if let Ok(mut reclaimer) = query_state_scene_reclaim.get_mut(state_machine_id)
+            && let Some(patch_result) = reclaimer.remove(from)
+        {
+            commands.queue(patch_result.reclaim_command(service_target));
         }
 
         let transition_context =
@@ -352,8 +372,12 @@ impl FsmStateMachine {
         action_systems.run_before_enter(to, transition_context, commands);
 
         #[cfg(feature = "state_data")]
-        if let Ok(state_data) = query_state_data.get(to).cloned() {
-            commands.queue(state_data.clone_state_data_command(to, service_target))
+        if let Ok(state_scene_patch) = query_state_scene_patch.get(to).cloned() {
+            commands.queue(state_scene_patch.apply_state_scene_command(
+                to,
+                state_machine_id,
+                service_target,
+            ))
         }
 
         let context = ActionContext::new(service_target, state_machine_id, to);
@@ -446,11 +470,12 @@ impl FsmStateMachine {
                 context.queue_system_command(id).apply(world)?;
 
                 #[cfg(feature = "state_data")]
-                if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
-                    state_data
-                        .remove_state_data_command(context.service_target)
-                        .apply(world);
-                }
+                StateScenePatch::reclaim_state_scene_command(
+                    context.state(),
+                    state_machine_id,
+                    service_target,
+                )
+                .apply(world);
             }
 
             if let Some(id) = after_exit_system_id {
@@ -479,9 +504,15 @@ impl FsmStateMachine {
 
             if let Some((id, context)) = on_enter_system_id {
                 #[cfg(feature = "state_data")]
-                if let Some(state_data) = world.get::<StateData>(context.state()).cloned() {
-                    state_data
-                        .clone_state_data_command(context.state(), context.service_target)
+                if let Some(state_scene_patch) =
+                    world.get::<StateScenePatch>(context.state()).cloned()
+                {
+                    state_scene_patch
+                        .apply_state_scene_command(
+                            context.state(),
+                            state_machine_id,
+                            context.service_target,
+                        )
                         .apply(world);
                 }
                 context.queue_system_command(id).apply(world)?;

@@ -19,7 +19,7 @@ fn is_down(_: In<GuardContext>, input: Res<ButtonInput<KeyCode>>) -> bool {
     input.just_pressed(KeyCode::ArrowDown)
 }
 
-#[derive(Component, Clone)]
+#[derive(Component, Default, Clone)]
 #[component(on_insert = Self::on_insert, on_remove = Self::on_remove)]
 struct StateAData;
 
@@ -58,8 +58,9 @@ fn setup(
         StateLifecycle::default(),
         Name::new("MyHSM"),
         #[state(after_enter="on_enter_name", before_exit="on_exit_name",behavior=Rebirth)]: Root(
-            #[state_data(StateAData)]
-            #[state(guard_enter="is_up", guard_exit="is_down", after_enter="on_enter_name", before_exit="on_exit_name")]: StateA(
+            #[state(guard_enter="is_up", guard_exit="is_down", after_enter="on_enter_name", before_exit="on_exit_name", 
+            state_scene={StateAData}
+            )]: StateA(
                 #[state(guard_enter="is_up", guard_exit="is_down", after_enter="on_enter_name", before_exit="on_exit_name")]: StateB
             )
         )
