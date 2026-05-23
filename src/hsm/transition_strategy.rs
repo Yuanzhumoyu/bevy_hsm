@@ -4,7 +4,7 @@ use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude
 
 use crate::{
     context::GuardContext,
-    error::StateMachineError,
+    error::{StateMachineError, error_event_world, warn_event, warn_event_world},
     hsm::{
         HsmState,
         state_lifecycle::StateLifecycle,
@@ -366,7 +366,11 @@ fn handle_enter_transitions(
         };
         commands.queue(move |world: &mut World| {
             let Some(state_tree) = world.get::<StateTree>(state_tree_id) else {
-                warn!("{}", StateMachineError::StateTreeNotFound(state_tree_id));
+                warn_event_world(
+                    world,
+                    state_machine_id,
+                    StateMachineError::StateTreeNotFound(state_tree_id),
+                );
                 return;
             };
             let sub_state_iter = state_tree.traversal_iter_with(world, curr_state_id, |e| {
@@ -396,14 +400,15 @@ fn handle_enter_transitions(
                             Ok(true) => return Some(sub_state_id),
                             Ok(false) => continue,
                             Err(e) => {
-                                error!(
-                                    "{}",
+                                error_event_world(
+                                    world,
+                                    state_machine_id,
                                     StateMachineError::GuardRunFailed {
                                         state_machine: state_machine_id,
                                         from_state: curr_state_id,
                                         to_state: Some(sub_state_id),
-                                        source: e.into(),
-                                    }
+                                        source: e.to_string(),
+                                    },
                                 );
                                 continue;
                             }
@@ -435,9 +440,10 @@ pub(super) fn handle_enter_transition(
 
         let mut service_target = world.entity_mut(state_machine_id);
         let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
-            warn!(
-                "{}",
-                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            warn_event_world(
+                world,
+                state_machine_id,
+                StateMachineError::HsmStateMachineMissing(state_machine_id),
             );
             return Ok(());
         };
@@ -476,16 +482,21 @@ fn handle_exit_transitions(
             continue;
         };
         let Ok(state_tree) = query_state_trees.get(state_tree_id) else {
-            warn!("{}", StateMachineError::StateTreeNotFound(state_tree_id));
+            warn_event(
+                &mut commands,
+                state_machine_id,
+                StateMachineError::StateTreeNotFound(state_tree_id),
+            );
             continue;
         };
         let Some(super_state_id) = state_tree.get_super_state(curr_state_id) else {
-            warn!(
-                "{}",
+            warn_event(
+                &mut commands,
+                state_machine_id,
                 StateMachineError::SuperStateNotFound {
                     state_tree: state_tree_id,
-                    state: curr_state_id
-                }
+                    state: curr_state_id,
+                },
             );
             continue;
         };
@@ -512,14 +523,15 @@ fn handle_exit_transitions(
                 Ok(true) => {}
                 Ok(false) => return Ok(()),
                 Err(e) => {
-                    error!(
-                        "{}",
+                    error_event_world(
+                        world,
+                        state_machine_id,
                         StateMachineError::GuardRunFailed {
                             state_machine: state_machine_id,
                             from_state: curr_state_id,
                             to_state: None,
-                            source: e.into(),
-                        }
+                            source: e.to_string(),
+                        },
                     );
                     return Ok(());
                 }
@@ -552,7 +564,11 @@ pub(super) fn handle_exit_transition(
             .get::<HsmState>(exit_state_id)
             .map(|state| (state.strategy, state.behavior))
         else {
-            warn!("{}", StateMachineError::HsmStateMissing(exit_state_id));
+            warn_event_world(
+                world,
+                state_machine_id,
+                StateMachineError::HsmStateMissing(exit_state_id),
+            );
             return Ok(());
         };
 
@@ -567,9 +583,10 @@ pub(super) fn handle_exit_transition(
 
         let mut service_target = world.entity_mut(state_machine_id);
         let Some(mut state_machine) = service_target.get_mut::<HsmStateMachine>() else {
-            warn!(
-                "{}",
-                StateMachineError::HsmStateMachineMissing(state_machine_id)
+            warn_event_world(
+                world,
+                state_machine_id,
+                StateMachineError::HsmStateMachineMissing(state_machine_id),
             );
             return Ok(());
         };

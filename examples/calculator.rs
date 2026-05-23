@@ -252,7 +252,7 @@ fn on_enter_operator(
 
     // for +, -, *, /
     if let Some(prev) = fsm.history.get_at(1)
-        && prev == fsm_states.operator
+        && prev.state_id() == fsm_states.operator
     {
         // This case handles replacing an operator (e.g., 5 + -)
         calculator.operator_stack.pop();

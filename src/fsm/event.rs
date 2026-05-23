@@ -89,6 +89,24 @@ impl FsmTrigger {
         }
     }
 
+    pub fn with_interrupt(
+        state_machine: Entity,
+        target_graph: Entity,
+        target_state: Entity,
+    ) -> Self {
+        Self {
+            state_machine,
+            typed: FsmTriggerType::interrupt(target_graph, target_state),
+        }
+    }
+
+    pub fn with_resume(state_machine: Entity) -> Self {
+        Self {
+            state_machine,
+            typed: FsmTriggerType::resume(),
+        }
+    }
+
     pub const fn state_machine(&self) -> Entity {
         self.state_machine
     }
@@ -106,6 +124,10 @@ pub enum FsmTriggerType {
     Guard(Entity),
     /// 根据事件跳转状态
     Event(Box<dyn StateEventType>),
+    /// 中断当前状态，保存到中断栈并跳转到目标图中的目标状态
+    Interrupt(Entity, Entity),
+    /// 从中断中恢复，返回到中断栈中最近保存的状态
+    Resume,
 }
 
 impl FsmTriggerType {
@@ -120,6 +142,14 @@ impl FsmTriggerType {
     pub fn event(event: impl StateEventType + 'static) -> Self {
         Self::Event(Box::new(event))
     }
+
+    pub const fn interrupt(target_graph: Entity, target_state: Entity) -> Self {
+        Self::Interrupt(target_graph, target_state)
+    }
+
+    pub const fn resume() -> Self {
+        Self::Resume
+    }
 }
 
 impl Debug for FsmTriggerType {
@@ -128,6 +158,12 @@ impl Debug for FsmTriggerType {
             Self::Next(target) => f.debug_tuple("Next").field(target).finish(),
             Self::Guard(target) => f.debug_tuple("Guard").field(target).finish(),
             Self::Event(event) => f.debug_tuple("Event").field(event).finish(),
+            Self::Interrupt(target_graph, target_state) => f
+                .debug_tuple("Interrupt")
+                .field(target_graph)
+                .field(target_state)
+                .finish(),
+            Self::Resume => write!(f, "Resume"),
         }
     }
 }

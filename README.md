@@ -25,6 +25,7 @@
     - `Resurrection`: 复活。返回到父状态的Update。
     - `Death`: 死亡。父状态也随之退出，并继续向上层传递退出行为。
 - **Bevy 范式**: 整体架构遵循 Bevy 的 ECS 设计哲学，由组件、事件和系统驱动，与引擎无缝集成。
+- **中断机制**: HSM 和 FSM 均支持中断/恢复（interrupt/resume）机制。通过中断保存当前状态，跳转到处理状态应对紧急事件，处理完毕后再恢复到之前保存的状态。基于栈的设计，天然支持嵌套中断。
 - **状态历史**: 内置状态转换历史记录功能，方便调试。
 
 ## 基本方法
@@ -54,6 +55,49 @@ fn main() {
 - `Paused`: 一个标记组件，用于临时“暂停”一个状态机，使其不响应任何转换。
 - `Terminated`: 一个标记组件，表示状态机已运行结束。
 
+### 中断状态机制
+
+HSM 和 FSM 均支持中断/恢复（interrupt/resume）机制，允许状态机临时挂起当前状态，跳转到指定的处理状态（可以在不同的状态图/树中）来响应紧急事件，处理完毕后再返回到之前保存的状态和状态图。这与硬件或操作系统中的"中断服务例程"概念类似。
+
+核心特性：
+
+- **基于栈**: 被中断的状态图和状态存储在栈上，天然支持嵌套中断（中断中再中断）。
+- **跨图中断**: 中断可以跳转到不同状态图/树中的目标状态，支持将正常行为和错误处理逻辑分离。
+- **自中断保护**: 向当前激活状态和图发起中断为无操作（no-op），不会产生副作用。
+- **空恢复保护**: 在没有发生中断时调用恢复操作会被安全忽略。
+- **独立于其他特性**: 中断机制是 FSM/HSM 核心的一部分，不依赖 `history` 或 `state_data` 等可选特性。
+
+**HSM 用法：**
+
+```rust
+// 保存当前状态并跳转到中断处理状态（可以在不同的状态树中）
+commands.trigger(HsmTrigger::interrupt(hsm_entity, error_tree_entity, error_handler_state));
+
+// 处理完紧急事件后，返回到之前保存的状态和树
+commands.trigger(HsmTrigger::resume(hsm_entity));
+```
+
+**FSM 用法：**
+
+```rust
+// 保存当前状态并跳转到中断处理状态（可以在不同的图中）
+commands.trigger(FsmTrigger::with_interrupt(fsm_entity, error_graph_entity, error_handler_state));
+
+// 处理完紧急事件后，返回到之前保存的状态
+commands.trigger(FsmTrigger::with_resume(fsm_entity));
+
+// 查询中断状态
+fn query_interrupt_status(query: Query<&FsmStateMachine>) {
+    for sm in &query {
+        if sm.is_interrupted() {
+            println!("当前中断深度: {}", sm.interrupt_depth());
+        }
+    }
+}
+```
+
+随时可通过 `clear_interrupt_stack()` 清空中断栈，放弃所有待恢复的状态，使状态机保持在当前状态。
+
 **两种设计哲学：HSM vs. FSM**
 `bevy_hsm` 的核心在于它提供了两种不同设计哲学的状态机：
 
@@ -67,7 +111,7 @@ fn main() {
 HSM 的运行由其内部状态驱动，非常适合管理复杂的、有生命周期的行为。它的生命周期管理是**异步的、基于计划的**。它支持两种驱动模式：
 
 - **状态驱动 (自动)**: 通过 `StateLifecycle` 组件。这是一个特殊的组件，它的值 (`Enter`, `Update`, `Exit`) 决定了状态机当前所处的生命周期阶段。当需要进行状态转换时，系统会计算出一个详细的**转换计划**（一系列的进入和退出步骤），然后通过修改 `StateLifecycle` 的值来逐步、异步地驱动这个计划的执行。
-- **事件驱动 (手动)**: 通过发送 `HsmTrigger` 事件。这是一个 Bevy 事件，发送此事件会强制触发 HSM 进行一次状态转换。它同样会生成一个转换计划，并交由 `StateLifecycle` 驱动执行，提供了命令式的、精确的控制方式。
+- **事件驱动 (手动)**: 通过发送 `HsmTrigger` 事件。这是一个 Bevy 事件，发送此事件会强制触发 HSM 进行一次状态转换。它同样会生成一个转换计划，并交由 `StateLifecycle` 驱动执行，提供了命令式的、精确的控制方式。支持 `Interrupt` 和 `Resume` 触发类型，用于通过中断机制保存/恢复状态。
 - `StateTree`: 定义状态之间的父子层级关系。
 - `GuardEnter` / `GuardExit`: 附加在状态实体上的组件，用于指定进入或退出该状态的条件。
 
@@ -119,7 +163,7 @@ FSM 的运行完全由外部事件驱动，其生命周期管理是**同步的�
 
 - `FsmState`: 一个标记组件，用于将一个实体标识为 FSM 的状态。
 - `FsmStateMachine`: FSM 的核心组件，管理当前状态和图。
-- `FsmTrigger`: **FSM 的唯一事件引擎**。这是一个 Bevy 事件，用于驱动 FSM 进行状态转换。当事件被接收时，状态机会**立即、同步地**完成从退出旧状态到进入新状态的整个过程。
+- `FsmTrigger`: **FSM 的唯一事件引擎**。这是一个 Bevy 事件，用于驱动 FSM 进行状态转换。当事件被接收时，状态机会**立即、同步地**完成从退出旧状态到进入新状态的整个过程。支持多种触发类型：`Next`（无条件）、`Guard`（条件检查）、`Event`（事件驱动）、`Interrupt`（保存当前状态并跳转）和 `Resume`（恢复到已保存的状态）。
 - `FsmGraph`: 定义一个 FSM 中所有有效的转换路径。一个转换必须在图中被定义才能执行。
 
 ## 宏语法 (EBNF)

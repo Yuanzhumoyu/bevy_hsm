@@ -25,6 +25,7 @@ A powerful, hybrid state machine system designed for the [Bevy Game Engine](http
     - `Resurrection`: Returns to the parent state's OnUpdate.
     - `Death`: Causes the parent state to exit as well, propagating the exit behavior up the hierarchy.
 - **Bevy-Idiomatic**: The entire architecture follows Bevy's ECS paradigm, driven by components, events, and systems for seamless integration with the engine.
+- **Interrupt Mechanism**: Both HSM and FSM support an interrupt/resume mechanism. Save the current state via an interrupt, transition to a handler state to deal with urgent events, then resume back to the previously saved state. Supports nested interrupts via a stack-based design.
 - **State History**: Built-in state transition history for easier debugging.
 
 ## Basic Usage
@@ -54,6 +55,49 @@ fn main() {
 - `Paused`: A marker component to temporarily "pause" a state machine, making it unresponsive to any transitions.
 - `Terminated`: A marker component indicating that the state machine has finished its execution.
 
+### Interrupt State Mechanism
+
+Both HSM and FSM support an interrupt/resume mechanism, which allows the state machine to temporarily suspend its current state, jump to a designated handler state (potentially in a different state graph/tree) to process urgent events, and then return to the previously saved state and graph. This is similar to an "interrupt service routine" in hardware or operating systems.
+
+Key features:
+
+- **Stack-based**: Interrupted state graphs and states are stored on a stack, naturally supporting nested interrupts (interrupt within an interrupt).
+- **Cross-graph interrupts**: Interrupts can target states in a different state graph/tree, enabling separation of normal behavior and error-handling logic.
+- **Self-interrupt protection**: Interrupting to the currently active state and graph is a no-op.
+- **Empty resume protection**: Calling resume when no interrupt has occurred is safely ignored.
+- **Independent of other features**: The interrupt mechanism is part of the FSM/HSM core and does not depend on optional features like `history` or `state_data`.
+
+**HSM Usage:**
+
+```rust
+// Save current state and jump to the interrupt handler state (in a different state tree)
+commands.trigger(HsmTrigger::interrupt(hsm_entity, error_tree_entity, error_handler_state));
+
+// After handling the urgent event, return to the previously saved state and tree
+commands.trigger(HsmTrigger::resume(hsm_entity));
+```
+
+**FSM Usage:**
+
+```rust
+// Save current state and jump to the interrupt handler state (in a different graph)
+commands.trigger(FsmTrigger::with_interrupt(fsm_entity, error_graph_entity, error_handler_state));
+
+// After handling the urgent event, return to the previously saved state
+commands.trigger(FsmTrigger::with_resume(fsm_entity));
+
+// Query interrupt status
+fn query_interrupt_status(query: Query<&FsmStateMachine>) {
+    for sm in &query {
+        if sm.is_interrupted() {
+            println!("Interrupt depth: {}", sm.interrupt_depth());
+        }
+    }
+}
+```
+
+The interrupt stack can be cleared at any time via `clear_interrupt_stack()`, which abandons all pending resumes and keeps the state machine in its current state.
+
 **Two Design Philosophies: HSM vs. FSM**
 At its core, `bevy_hsm` offers two state machines with distinct design philosophies:
 
@@ -67,7 +111,7 @@ Understanding the difference between these two modes is key to using this librar
 The HSM is driven by its internal state, making it ideal for managing complex behaviors with lifecycles. Its lifecycle management is **asynchronous and plan-based**. It supports two driving modes:
 
 - **State-Driven (Automatic)**: Via the `StateLifecycle` component. This is a special component whose value (`Enter`, `Update`, `Exit`) determines the current lifecycle stage. When a transition is needed, the system calculates a detailed **transition plan** (a series of enter and exit steps) and then drives the execution of this plan asynchronously by modifying the `StateLifecycle` value.
-- **Event-Driven (Manual)**: By sending an `HsmTrigger` event. This is a Bevy event that, when sent, forces an HSM state transition. It also generates a transition plan, which is then driven by the `StateLifecycle`, providing an imperative and precise method of control.
+- **Event-Driven (Manual)**: By sending an `HsmTrigger` event. This is a Bevy event that, when sent, forces an HSM state transition. It also generates a transition plan, which is then driven by the `StateLifecycle`, providing an imperative and precise method of control. Supports `Interrupt` and `Resume` trigger types for saving/restoring state via the interrupt mechanism.
 - `StateTree`: Defines the parent-child hierarchical relationships between states.
 - `GuardEnter` / `GuardExit`: Components attached to state entities to specify the conditions for entering or exiting that state.
 
@@ -119,7 +163,7 @@ The FSM is driven entirely by external events, and its lifecycle management is *
 
 - `FsmState`: A marker component used to identify an entity as an FSM state.
 - `FsmStateMachine`: The core component of the FSM, managing the current state and graph.
-- `FsmTrigger`: **The sole event engine of the FSM**. This is a Bevy event used to drive FSM state transitions. When the event is received, the state machine **immediately and synchronously** completes the entire process from exiting the old state to entering the new one.
+- `FsmTrigger`: **The sole event engine of the FSM**. This is a Bevy event used to drive FSM state transitions. When the event is received, the state machine **immediately and synchronously** completes the entire process from exiting the old state to entering the new one. Supports multiple trigger types: `Next` (unconditional), `Guard` (condition-checked), `Event` (event-based), `Interrupt` (save state and jump to handler), and `Resume` (return to saved state).
 - `FsmGraph`: Defines all valid transition paths within an FSM. A transition must be defined in the graph to be executed.
 
 ## Macro Syntax (EBNF)

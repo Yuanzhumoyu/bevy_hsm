@@ -9,7 +9,7 @@ use crate::hsm::history::HistoricalNode;
 use crate::prelude::StateScenePatch;
 use crate::{
     context::{ActionContext, TransitionContext},
-    error::StateMachineError,
+    error::{StateMachineError, warn_event_world},
     hsm::state_machine::*,
     labels::SystemLabel,
     markers::Terminated,
@@ -175,7 +175,16 @@ impl StateLifecycle {
         let curr = Transition::with_lifecycle(curr_state_id, lifecycle);
         let prev = state_machine.push_prev_state(curr);
         #[cfg(feature = "history")]
-        state_machine.push_history(HistoricalNode::new(curr_state_id, lifecycle.into()));
+        {
+            let depth = state_machine.interrupt_depth();
+            let tree_id = state_machine.state_tree();
+            state_machine.push_history(HistoricalNode::new(
+                curr_state_id,
+                lifecycle.into(),
+                tree_id,
+                depth,
+            ));
+        }
 
         let state_context = ActionContext::new(service_target, state_machine_id, curr_state_id);
 
@@ -325,9 +334,10 @@ impl StateLifecycle {
 
         world.commands().queue(move |world: &mut World| {
             let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(state_machine_id) else {
-                warn!(
-                    "{}",
-                    StateMachineError::HsmStateMachineMissing(state_machine_id)
+                warn_event_world(
+                    world,
+                    state_machine_id,
+                    StateMachineError::HsmStateMachineMissing(state_machine_id),
                 );
                 return;
             };

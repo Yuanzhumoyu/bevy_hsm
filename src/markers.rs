@@ -88,6 +88,7 @@ impl Terminated {
             use crate::prelude::StateLifecycle;
 
             state_machine.clear_next_states();
+            state_machine.clear_interrupt_stack();
             #[cfg(feature = "history")]
             state_machine.clear_history();
 

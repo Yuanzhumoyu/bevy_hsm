@@ -55,6 +55,8 @@ pub mod fsm;
 pub mod guards;
 #[cfg(feature = "hsm")]
 pub mod hsm;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+pub mod interrupt;
 pub mod labels;
 pub mod markers;
 pub mod state_actions;
@@ -190,8 +192,8 @@ macro_rules! system_registry {
 
 pub mod prelude {
     pub use crate::{
-        StateMachinePlugin, action_dispatcher::*, context::*, guards::*, markers::*,
-        state_actions::*,
+        StateMachinePlugin, action_dispatcher::*, context::*, error::StateMachineErrorEvent,
+        guards::*, interrupt::*, markers::*, state_actions::*,
     };
 
     #[cfg(feature = "state_data")]
