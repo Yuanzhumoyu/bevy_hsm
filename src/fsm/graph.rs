@@ -201,7 +201,7 @@ impl FsmGraph {
         }
 
         let mut transitions = std::mem::take(&mut self.transitions);
-        let potential_roots: HashSet<Entity> = match transitions.remove(&state) {
+        let removed_state_successors: HashSet<Entity> = match transitions.remove(&state) {
             Some(outgoing) => outgoing.iter().collect(),
             None => {
                 self.transitions = transitions;
@@ -214,10 +214,15 @@ impl FsmGraph {
         for (&source, outgoing) in transitions.iter_mut() {
             outgoing.remove(state);
             all_nodes.insert(source);
-            all_nodes.extend(outgoing.iter());
             for successor in outgoing.iter() {
+                all_nodes.insert(successor);
                 predecessors.entry(successor).or_default().push(source);
             }
+        }
+
+        if all_nodes.is_empty() {
+            self.transitions = transitions;
+            return Some(Vec::new());
         }
 
         let mut all_components: Vec<HashSet<Entity>> = Vec::new();
@@ -274,7 +279,7 @@ impl FsmGraph {
                 }
             }
 
-            let init_state = potential_roots
+            let init_state = removed_state_successors
                 .iter()
                 .find(|&&root| component.contains(&root))
                 .copied()
@@ -286,15 +291,15 @@ impl FsmGraph {
             });
         }
 
-        let main_graph_index = all_graphs
-            .iter()
-            .position(|g| g.transitions.contains_key(&self.init_state))
-            .expect("Main graph component with init_state should always be found");
+        let main_graph_index = all_graphs.iter().position(|g| {
+            g.transitions.contains_key(&self.init_state) || g.init_state == self.init_state
+        });
 
-        let mut main_graph = all_graphs.remove(main_graph_index);
-        main_graph.set_init_state(self.init_state);
-
-        *self = main_graph;
+        if let Some(index) = main_graph_index {
+            let mut main_graph = all_graphs.remove(index);
+            main_graph.set_init_state(self.init_state);
+            *self = main_graph;
+        }
 
         Some(all_graphs)
     }
@@ -304,7 +309,7 @@ impl FsmGraph {
             return None;
         }
 
-        if from == to || self.is_bridge(from, to) {
+        if from == to || self.can_reach(from, to) {
             return None;
         }
 
@@ -339,15 +344,15 @@ impl FsmGraph {
             .into_iter()
             .partition(|(k, _)| component_nodes.contains(k));
 
-        let mut edge_emptys = HashSet::new();
+        let mut edge_empties = HashSet::new();
         for (node, outgoing) in remaining_transitions.iter_mut() {
             outgoing.retain(|e| !component_nodes.contains(e));
             if outgoing.is_empty() {
-                edge_emptys.insert(*node);
+                edge_empties.insert(*node);
             }
         }
 
-        remaining_transitions.retain(|e, _| !edge_emptys.contains(e));
+        remaining_transitions.retain(|e, _| !edge_empties.contains(e));
         self.transitions = remaining_transitions;
 
         let mut subgraph = FsmGraph {
@@ -394,7 +399,7 @@ impl FsmGraph {
         self
     }
 
-    pub fn is_bridge(&self, from: Entity, to: Entity) -> bool {
+    pub fn can_reach(&self, from: Entity, to: Entity) -> bool {
         if from == to {
             return true;
         }

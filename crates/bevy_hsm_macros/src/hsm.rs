@@ -63,6 +63,9 @@ impl Parse for Hsm {
             None
         };
 
+        // Consume optional trailing comma after init(...) per EBNF
+        input.parse::<Option<Token![,]>>()?;
+
         while !input.is_empty() {
             let fork = input.fork();
             let is_state = if let Ok(attrs) = fork.call(syn::Attribute::parse_outer) {

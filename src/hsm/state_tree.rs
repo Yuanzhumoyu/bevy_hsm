@@ -308,7 +308,7 @@ impl StateTree {
         // 收集从 `to` 到根的路径
         let mut to_path: Vec<Entity> = std::iter::once(to).chain(self.path_iter(to)).collect();
 
-        let lca_index = match from_path.iter().rev().zip(to_path.iter().rev()).try_fold(
+        let common_count = match from_path.iter().rev().zip(to_path.iter().rev()).try_fold(
             0,
             |acc, (a, b)| match a != b {
                 false => ControlFlow::Continue(acc + 1),
@@ -317,7 +317,13 @@ impl StateTree {
         ) {
             ControlFlow::Continue(i) => i,
             ControlFlow::Break(i) => i,
-        } - 1;
+        };
+
+        // No common ancestor found (e.g. states from different trees)
+        if common_count == 0 {
+            return None;
+        }
+        let lca_index = common_count - 1;
 
         from_path.truncate(from_path.len() - lca_index);
         to_path.truncate(to_path.len() - lca_index);

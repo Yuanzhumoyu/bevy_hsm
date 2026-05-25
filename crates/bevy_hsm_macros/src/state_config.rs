@@ -72,7 +72,7 @@ impl StateConfig {
     }
 
     #[cfg(feature = "hsm")]
-    pub fn is_hsm_state_any(&self) -> bool {
+    pub fn is_default_hsm_state(&self) -> bool {
         #[cfg(feature = "hybrid")]
         if self.fsm_blueprint.is_some() {
             return false;
@@ -82,7 +82,7 @@ impl StateConfig {
 
     #[cfg(feature = "hsm")]
     pub(super) fn hsm_state_token_stream(&self) -> proc_macro2::TokenStream {
-        if self.is_hsm_state_any() {
+        if self.is_default_hsm_state() {
             return quote::quote! {HsmState::default(),};
         }
 
@@ -147,117 +147,146 @@ impl StateConfig {
     pub(crate) fn from_attrs(attrs: &[syn::Attribute]) -> syn::Result<Self> {
         let mut config: StateConfig = Self::default();
         for attr in attrs {
-            if attr.path().is_ident("state") {
-                if matches!(attr.meta, syn::Meta::Path(_)) {
-                    continue;
-                }
-                let parsed_attrs =
-                    attr.parse_args_with(Punctuated::<StateAttrType, Token![,]>::parse_terminated)?;
+            if !attr.path().is_ident("state") {
+                continue;
+            }
+            if matches!(attr.meta, syn::Meta::Path(_)) {
+                continue;
+            }
+            let parsed_attrs =
+                attr.parse_args_with(Punctuated::<StateAttrType, Token![,]>::parse_terminated)?;
 
-                for state_attr in parsed_attrs {
-                    match state_attr {
-                        StateAttrType::GuardEnter(guard) => {
-                            if config.guard_enter.is_some() {
-                                return Err(syn::Error::new(
-                                    guard.span(),
-                                    "guard_enter already exists",
-                                ));
-                            }
-                            config.guard_enter = Some(guard);
+            for state_attr in parsed_attrs {
+                match state_attr {
+                    StateAttrType::GuardEnter(guard) => {
+                        if config.guard_enter.is_some() {
+                            return Err(syn::Error::new(
+                                guard.span(),
+                                "duplicate `guard_enter` attribute",
+                            ));
                         }
-                        StateAttrType::GuardExit(guard) => {
-                            if config.guard_exit.is_some() {
-                                return Err(syn::Error::new(
-                                    guard.span(),
-                                    "guard_exit already exists",
-                                ));
-                            }
-                            config.guard_exit = Some(guard);
+                        config.guard_enter = Some(guard);
+                    }
+                    StateAttrType::GuardExit(guard) => {
+                        if config.guard_exit.is_some() {
+                            return Err(syn::Error::new(
+                                guard.span(),
+                                "duplicate `guard_exit` attribute",
+                            ));
                         }
-                        StateAttrType::BeforeEnter(enter) => {
-                            if config.after_enter.is_some() {
-                                return Err(syn::Error::new(
-                                    enter.span(),
-                                    "after_enter already exists",
-                                ));
-                            }
-                            config.before_enter = Some(enter);
+                        config.guard_exit = Some(guard);
+                    }
+                    StateAttrType::BeforeEnter(enter) => {
+                        if config.before_enter.is_some() {
+                            return Err(syn::Error::new(
+                                enter.span(),
+                                "duplicate `before_enter` attribute",
+                            ));
                         }
-                        StateAttrType::AfterExit(exit) => {
-                            if config.before_exit.is_some() {
-                                return Err(syn::Error::new(
-                                    exit.span(),
-                                    "before_exit already exists",
-                                ));
-                            }
-                            config.after_exit = Some(exit);
+                        config.before_enter = Some(enter);
+                    }
+                    StateAttrType::AfterExit(exit) => {
+                        if config.after_exit.is_some() {
+                            return Err(syn::Error::new(
+                                exit.span(),
+                                "duplicate `after_exit` attribute",
+                            ));
                         }
-                        StateAttrType::OnUpdate(update) => {
-                            if config.on_update.is_some() {
-                                return Err(syn::Error::new(
-                                    update.span(),
-                                    "on_update already exists",
-                                ));
-                            }
-                            config.on_update = Some(update);
+                        config.after_exit = Some(exit);
+                    }
+                    StateAttrType::OnUpdate(update) => {
+                        if config.on_update.is_some() {
+                            return Err(syn::Error::new(
+                                update.span(),
+                                "duplicate `on_update` attribute",
+                            ));
                         }
-                        StateAttrType::AfterEnter(enter) => {
-                            if config.after_enter.is_some() {
-                                return Err(syn::Error::new(
-                                    enter.span(),
-                                    "after_enter already exists",
-                                ));
-                            }
-                            config.after_enter = Some(enter);
+                        config.on_update = Some(update);
+                    }
+                    StateAttrType::AfterEnter(enter) => {
+                        if config.after_enter.is_some() {
+                            return Err(syn::Error::new(
+                                enter.span(),
+                                "duplicate `after_enter` attribute",
+                            ));
                         }
-                        StateAttrType::BeforeExit(exit) => {
-                            if config.before_exit.is_some() {
-                                return Err(syn::Error::new(
-                                    exit.span(),
-                                    "before_exit already exists",
-                                ));
-                            }
-                            config.before_exit = Some(exit);
+                        config.after_enter = Some(enter);
+                    }
+                    StateAttrType::BeforeExit(exit) => {
+                        if config.before_exit.is_some() {
+                            return Err(syn::Error::new(
+                                exit.span(),
+                                "duplicate `before_exit` attribute",
+                            ));
                         }
-                        StateAttrType::Strategy(strategy) => {
-                            if config.strategy.is_some() {
-                                return Err(syn::Error::new(
-                                    strategy.span(),
-                                    "strategy already exists",
-                                ));
-                            }
-                            config.strategy = Some(strategy);
+                        config.before_exit = Some(exit);
+                    }
+                    StateAttrType::Strategy(strategy) => {
+                        if config.strategy.is_some() {
+                            return Err(syn::Error::new(
+                                strategy.span(),
+                                "duplicate `strategy` attribute",
+                            ));
                         }
-                        StateAttrType::Behavior(behavior) => {
-                            if config.behavior.is_some() {
-                                return Err(syn::Error::new(
-                                    behavior.span(),
-                                    "behavior already exists",
-                                ));
-                            }
-                            config.behavior = Some(behavior);
+                        config.strategy = Some(strategy);
+                    }
+                    StateAttrType::Behavior(behavior) => {
+                        if config.behavior.is_some() {
+                            return Err(syn::Error::new(
+                                behavior.span(),
+                                "duplicate `behavior` attribute",
+                            ));
                         }
-                        StateAttrType::StateScene(scene) => {
-                            if config.scene.is_some() {
-                                return Err(syn::Error::new(scene.span(), "scene already exists"));
-                            }
-                            config.scene = Some(scene);
+                        config.behavior = Some(behavior);
+                    }
+                    StateAttrType::StateScene(scene) => {
+                        if config.scene.is_some() {
+                            return Err(syn::Error::new(
+                                scene.span(),
+                                "duplicate `scene` attribute",
+                            ));
                         }
-                        #[cfg(feature = "hybrid")]
-                        StateAttrType::FsmBlueprint(fsm_blueprint) => {
-                            if config.fsm_blueprint.is_some() {
-                                return Err(syn::Error::new(
-                                    fsm_blueprint.span(),
-                                    "fsm_config already exists",
-                                ));
-                            }
-                            config.fsm_blueprint = Some(fsm_blueprint);
+                        config.scene = Some(scene);
+                    }
+                    #[cfg(feature = "hybrid")]
+                    StateAttrType::FsmBlueprint(fsm_blueprint) => {
+                        if config.fsm_blueprint.is_some() {
+                            return Err(syn::Error::new(
+                                fsm_blueprint.span(),
+                                "duplicate `fsm_blueprint` attribute",
+                            ));
                         }
-                        StateAttrType::Minimal => {
-                            config.minimal = true;
+                        config.fsm_blueprint = Some(fsm_blueprint);
+                    }
+                    StateAttrType::Minimal(span) => {
+                        if config.minimal {
+                            return Err(syn::Error::new(span, "duplicate `minimal` attribute"));
                         }
+                        config.minimal = true;
                     }
                 }
+            }
+        }
+
+        // Validate strategy / behavior enum values per EBNF
+        if let Some(ref strategy) = config.strategy {
+            let s = strategy.to_string();
+            if s != "Nested" && s != "Parallel" {
+                return Err(syn::Error::new_spanned(
+                    strategy,
+                    format!("unknown transition strategy `{s}`; expected `Nested` or `Parallel`"),
+                ));
+            }
+        }
+        if let Some(ref behavior) = config.behavior {
+            let b = behavior.to_string();
+            if b != "Rebirth" && b != "Resurrection" && b != "Death" {
+                return Err(syn::Error::new_spanned(
+                    behavior,
+                    format!(
+                        "unknown exit behavior `{b}`; expected `Rebirth`, `Resurrection`, or `Death`"
+                    ),
+                ));
             }
         }
 
@@ -390,7 +419,7 @@ enum StateAttrType {
     StateScene(StateScene),
     #[cfg(feature = "hybrid")]
     FsmBlueprint(Expr),
-    Minimal,
+    Minimal(proc_macro2::Span),
 }
 
 impl Parse for StateAttrType {
@@ -400,10 +429,12 @@ impl Parse for StateAttrType {
             input.parse::<Token![=]>()?;
             input.parse::<O>()
         }
+
         let lookahead = input.lookahead1();
+
         if lookahead.peek(kw::minimal) {
-            input.parse::<kw::minimal>()?;
-            Ok(StateAttrType::Minimal)
+            let minimal = input.parse::<kw::minimal>()?;
+            Ok(StateAttrType::Minimal(minimal.span()))
         } else if lookahead.peek(kw::guard_enter) {
             Ok(StateAttrType::GuardEnter(parse_attr::<
                 kw::guard_enter,
@@ -446,21 +477,22 @@ impl Parse for StateAttrType {
             Ok(StateAttrType::Behavior(parse_attr::<kw::behavior, Ident>(
                 &input,
             )?))
+        } else if lookahead.peek(kw::state_scene) {
+            Ok(StateAttrType::StateScene(parse_attr::<
+                kw::state_scene,
+                StateScene,
+            >(&input)?))
         } else {
-            if lookahead.peek(kw::state_scene) {
-                return Ok(StateAttrType::StateScene(parse_attr::<
-                    kw::state_scene,
-                    StateScene,
-                >(&input)?));
+            #[cfg(feature = "hybrid")]
+            {
+                if lookahead.peek(kw::fsm_blueprint) {
+                    return Ok(StateAttrType::FsmBlueprint(parse_attr::<
+                        kw::fsm_blueprint,
+                        Expr,
+                    >(&input)?));
+                }
             }
 
-            #[cfg(feature = "hybrid")]
-            if lookahead.peek(kw::fsm_blueprint) {
-                return Ok(StateAttrType::FsmBlueprint(parse_attr::<
-                    kw::fsm_blueprint,
-                    Expr,
-                >(&input)?));
-            }
             Err(lookahead.error())
         }
     }

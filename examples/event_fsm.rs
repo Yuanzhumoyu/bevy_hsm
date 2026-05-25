@@ -1,31 +1,41 @@
-//! # 简单 FSM / Simple FSM
+//! # 事件驱动有限状态机 / Event-Driven FSM
 //!
-//! 本示例演示事件驱动的有限状态机基本用法：
-//! - **事件转换 (Event Transition)**: 使用自定义事件在状态间切换
-//! - **BeforeEnter/AfterExit**: 转换系统在状态切换前后执行
-//! - **暂停/恢复**: Paused 标记暂停状态机 (暂停后事件被忽略)
+//! 本示例演示事件驱动的有限状态机：
+//! - **事件转换 (Event Transition)**: 当特定事件触发时切换到目标状态
+//! - **动作系统 (Action Systems)**: 进入/退出/更新时执行自定义逻辑
+//! - **暂停/恢复 (Pause/Resume)**: 使用 Paused 标记暂停状态机
 //!
-//! This example demonstrates basic event-driven FSM usage:
-//! - **Event transitions**: use custom events to switch between states
-//! - **BeforeEnter/AfterExit**: transition systems fire around state changes
-//! - **Pause/Resume**: Paused marker pauses the state machine (events ignored)
+//! This example demonstrates an event-driven finite state machine:
+//! - **Event transitions**: switch to target state when a specific event fires
+//! - **Action systems**: custom logic at enter/exit/update
+//! - **Pause/Resume**: pause the state machine with the Paused marker
 //!
 //! ## 状态结构 / State Structure
 //! ```text
-//! State A ──(ToggleEvent)──> State B
-//!    ^                        │
-//!    └───────(ToggleEvent)────┘
+//! Red ──(ToggleEvent)──> Green
+//!  ^                      │
+//!  └──────(ToggleEvent)───┘
 //! ```
 //!
 //! ## 操作 / Controls
-//! - **空格 / Space**: 发送 ToggleEvent, 在 A ↔ B 之间切换
-//! - **P**: 暂停/恢复状态机
+//! - **空格 / Space**: 发送 ToggleEvent, 在 Red ↔ Green 之间切换
+//! - **P**: 暂停/恢复状态机 (暂停后不再响应事件)
+//!
+//! ## 核心概念 / Core Concepts
+//! - `StateEvent`: 实现此 trait 的类型可作为事件触发转换
+//! - `FsmGraph::with_event(from, event, to)`: 注册事件转换
+//! - `FsmTrigger::with_event(sm, event)`: 向状态机发送事件
 
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
 // ── 自定义事件类型 / Custom Event Type ────────────────────────────
 
+/// 状态事件: 实现 StateEvent trait
+/// (需要 Clone + Eq + Hash + Send + Sync + Debug + 'static)
+///
+/// StateEvent: types implementing this trait can trigger transitions
+/// (requires Clone + Eq + Hash + Send + Sync + Debug + 'static)
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct ToggleEvent;
 
@@ -43,94 +53,77 @@ fn log_exit(In(ctx): In<ActionContext>, query: Query<&Name>) {
     }
 }
 
-fn log_on_transition(label: &str) -> impl Fn(In<TransitionContext>) {
-    let label = label.to_string();
-    move |ctx: In<TransitionContext>| {
-        info!("  → {:?} {}", ctx.relationship(), label);
-    }
-}
-
 fn log_update(contexts: In<Vec<ActionContext>>, query: Query<&Name>) -> Option<Vec<ActionContext>> {
-    for name in query.iter_many(contexts.iter().map(|c| c.state())) {
-        info!("--- Update [{}]", name);
+    for ctx in contexts.iter() {
+        if let Ok(name) = query.get(ctx.state()) {
+            info!("--- Update [{}]", name);
+        }
     }
     Some(contexts.0)
 }
 
 // ── 初始化 / Startup ──────────────────────────────────────────────
 
-fn setup(
-    mut commands: Commands,
-    mut action_registry: ResMut<ActionRegistry>,
-    mut transition_registry: ResMut<TransitionRegistry>,
-) {
+fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     action_registry.extend([
         ("log_enter", commands.register_system(log_enter)),
         ("log_exit", commands.register_system(log_exit)),
     ]);
-    transition_registry.extend([
-        (
-            "before_enter",
-            commands.register_system(log_on_transition("before enter")),
-        ),
-        (
-            "after_exit",
-            commands.register_system(log_on_transition("after exit")),
-        ),
-    ]);
 
-    let state_a = commands
+    // 创建状态实体 / Create state entities
+    let red = commands
         .spawn((
+            Name::new("Red"),
             FsmState,
-            Name::new("State A"),
-            BeforeEnterSystem::new("before_enter"),
-            AfterExitSystem::new("after_exit"),
             AfterEnterSystem::new("log_enter"),
+            BeforeExitSystem::new("log_exit"),
             OnUpdateSystem::new("Update:log_update"),
-            BeforeExitSystem::new("log_exit"),
         ))
         .id();
 
-    let state_b = commands
+    let green = commands
         .spawn((
+            Name::new("Green"),
             FsmState,
-            Name::new("State B"),
-            BeforeEnterSystem::new("before_enter"),
-            AfterExitSystem::new("after_exit"),
             AfterEnterSystem::new("log_enter"),
             BeforeExitSystem::new("log_exit"),
+            OnUpdateSystem::new("Update:log_update"),
         ))
         .id();
 
-    // 双向事件图 / Bidirectional event graph
-    let mut graph = FsmGraph::new(state_a);
+    // 构建 FSM 图: Red ←→ Green (通过 ToggleEvent)
+    // Build FSM graph: Red ←→ Green (via ToggleEvent)
+    let mut graph = FsmGraph::new(red);
     graph
-        .with_event(state_a, ToggleEvent, state_b)
-        .with_event(state_b, ToggleEvent, state_a);
+        .with_event(red, ToggleEvent, green)
+        .with_event(green, ToggleEvent, red);
 
     let graph_id = commands.spawn(graph).id();
 
+    // 生成 FSM 状态机 / Spawn FSM state machine
     commands.spawn((
         FsmStateMachine::with(
             graph_id,
-            state_a,
+            red, // 初始状态 / initial state
             #[cfg(feature = "history")]
             10,
         ),
-        Name::new("SimpleFSM"),
+        Name::new("EventFSM"),
     ));
 }
 
 // ── 输入处理 / Input Handling ─────────────────────────────────────
 
 fn handle_input(
-    mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     sm: Single<Entity, With<FsmStateMachine>>,
+    mut commands: Commands,
 ) {
-    let sm_entity = sm.entity();
+    let sm_entity = *sm;
 
     if keyboard.just_pressed(KeyCode::Space) {
+        // 发送 ToggleEvent — FsmTrigger 是 EntityEvent, 使用 World::trigger
+        // Send ToggleEvent — FsmTrigger is an EntityEvent, use World::trigger
         commands.queue(move |world: &mut World| {
             info!("Space: sending ToggleEvent");
             world.trigger(FsmTrigger::with_event(

@@ -1,3 +1,31 @@
+//! # 交互式计算器 / Interactive Calculator
+//!
+//! 本示例演示 HSM 与 FSM 混合架构的完整 GUI 应用：
+//! - **Hybrid 架构**: HSM 管理命令 (Clear/Equals/Backspace/ToggleSign), FSM 管理表达式解析 (Operand/Operator/Parenthesis)
+//! - **消息驱动**: 通过 `ButtonType` 消息传递 UI 按钮输入到状态机
+//! - **TransitionContext**: 在状态转换间插入隐式乘法 (e.g., `(` 前接数字自动补 `*`)
+//! - **状态历史**: HSM 使用 chain 方法在命令状态间导航, FSM 使用 next 方法做表达式状态转换
+//!
+//! This example demonstrates a full GUI app with hybrid HSM+FSM architecture:
+//! - **Hybrid architecture**: HSM manages commands (Clear/Equals/Backspace/ToggleSign), FSM manages expression parsing (Operand/Operator/Parenthesis)
+//! - **Message-driven**: UI button inputs are delivered to the state machine via `ButtonType` messages
+//! - **TransitionContext**: implicit multiplication inserted between states (e.g., number before `(` auto-inserts `*`)
+//! - **State history**: HSM uses chain for command navigation, FSM uses next for expression state transitions
+//!
+//! ## 状态结构 / State Structure
+//! ```text
+//! HSM: ProcessingInput (FsmBlueprint → FSM)
+//!  ├── Clear        (OnUpdate→ToSuper)
+//!  ├── Equals       (OnUpdate→ToSuper)
+//!  ├── Backspace    (OnUpdate→ToSuper)
+//!  └── ToggleSign   (OnUpdate→ToSuper)
+//!
+//! FSM: Start → Operand ↔ Operator ↔ LeftParenthesis ↔ RightParenthesis
+//! ```
+//!
+//! ## 操作 / Controls
+//! - **鼠标点击**: 虚拟键盘按钮输入数字、运算符和命令
+
 use bevy::{
     color::palettes::css::NAVY,
     ecs::system::EntityCommands,

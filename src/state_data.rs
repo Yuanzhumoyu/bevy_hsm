@@ -7,16 +7,47 @@ use bevy::{
     scene::{ScenePatch, SpawnSceneError},
 };
 
+/// # 状态场景补丁\State Scene Patch
+/// * 一个组件，包含预编译的场景补丁数据。当附加到 HSM 状态实体时，进入状态会自动应用补丁（添加组件/子实体），退出状态时会回收这些更改。
+/// - A component containing pre-compiled scene patch data. When attached to an HSM state entity,
+///   entering the state automatically applies the patch (adding components/children), and exiting
+///   reclaims those changes.
+///
+/// ## Example
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn setup(world: &mut World) {
+/// let patch = world
+///     .create_state_scene_patch(bsn! {
+///         SomeComponent
+///         Children[
+///             ChildComponent,
+///         ]
+///     })
+///     .unwrap();
+/// world.spawn((Name::new("MyState"), HsmState::default(), patch));
+/// # }
+/// ```
 #[derive(Component, Clone)]
 pub struct StateScenePatch(Arc<ScenePatch>);
 
+/// # 补丁结果\Patch Result
+/// * 记录场景补丁应用后新增的组件和子实体，用于退出状态时的精确回收。
+/// - Records the components and child entities added by a scene patch application,
+///   enabling precise reclamation on state exit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchResult {
+    /// 新增的组件 ID 列表\List of added component IDs
     pub components: Vec<ComponentId>,
+    /// 新增的子实体列表\List of added child entities
     pub children: Vec<Entity>,
 }
 
 impl PatchResult {
+    /// 回收补丁应用的所有更改：移除新增组件并销毁新增子实体。
+    ///
+    /// Reclaims all changes applied by the patch: removes added components and despawns added children.
     pub fn reclaim(&self, entity: &mut EntityWorldMut) {
         entity.remove_by_ids(&self.components);
         let world = unsafe { entity.world_mut() };
@@ -25,6 +56,9 @@ impl PatchResult {
         });
     }
 
+    /// 创建一个回收命令，用于延迟回收操作。
+    ///
+    /// Creates a reclamation command for deferred reclamation.
     pub fn reclaim_command(self, service_target: Entity) -> impl Command {
         move |world: &mut World| {
             self.reclaim(&mut world.entity_mut(service_target));
@@ -33,6 +67,10 @@ impl PatchResult {
 }
 
 impl StateScenePatch {
+    /// 在进入状态时应用场景补丁：从状态实体读取 [`StateScenePatch`] 并应用到服务目标实体。
+    ///
+    /// Applies the scene patch on state enter: reads [`StateScenePatch`] from the state entity
+    /// and applies it to the service target entity.
     pub fn spawn_state_scene(
         world: &mut DeferredWorld,
         state: Entity,
@@ -51,6 +89,10 @@ impl StateScenePatch {
             ));
     }
 
+    /// 在退出状态时回收场景补丁：从状态机实体的 [`StateSceneReclaimer`] 中移除并回收之前应用的补丁。
+    ///
+    /// Reclaims the scene patch on state exit: removes and reclaims a previously applied patch
+    /// from the state machine entity's [`StateSceneReclaimer`].
     pub fn reclaim_state_scene(
         world: &mut DeferredWorld,
         state: Entity,
@@ -106,6 +148,9 @@ impl StateScenePatch {
         }
     }
 
+    /// 从场景数据构建一个 [`StateScenePatch`]，加载并解析场景补丁。
+    ///
+    /// Constructs a [`StateScenePatch`] from scene data, loading and resolving the scene patch.
     #[inline]
     pub fn with<T: Scene>(
         assets: &AssetServer,
@@ -161,7 +206,14 @@ impl StateSceneReclaimer {
     }
 }
 
+/// # 状态场景扩展\State Scene Extension
+/// * 为 `World`、`EntityWorldMut`、`DeferredWorld` 提供创建 [`StateScenePatch`] 的便捷方法。
+/// - Provides convenience methods for creating [`StateScenePatch`] from
+///   `World`, `EntityWorldMut`, and `DeferredWorld`.
 pub trait StateSceneExt {
+    /// 使用 BSN 宏或场景数据创建状态场景补丁。
+    ///
+    /// Creates a state scene patch from BSN macro or scene data.
     fn create_state_scene_patch<T: Scene>(&self, scene: T) -> Result<StateScenePatch>;
 }
 

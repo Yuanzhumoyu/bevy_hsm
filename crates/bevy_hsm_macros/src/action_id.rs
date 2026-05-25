@@ -6,7 +6,7 @@
 //! them with the runtime [`ActionRegistry`] / [`TransitionRegistry`] resources.
 
 use proc_macro2::Span;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{LitStr, Token, parse::Parse, spanned::Spanned};
 
 use crate::machine_config::ConfigFn;
@@ -24,7 +24,7 @@ use crate::machine_config::ConfigFn;
 #[derive(Debug)]
 pub enum ActionId {
     Closure((syn::LitStr, syn::ExprClosure)),
-    FnIdent((Option<LitStr>, syn::Ident)),
+    FnIdent((Option<LitStr>, syn::Expr)),
     Call((syn::LitStr, syn::ExprCall)),
     ActionName(syn::LitStr),
 }
@@ -35,9 +35,9 @@ impl ActionId {
             ActionId::Closure(expr_closure) => expr_closure.0.span(),
             ActionId::Call(expr_call) => expr_call.0.span(),
             ActionId::ActionName(lit_str) => lit_str.span(),
-            ActionId::FnIdent(ident) => match &ident.0 {
+            ActionId::FnIdent(expr) => match &expr.0 {
                 Some(name) => name.span(),
-                None => ident.1.span(),
+                None => expr.1.span(),
             },
         }
     }
@@ -48,11 +48,11 @@ impl ActionId {
                 Some((name.clone(), ConfigFn::Closure(closure.clone())))
             }
             ActionId::Call((name, call)) => Some((name.clone(), ConfigFn::Call(call.clone()))),
-            ActionId::FnIdent((name, ident)) => {
-                let name = name
-                    .clone()
-                    .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
-                Some((name, ConfigFn::FnName(ident.clone())))
+            ActionId::FnIdent((name, expr)) => {
+                let name = name.clone().unwrap_or_else(|| {
+                    LitStr::new(&expr.to_token_stream().to_string(), expr.span())
+                });
+                Some((name, ConfigFn::FnName(expr.clone())))
             }
             ActionId::ActionName(_) => None,
         }
@@ -74,12 +74,7 @@ impl Parse for ActionId {
                     match expr {
                         syn::Expr::Closure(closure) => Self::Closure((name, closure)),
                         syn::Expr::Call(call) => Self::Call((name, call)),
-                        syn::Expr::Path(path) => {
-                            let Some(ident) = path.path.get_ident() else {
-                                return Err(syn::Error::new(path.span(), "expect function name"));
-                            };
-                            Self::FnIdent((Some(name), ident.clone()))
-                        }
+                        syn::Expr::Path(path) => Self::FnIdent((Some(name), syn::Expr::Path(path))),
                         _ => {
                             return Err(syn::Error::new(
                                 expr.span(),
@@ -88,7 +83,15 @@ impl Parse for ActionId {
                         }
                     }
                 }
-                false => Self::FnIdent((None, ident)),
+                false => {
+                    let path: syn::Path = ident.into();
+                    let expr = syn::Expr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path,
+                    });
+                    Self::FnIdent((None, expr))
+                }
             })
         } else {
             Err(lookahead.error())
@@ -105,7 +108,7 @@ impl quote::ToTokens for ActionId {
             ActionId::FnIdent((name, ident)) => {
                 let name_str = match name {
                     Some(name) => name,
-                    None => &LitStr::new(&ident.to_string(), ident.span()),
+                    None => &LitStr::new(&ident.to_token_stream().to_string(), ident.span()),
                 };
                 quote! {#name_str}
             }

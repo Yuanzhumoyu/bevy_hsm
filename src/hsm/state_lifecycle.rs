@@ -9,14 +9,14 @@ use crate::hsm::history::HistoricalNode;
 use crate::prelude::StateScenePatch;
 use crate::{
     context::{ActionContext, TransitionContext},
-    error::{StateMachineError, warn_event_world},
-    hsm::state_machine::*,
+    error::{StateMachineError, StateMachineErrorEvent, warn_event_world},
+    hsm::{state_machine::*, state_tree::StateTree, transition::Transition},
     labels::SystemLabel,
     markers::Terminated,
     prelude::{
         ActionRegistry, AfterEnterSystem, AfterExitSystem, BeforeEnterSystem, BeforeExitSystem,
-        CheckOnTransitionStates, OnUpdateSystem, ServiceTarget, StateActionBuffer,
-        TransitionRegistry,
+        CheckOnTransitionStates, GuardEnter, GuardExit, OnUpdateSystem, ServiceTarget,
+        StateActionBuffer, TransitionRegistry,
     },
 };
 
@@ -81,7 +81,7 @@ impl StateLifecycle {
         state_machine_id: Entity,
         state_id: Entity,
     ) -> Result<(), StateMachineError> {
-        use crate::{fsm::state_machine::NestedFsm, hsm::HsmState, prelude::FsmGraph};
+        use crate::{fsm::hybrid::NestedFsm, hsm::HsmState, prelude::FsmGraph};
         let Some(state) = world.get::<HsmState>(state_id) else {
             return Err(StateMachineError::HsmStateMissing(state_id));
         };
@@ -118,13 +118,16 @@ impl StateLifecycle {
 
     #[cfg(feature = "hybrid")]
     fn handle_hybrid_exit(world: &mut DeferredWorld, state_machine_id: Entity, state_id: Entity) {
-        use crate::{fsm::state_machine::HsmOwnedFsms, prelude::FsmStateMachine};
+        use crate::{fsm::hybrid::HsmOwnedFsms, prelude::FsmStateMachine};
 
+        // 当没有[`HsmOwnedFsms`]组件时直接退出, 直接退出
         let Some(mut mapping) = world.get_mut::<HsmOwnedFsms>(state_machine_id) else {
             return;
         };
 
-        let Some(_fsm_state_machine) = mapping.0.remove(&state_id) else {
+        // 当[`HsmOwnedFsms`]组件存储[`FsmStateMachine`]组件时, 才会执行退出操作
+        // 当没有[`FsmStateMachine`]组件时, 直接退出
+        let Some(fsm_state_machine) = mapping.0.remove(&state_id) else {
             return;
         };
 
@@ -137,7 +140,7 @@ impl StateLifecycle {
 
         #[cfg(feature = "history")]
         if let Ok([mut state_machine_mut, mut fsm_state_machine_mut]) =
-            world.get_entity_mut([state_machine_id, _fsm_state_machine])
+            world.get_entity_mut([state_machine_id, fsm_state_machine])
             && let Some(mut hsm) = state_machine_mut.get_mut::<HsmStateMachine>()
             && let Some(mut fsm) = fsm_state_machine_mut.get_mut::<FsmStateMachine>()
         {
@@ -145,7 +148,7 @@ impl StateLifecycle {
                 .set_last_state_fsm_history(state_id, fsm.history.take());
         }
 
-        world.commands().entity(_fsm_state_machine).despawn();
+        world.commands().entity(fsm_state_machine).despawn();
     }
 
     fn prepare_transition(
@@ -173,7 +176,7 @@ impl StateLifecycle {
 
         let curr_state_id = state_machine.curr_state_id();
         let curr = Transition::with_lifecycle(curr_state_id, lifecycle);
-        let prev = state_machine.push_prev_state(curr);
+        let prev = state_machine.replace_prev_state(curr);
         #[cfg(feature = "history")]
         {
             let depth = state_machine.interrupt_depth();
@@ -253,6 +256,29 @@ impl StateLifecycle {
         curr_transition: Transition,
         state_context: ActionContext,
     ) {
+        // When transitioning Update(parent) → Enter(child) via Nested
+        // strategy, the parent's OnUpdateSystem must be filtered so only
+        // the leaf state receives Update events. Remove from curr/next
+        // immediately (the filter alone only applies at the next swap).
+        if let (Transition::Update(prev_state_id), Transition::Enter(_)) =
+            (prev_transition, curr_transition)
+        {
+            StateActionBuffer::buffer_scope(
+                world.as_unsafe_world_cell(),
+                prev_state_id,
+                move |buff| {
+                    let parent_ctx = ActionContext::new(
+                        state_context.service_target,
+                        state_machine_id,
+                        prev_state_id,
+                    );
+                    buff.curr.remove(&parent_ctx);
+                    buff.next.remove(&parent_ctx);
+                    buff.add_filter(parent_ctx);
+                },
+            );
+        }
+
         let Some(relationship) = prev_transition.to_transition(curr_transition) else {
             return;
         };
@@ -266,6 +292,9 @@ impl StateLifecycle {
         #[cfg(feature = "hybrid")]
         if let Err(e) = Self::handle_hybrid_entry(world, state_machine_id, curr_state_id) {
             error!("{}", e);
+            world
+                .commands()
+                .trigger(StateMachineErrorEvent::new(state_machine_id, e));
         }
 
         #[cfg(feature = "state_data")]
@@ -290,8 +319,27 @@ impl StateLifecycle {
         curr_state_id: Entity,
         state_context: ActionContext,
     ) {
-        let mut check_on_transition_states = world.resource_mut::<CheckOnTransitionStates>();
-        check_on_transition_states.insert(state_machine_id);
+        // Only track for guard checking when guards actually exist
+        let has_guards = world
+            .get::<HsmStateMachine>(state_machine_id)
+            .is_some_and(|sm| {
+                let tree_id = sm.state_tree();
+                world.get::<StateTree>(tree_id).is_some_and(|tree| {
+                    world.entity(curr_state_id).contains::<GuardExit>()
+                        || tree
+                            .get_sub_states(curr_state_id)
+                            .map(|subs| {
+                                subs.iter()
+                                    .any(|&sub| world.entity(sub).contains::<GuardEnter>())
+                            })
+                            .unwrap_or(false)
+                })
+            });
+
+        if has_guards {
+            let mut check_on_transition_states = world.resource_mut::<CheckOnTransitionStates>();
+            check_on_transition_states.insert(state_machine_id);
+        }
 
         if world.entity(curr_state_id).contains::<OnUpdateSystem>() {
             StateActionBuffer::buffer_scope(

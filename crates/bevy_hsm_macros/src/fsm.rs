@@ -42,7 +42,10 @@ impl Parse for Fsm {
             None
         };
 
-        let fsm_graph = input.parse::<FsmGraph>()?;
+        // Consume optional trailing comma after init(...) per EBNF
+        input.parse::<Option<Token![,]>>()?;
+
+        let mut fsm_graph = input.parse::<FsmGraph>()?;
         input.parse::<Option<Token![,]>>()?;
 
         let components = match input.peek(kw::components) {
@@ -79,6 +82,9 @@ impl Parse for Fsm {
             }
             None => Default::default(),
         };
+
+        // Use the resolved init state as the graph's initial state.
+        fsm_graph.init_state_index = Some(machine_config.init_state);
 
         Ok(Fsm {
             machine_config,

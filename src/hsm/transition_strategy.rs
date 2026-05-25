@@ -1,5 +1,3 @@
-use std::{any::type_name, fmt::Debug, sync::Arc};
-
 use bevy::{ecs::schedule::ScheduleLabel, platform::collections::HashSet, prelude::*};
 
 use crate::{
@@ -8,185 +6,19 @@ use crate::{
     hsm::{
         HsmState,
         state_lifecycle::StateLifecycle,
-        state_machine::{Transition, *},
+        state_machine::*,
         state_tree::StateTree,
+        strategy::{get_hsm_state, get_state_tree},
+        transition::Transition,
     },
     markers::*,
-    prelude::{GuardEnter, GuardEnterCache, GuardExit, GuardExitCache, ServiceTarget},
+    prelude::{GuardEnter, GuardEnterCache, GuardExit, GuardExitCache},
 };
 
-/// 状态转换策略，用于控制状态转换行为
-///
-/// State transition strategy, used to control state transition behavior
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum StateTransitionStrategy {
-    /// 子状态嵌套转换：父状态保持激活，子状态进入和退出发生在父状态内部
-    ///
-    /// Sub state nested transition: The parent state remains active, and the sub state enters and exits occur within the parent state
-    /// ```toml
-    ///    super_state: after_enter
-    ///    sub_state: after_enter
-    ///    sub_state: before_exit
-    ///    super_state: before_exit
-    /// ```
-    #[default]
-    Nested,
-    /// 平级转换：父状态先退出，然后子状态进入和退出，最后可能重新进入父状态
-    ///
-    /// Level-to-level transition: The parent state exits first, followed by the entry and exit of the child state, and finally, the parent state may be re-entered
-    /// ```toml
-    ///    super_state: after_enter
-    ///    super_state: before_exit
-    ///    sub_state: after_enter
-    ///    sub_state: before_exit
-    /// ```
-    Parallel,
-}
-
-impl StateTransitionStrategy {
-    pub fn is_nested(&self) -> bool {
-        matches!(self, Self::Nested)
-    }
-
-    pub fn is_parallel(&self) -> bool {
-        matches!(self, Self::Parallel)
-    }
-}
-
-/// # 退出过渡状态行为\Exit Transition Behavior
-///
-/// * 用于定义状态在退出时的行为，包括重生、复活和死亡
-/// - Used to define the behavior of a state when exiting, including rebirth, resurrection, and death
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ExitTransitionBehavior {
-    /// # 重生\Rebirth
-    ///
-    /// 从sub_state退出后，重新进入super_state的enter阶段
-    ///
-    /// From sub_state exit, re-enter the super_state's after_enter phase
-    Rebirth,
-    /// # 复活\Resurrection
-    ///
-    /// 从sub_state退出后，进入super_state的update阶段
-    ///
-    /// From sub_state exit, enter the super_state's on_update phase
-    #[default]
-    Resurrection,
-    /// # 死亡\Death
-    ///
-    /// 从sub_state退出后，不再进入super_state, 而是向上层状态继续判断[ExitTransitionBehavior]和[StateTransitionStrategy]
-    ///
-    /// From sub_state exit, do not enter super_state, but continue to judge [ExitTransitionBehavior] and [StateTransitionStrategy] to the upper state
-    Death,
-}
-
-impl From<ExitTransitionBehavior> for StateLifecycle {
-    fn from(value: ExitTransitionBehavior) -> Self {
-        match value {
-            ExitTransitionBehavior::Rebirth => StateLifecycle::Enter,
-            ExitTransitionBehavior::Resurrection => StateLifecycle::Update,
-            ExitTransitionBehavior::Death => StateLifecycle::Exit,
-        }
-    }
-}
-
-impl From<StateLifecycle> for ExitTransitionBehavior {
-    fn from(value: StateLifecycle) -> Self {
-        match value {
-            StateLifecycle::Enter => ExitTransitionBehavior::Rebirth,
-            StateLifecycle::Update => ExitTransitionBehavior::Resurrection,
-            StateLifecycle::Exit => ExitTransitionBehavior::Death,
-        }
-    }
-}
-
-/// 一个用于定义子状态应如何遍历的 trait。
-///
-/// 此 trait 的实现将决定子状态在激活或其他操作中被考虑的顺序。
-pub trait StateTraversalStrategy: Send + Sync + 'static {
-    /// 给定一个子状态实体列表，按照期望的遍历顺序返回它们（取得所有权）。
-    fn traverse(&self, world: &World, children: Vec<Entity>) -> Vec<Entity>;
-
-    /// 返回遍历策略的名称。
-    fn name(&self) -> &'static str {
-        type_name::<Self>()
-    }
-}
-
-/// 一个包装结构体，用于持有动态的 `StateTraversalStrategy`。
-///
-/// 这允许在运行时互换使用不同的遍历策略。
-pub struct TraversalStrategy(pub(crate) Arc<dyn StateTraversalStrategy>);
-
-impl TraversalStrategy {
-    /// 使用给定的实现创建一个新的 `TraversalStrategy`。
-    pub fn new<T: StateTraversalStrategy>(strategy: T) -> Self {
-        Self(Arc::new(strategy))
-    }
-}
-
-impl Eq for TraversalStrategy {}
-
-impl PartialEq for TraversalStrategy {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.name() == other.0.name()
-    }
-}
-
-impl Clone for TraversalStrategy {
-    fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
-    }
-}
-
-impl Default for TraversalStrategy {
-    fn default() -> Self {
-        static SEQUENTIAL: std::sync::LazyLock<TraversalStrategy> =
-            std::sync::LazyLock::new(|| TraversalStrategy(Arc::new(SequentialTraversal)));
-        SEQUENTIAL.clone()
-    }
-}
-
-impl Debug for TraversalStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.name())
-    }
-}
-
-/// 一个基本的顺序遍历策略。
-///
-/// 此策略是零开销的透传——直接按提供的顺序返回子状态。
-pub struct SequentialTraversal;
-
-impl StateTraversalStrategy for SequentialTraversal {
-    fn traverse(&self, _world: &World, children: Vec<Entity>) -> Vec<Entity> {
-        children
-    }
-}
-
-/// 一个基本的逆序遍历策略
-///
-/// 此策略简单地按照提供的逆序返回子状态。
-pub struct ReverseTraversal;
-
-impl StateTraversalStrategy for ReverseTraversal {
-    fn traverse(&self, _world: &World, children: Vec<Entity>) -> Vec<Entity> {
-        children.into_iter().rev().collect()
-    }
-}
-
-fn get_state_tree(world: &World, state_tree_id: Entity) -> Result<&StateTree, StateMachineError> {
-    world
-        .get::<StateTree>(state_tree_id)
-        .ok_or(StateMachineError::StateTreeNotFound(state_tree_id))
-}
-
-fn get_hsm_state(world: &World, state: Entity) -> Result<HsmState, StateMachineError> {
-    world
-        .get::<HsmState>(state)
-        .copied()
-        .ok_or(StateMachineError::HsmStateMissing(state))
-}
+pub use super::strategy::{
+    ExitTransitionBehavior, ReverseTraversal, SequentialTraversal, StateTransitionStrategy,
+    StateTraversalStrategy, TraversalStrategy,
+};
 
 /// Builds the exit transition plan for a state given its strategy and behavior.
 ///
@@ -240,14 +72,15 @@ pub(crate) fn build_exit_transition_plan(
                     continue;
                 }
 
-                transition_queue.extend(build_exit_transition_plan(
+                let mut sub_plan = build_exit_transition_plan(
                     world,
                     state_tree_id,
                     super_state,
                     next_hsm_state.strategy,
                     next_hsm_state.behavior,
                     stop_at,
-                )?);
+                )?;
+                transition_queue.append(&mut sub_plan);
                 return Ok(transition_queue);
             }
 
@@ -258,13 +91,7 @@ pub(crate) fn build_exit_transition_plan(
 
             while let Some(super_state) = state_tree.get_super_state(state_id) {
                 if at_boundary(super_state) {
-                    return match behavior {
-                        ExitTransitionBehavior::Rebirth => Ok(vec![Transition::Enter(state_id)]),
-                        ExitTransitionBehavior::Resurrection => {
-                            Ok(vec![Transition::Update(state_id)])
-                        }
-                        ExitTransitionBehavior::Death => Ok(vec![Transition::End]),
-                    };
+                    break;
                 }
 
                 let next_hsm_state = get_hsm_state(world, super_state)?;
@@ -303,8 +130,12 @@ pub(crate) fn build_exit_transition_plan(
 pub(crate) fn build_enter_transition_plan(
     world: &World,
     enter_path: &[Entity],
-) -> bevy::prelude::Result<Vec<Transition>> {
-    use crate::prelude::StateTransitionStrategy::*;
+) -> Result<Vec<Transition>, StateMachineError> {
+    // Single-element path: used by cross-tree transitions when the target
+    // is the root of the destination tree. Just enter it directly.
+    if enter_path.len() == 1 {
+        return Ok(vec![Transition::Enter(enter_path[0])]);
+    }
 
     let mut transitions = Vec::with_capacity(enter_path.len() * 2);
 
@@ -315,7 +146,7 @@ pub(crate) fn build_enter_transition_plan(
     {
         let hsm = get_hsm_state(world, curr_state_id)?;
 
-        if hsm.strategy == Parallel && i != 0 {
+        if hsm.strategy == StateTransitionStrategy::Parallel && i != 0 {
             transitions.push(Transition::Exit(curr_state_id));
         }
         transitions.push(Transition::Enter(sub_state_id));
@@ -362,6 +193,11 @@ fn handle_enter_transitions(
             .get(curr_state_id)
             .map(|hsm_state| hsm_state.strategy)
         else {
+            warn_event(
+                &mut commands,
+                state_machine_id,
+                StateMachineError::HsmStateMissing(curr_state_id),
+            );
             continue;
         };
         commands.queue(move |world: &mut World| {
@@ -387,7 +223,8 @@ fn handle_enter_transitions(
                             continue;
                         };
 
-                        let service_target = get_service_target(world, state_machine_id);
+                        let service_target =
+                            crate::state_actions::get_service_target(world, state_machine_id);
                         match condition_id.run(
                             world,
                             GuardContext::new(
@@ -427,6 +264,13 @@ fn handle_enter_transitions(
     }
 }
 
+/// 处理进入转换：将状态机切换到子状态，根据策略决定是嵌套还是平级。
+///
+/// Handles enter transitions: switches the state machine to a child state,
+/// deciding between nested or parallel based on the strategy.
+///
+/// - `Nested`: 当前状态直接切换到子状态，触发 `Enter` 生命周期。
+/// - `Parallel`: 当前状态保持，子状态进入队列，触发 `Exit` 生命周期。
 pub(super) fn handle_enter_transition(
     state_machine_id: Entity,
     curr_state_id: Entity,
@@ -506,7 +350,8 @@ fn handle_exit_transitions(
                     .get(&curr_state_id)
                 {
                     Some(guard) => {
-                        let service_target = get_service_target(world, state_machine_id);
+                        let service_target =
+                            crate::state_actions::get_service_target(world, state_machine_id);
                         guard.run(
                             world,
                             GuardContext::new(
@@ -548,6 +393,10 @@ fn handle_exit_transitions(
     }
 }
 
+/// 处理退出转换：从当前状态退出到父状态，构建退出计划并推送到状态机队列。
+///
+/// Handles exit transitions: exits from the current state to its parent state,
+/// builds an exit plan and pushes it to the state machine's transition queue.
 #[inline]
 pub(super) fn handle_exit_transition(
     state_machine_id: Entity,
@@ -598,544 +447,6 @@ pub(super) fn handle_exit_transition(
     }
 }
 
-fn get_service_target(world: &World, state_machine_id: Entity) -> Entity {
-    world
-        .get::<ServiceTarget>(state_machine_id)
-        .map_or(state_machine_id, |st| st.0)
-}
-
 #[cfg(test)]
-mod tests {
-    use crate::{
-        StateMachinePlugin, context::*, guards::GuardRegistry, prelude::SystemState,
-        state_actions::*,
-    };
-
-    use super::*;
-
-    #[derive(Resource)]
-    struct DebugInfoCollector(Vec<String>);
-
-    #[derive(Component, Debug)]
-    struct Condition(bool);
-
-    fn log_on_enter(
-        entity: In<ActionContext>,
-        query: Query<&Name, With<HsmState>>,
-        mut collector: ResMut<DebugInfoCollector>,
-    ) {
-        let state_name = query
-            .get(entity.state())
-            .expect("State should have a Name component");
-        collector.0.push(format!("{}: Enter", state_name));
-    }
-
-    fn log_on_exit(
-        entity: In<ActionContext>,
-        query: Query<&Name, With<HsmState>>,
-        mut collector: ResMut<DebugInfoCollector>,
-    ) {
-        let state_name = query
-            .get(entity.state())
-            .expect("State should have a Name component");
-        collector.0.push(format!("{}: Exit", state_name));
-    }
-
-    fn is_condition_true(entity: In<GuardContext>, query: Query<&Condition>) -> bool {
-        let condition = query
-            .get(entity.state_machine)
-            .expect("State machine should have a Condition component");
-        condition.0
-    }
-
-    fn is_condition_false(entity: In<GuardContext>, query: Query<&Condition>) -> bool {
-        let condition = query
-            .get(entity.state_machine)
-            .expect("State machine should have a Condition component");
-        !condition.0
-    }
-
-    fn set_condition_false(
-        contexts: In<Vec<ActionContext>>,
-        mut query: Query<&mut Condition>,
-    ) -> Option<Vec<ActionContext>> {
-        let mut iter = query.iter_many_mut(contexts.0.iter().map(|a| a.state_machine));
-        while let Some(mut condition) = iter.fetch_next() {
-            condition.0 = false;
-        }
-        None
-    }
-
-    fn create_state_machine(
-        app: &mut App,
-        states: Vec<(StateTransitionStrategy, ExitTransitionBehavior)>,
-    ) {
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(StateMachinePlugin::default());
-
-        app.add_action_system(Update, "set_condition_false", set_condition_false);
-
-        let world = app.world_mut();
-        let systems = ActionRegistry::from([
-            ("log_on_enter", world.register_system(log_on_enter)),
-            ("log_on_exit", world.register_system(log_on_exit)),
-        ]);
-        world.insert_resource(systems);
-
-        let guard_registry = GuardRegistry::from([
-            (
-                "is_condition_true",
-                world.register_system(is_condition_true),
-            ),
-            (
-                "is_condition_false",
-                world.register_system(is_condition_false),
-            ),
-        ]);
-
-        world.insert_resource(guard_registry);
-
-        world.insert_resource(DebugInfoCollector(Vec::new()));
-
-        let start_id = world.spawn_empty().id();
-        let state_machine_id = world.spawn_empty().id();
-
-        let mut curr_state_id = world
-            .entity_mut(start_id)
-            .insert((
-                Name::new("OFF"),
-                HsmState::with(states[0].0, states[0].1),
-                AfterEnterSystem::new("log_on_enter"),
-                BeforeExitSystem::new("log_on_exit"),
-            ))
-            .id();
-        let mut state_tree = StateTree::new(curr_state_id);
-
-        for (i, (strategy, behavior)) in states[1..].iter().enumerate() {
-            let new_state_id = world
-                .spawn((
-                    Name::new(format!("ON{}", i)),
-                    HsmState::with(*strategy, *behavior),
-                    AfterEnterSystem::new("log_on_enter"),
-                    BeforeExitSystem::new("log_on_exit"),
-                    GuardEnter::new("is_condition_true"),
-                    GuardExit::new("is_condition_false"),
-                ))
-                .id();
-            state_tree.with_child(curr_state_id, new_state_id);
-            curr_state_id = new_state_id;
-        }
-
-        world
-            .entity_mut(curr_state_id)
-            .insert(OnUpdateSystem::new("Update:set_condition_false"));
-
-        world.entity_mut(state_machine_id).insert((
-            state_tree,
-            HsmStateMachine::with(
-                state_machine_id,
-                start_id,
-                #[cfg(feature = "history")]
-                10,
-            ),
-            Name::new("StateMachines"),
-            StateLifecycle::default(),
-            Condition(true),
-        ));
-    }
-
-    // strategy:Nested,Parallel,
-    // behavior:Rebirth,Resurrection,Death,
-    // 三进制表示法
-    // xx：第一位表示strategy，0为Nested，1为Parallel；后一位表示behavior，0为Rebirth，1为Resurrection，2为Death,
-
-    fn create_states_from_trinary(
-        trinary: &str,
-    ) -> Vec<(StateTransitionStrategy, ExitTransitionBehavior)> {
-        let mut states = Vec::new();
-        for c in trinary.split('_') {
-            let chars: Vec<char> = c.chars().collect();
-            let strategy = match chars[0] {
-                '0' => StateTransitionStrategy::Nested,
-                '1' => StateTransitionStrategy::Parallel,
-                _ => panic!("Invalid strategy character: {}", chars[0]),
-            };
-            let behavior = match &chars[1..] {
-                ['0'] => ExitTransitionBehavior::Rebirth,
-                ['1'] => ExitTransitionBehavior::Resurrection,
-                ['2'] => ExitTransitionBehavior::Death,
-                _ => panic!("Invalid behavior characters: {:?}", &chars[1..]),
-            };
-            states.push((strategy, behavior));
-        }
-        states
-    }
-
-    fn create_transition_strategy_test(v: Vec<(&str, Vec<&str>)>) {
-        for (i, (binary, expected)) in v.into_iter().enumerate() {
-            let mut app = App::new();
-            let states = create_states_from_trinary(binary);
-            create_state_machine(&mut app, states);
-            for _ in 0..expected.len() {
-                app.update();
-            }
-            let collector = app
-                .world()
-                .get_resource::<DebugInfoCollector>()
-                .expect("DebugInfoCollector missing in test app world");
-            assert_eq!(expected, collector.0, "error in strategy<{i}>: {}", binary);
-        }
-    }
-
-    #[test]
-    fn test_transition_strategies() {
-        create_transition_strategy_test(vec![
-            (
-                "00_00_00",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "00_00_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "00_01_00",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "00_01_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "01_00_00",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_00_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_01_00",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_01_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_01_02",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_02_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "01_02_02",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "02_01_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Exit",
-                ],
-            ),
-            (
-                "02_01_02",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Exit",
-                ],
-            ),
-            (
-                "02_02_01",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Exit",
-                ],
-            ),
-            (
-                "02_02_02",
-                vec![
-                    "OFF: Enter",
-                    "ON0: Enter",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Exit",
-                ],
-            ),
-            (
-                "10_10_10",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "10_10_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "10_11_10",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "10_11_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                    "OFF: Enter",
-                ],
-            ),
-            (
-                "11_10_10",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "11_10_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "11_11_10",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "11_11_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "11_11_12",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "11_12_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                ],
-            ),
-            (
-                "11_12_12",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                ],
-            ),
-            (
-                "12_11_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "12_11_12",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                    "ON0: Exit",
-                ],
-            ),
-            (
-                "12_12_11",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                ],
-            ),
-            (
-                "12_12_12",
-                vec![
-                    "OFF: Enter",
-                    "OFF: Exit",
-                    "ON0: Enter",
-                    "ON0: Exit",
-                    "ON1: Enter",
-                    "ON1: Exit",
-                ],
-            ),
-        ]);
-    }
-}
+#[path = "../tests/hsm_transition_strategy_tests.rs"]
+mod tests;

@@ -11,6 +11,7 @@ pub(super) enum Token {
     LeftParen,
     RightParen,
     Comma,
+    Invalid(char),
 }
 
 /// 用于解析守卫条件的词法分析器。
@@ -71,7 +72,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Some(Token::Comma)
                 }
-                c if c.is_alphabetic() => {
+                c if c.is_alphabetic() || c == '_' => {
                     let mut identifier = String::new();
                     while let Some(ch) = self.current_char {
                         if ch.is_alphanumeric() || ch == '_' {
@@ -83,9 +84,9 @@ impl<'a> Lexer<'a> {
                     }
                     Some(Token::Identifier(identifier))
                 }
-                _ => {
+                c => {
                     self.advance();
-                    None
+                    Some(Token::Invalid(c))
                 }
             }
         } else {
@@ -150,6 +151,7 @@ impl<'a> Parser<'a> {
                 let id = self.expect_identifier()?;
                 Ok(GuardCondition::Id(SystemLabel::from(id)))
             }
+            Some(Token::Invalid(c)) => Err(GuardConditionParseError::InvalidCharacter(*c)),
             Some(tok) => Err(GuardConditionParseError::UnexpectedToken(format!(
                 "{:?}",
                 tok

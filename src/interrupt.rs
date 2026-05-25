@@ -46,6 +46,13 @@ impl InterruptStack {
         self.0.push(InterruptFrame::new(graph_id, saved_state));
     }
 
+    /// 查看栈顶的中断帧而不弹出
+    ///
+    /// Peek at the top interrupt frame without popping it
+    pub fn peek_interrupt(&self) -> Option<InterruptFrame> {
+        self.0.last().copied()
+    }
+
     /// 从中断栈弹出最近被中断的状态帧
     ///
     /// Pop the most recently interrupted frame from the interrupt stack

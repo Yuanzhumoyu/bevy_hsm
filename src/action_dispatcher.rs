@@ -474,12 +474,19 @@ impl StateActionBuffer {
     /// - Can add or modify state contexts in the scope
     /// * 作用域结束后，会自动更新缓存
     /// - The scope will automatically update the cache after ending
-    pub fn buffer_scope(
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `world` is an `UnsafeWorldCell` obtained from within
+    /// a system or hook context. Calling this from outside a Bevy system context results
+    /// in undefined behavior.
+    pub(crate) fn buffer_scope(
         world: UnsafeWorldCell,
         state_id: Entity,
         f: impl FnOnce(&mut StateActionBuffer) + 'static,
     ) {
-        // SAFETY: 该函数必须在系统中调用，并且保证在调用过程中不会有并发访问 `World` 的情况发生。
+        // SAFETY: The caller must guarantee this is invoked from within a Bevy system or
+        // hook, where no other code holds a mutable reference to the world.
         let world = unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<OnUpdateSystem>(state_id) else {
             return;
@@ -778,11 +785,12 @@ impl ActionSystemRegistry {
         &mut self,
         action_name: &SystemLabel,
     ) -> Option<ActionSystemSet> {
-        let new = ActionSystemSet(self.counter);
-        self.counter += 1;
         self.systems.get_mut(&TypeId::of::<T>()).and_then(|map| {
-            map.get_mut(action_name)
-                .map(|old| std::mem::replace(old, new))
+            map.get_mut(action_name).map(|old| {
+                let new = ActionSystemSet(self.counter);
+                self.counter += 1;
+                std::mem::replace(old, new)
+            })
         })
     }
 }

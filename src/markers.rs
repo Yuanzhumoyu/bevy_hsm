@@ -124,13 +124,12 @@ impl Paused {
             let Some(state_machine) = world.get::<HsmStateMachine>(entity) else {
                 break 'hsm;
             };
-            // 查看当前状态是否有OnUpdateSystem,则将其添加进延期表中
             let curr_state_id = state_machine.curr_state_id();
             let state_context = ActionContext::new(service_target, entity, curr_state_id);
 
             let unsafe_world_cell = world.as_unsafe_world_cell();
             StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
-                buff.add(state_context);
+                buff.add_filter(state_context);
             });
         }
 
@@ -187,6 +186,24 @@ impl Paused {
     }
 }
 
+/// # 延迟生成状态机组件\Deferred State Machine Spawner
+/// * 一个包装组件，允许通过闭包延迟创建状态机。插入实体时会自动执行闭包并移除自身。
+/// - A wrapper component that allows deferred state machine creation via a closure.
+///   Executes the closure automatically on insert and removes itself.
+///
+/// ## Example
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use bevy_hsm::prelude::*;
+/// # fn setup(mut commands: Commands) {
+/// commands.spawn(SpawnStateMachine::new(|entity| {
+///     entity.insert(HsmStateMachine::with(
+///         entity.id(), entity.id(),
+///         #[cfg(feature = "history")] 10,
+///     ));
+/// }));
+/// # }
+/// ```
 #[derive(Component, Clone)]
 #[component(on_insert=Self::on_insert)]
 pub struct SpawnStateMachine(
@@ -194,6 +211,9 @@ pub struct SpawnStateMachine(
 );
 
 impl SpawnStateMachine {
+    /// 创建一个新的 [`SpawnStateMachine`]，传入一个在插入时执行的闭包。
+    ///
+    /// Creates a new [`SpawnStateMachine`] with a closure that runs on insert.
     pub fn new<F>(f: F) -> Self
     where
         F: for<'w> Fn(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync,

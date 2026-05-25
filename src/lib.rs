@@ -211,8 +211,15 @@ pub mod prelude {
     #[cfg(feature = "fsm")]
     pub use crate::fsm::{FsmState, event::*, graph::*, state_machine::*};
 
+    #[cfg(feature = "hybrid")]
+    pub use crate::fsm::hybrid::*;
+
     #[cfg(feature = "fsm")]
     pub use bevy_hsm_macros::{fsm, fsm_graph};
 
     pub use bevy_hsm_macros::combination_condition;
 }
+
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod tests;

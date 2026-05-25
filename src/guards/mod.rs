@@ -18,6 +18,7 @@ pub enum GuardConditionParseError {
     InvalidOperator(String),
     TooFewOperands(String),
     TrailingToken(String),
+    InvalidCharacter(char),
 }
 
 impl Display for GuardConditionParseError {
@@ -33,6 +34,9 @@ impl Display for GuardConditionParseError {
                 write!(f, "operator '{}' needs at least 2 operands", op)
             }
             GuardConditionParseError::TrailingToken(tok) => write!(f, "trailing token: {}", tok),
+            GuardConditionParseError::InvalidCharacter(c) => {
+                write!(f, "invalid character: '{}'", c)
+            }
         }
     }
 }

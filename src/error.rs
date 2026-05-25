@@ -63,6 +63,12 @@ pub enum StateMachineError {
         from_state: Entity,
         to_state: Entity,
     },
+    /// An event-triggered FSM transition did not match any transition from the current state.
+    #[cfg(feature = "fsm")]
+    NoMatchingEventTransition {
+        graph: Entity,
+        state: Entity,
+    },
     /// The lowest common ancestor (LCA) could not be found between two states in an HSM transition.
     #[cfg(feature = "hsm")]
     LcaNotFound {
@@ -188,6 +194,14 @@ impl fmt::Display for StateMachineError {
                     from_state, to_state, graph
                 )
             }
+            #[cfg(feature = "fsm")]
+            StateMachineError::NoMatchingEventTransition { graph, state } => {
+                write!(
+                    f,
+                    "No matching event transition found from state {:?} in FsmGraph {:?}",
+                    state, graph
+                )
+            }
             #[cfg(feature = "hsm")]
             StateMachineError::LcaNotFound {
                 state_machine,
@@ -227,7 +241,9 @@ impl fmt::Display for StateMachineError {
             StateMachineError::ActionNotFound(system_label) => {
                 write!(f, "Action with label {} not found", system_label)
             }
-            StateMachineError::ScheduleError(schedule_error) => schedule_error.fmt(f),
+            StateMachineError::ScheduleError(schedule_error) => {
+                write!(f, "Schedule error: {}", schedule_error)
+            }
         }
     }
 }
@@ -238,11 +254,7 @@ impl From<ScheduleError> for StateMachineError {
     }
 }
 
-impl std::error::Error for StateMachineError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self)
-    }
-}
+impl std::error::Error for StateMachineError {}
 
 /// # 状态机运行时错误事件
 ///
@@ -286,29 +298,40 @@ impl StateMachineErrorEvent {
     }
 }
 
-/// Convenience helper to log an error and trigger a [`StateMachineErrorEvent`].
-///
-/// Use this in contexts where `Commands` is available (systems, observers).
-pub(crate) fn error_event(
-    commands: &mut Commands,
-    state_machine: Entity,
-    error: StateMachineError,
-) {
-    error!("{}", error);
-    commands.trigger(StateMachineErrorEvent::new(state_machine, error));
+macro_rules! define_error_event {
+    ($fn_name:ident, $world_fn_name:ident, $log_level:ident) => {
+        /// Convenience helper to log and trigger a [`StateMachineErrorEvent`].
+        ///
+        /// Use this in contexts where `Commands` is available (systems, observers).
+        pub(crate) fn $fn_name(
+            commands: &mut Commands,
+            state_machine: Entity,
+            error: StateMachineError,
+        ) {
+            $log_level!("{}", error);
+            commands.trigger(StateMachineErrorEvent::new(state_machine, error));
+        }
+
+        /// Convenience helper to log and trigger a [`StateMachineErrorEvent`] from `&mut World`.
+        ///
+        /// Use this inside `commands.queue()` closures or other World-only contexts.
+        pub(crate) fn $world_fn_name(
+            world: &mut World,
+            state_machine: Entity,
+            error: StateMachineError,
+        ) {
+            $log_level!("{}", error);
+            if let Ok(mut entity) = world.get_entity_mut(state_machine) {
+                entity.trigger(|sm| StateMachineErrorEvent::new(sm, error.clone()));
+            }
+        }
+    };
 }
 
-/// Convenience helper to log a warning and trigger a [`StateMachineErrorEvent`].
-///
-/// Use this in contexts where `Commands` is available (systems, observers).
-pub(crate) fn warn_event(commands: &mut Commands, state_machine: Entity, error: StateMachineError) {
-    warn!("{}", error);
-    commands.trigger(StateMachineErrorEvent::new(state_machine, error));
-}
+define_error_event!(error_event, error_event_world, error);
+define_error_event!(warn_event, warn_event_world, warn);
 
 /// Convenience helper to log a trace and trigger a [`StateMachineErrorEvent`].
-///
-/// Use this in contexts where `Commands` is available (systems, observers).
 pub(crate) fn trace_event(
     commands: &mut Commands,
     state_machine: Entity,
@@ -316,43 +339,4 @@ pub(crate) fn trace_event(
 ) {
     trace!("{}", error);
     commands.trigger(StateMachineErrorEvent::new(state_machine, error));
-}
-
-/// Convenience helper to log an error and trigger a [`StateMachineErrorEvent`] from `&mut World`.
-///
-/// Use this inside `commands.queue()` closures or other World-only contexts.
-pub(crate) fn error_event_world(
-    world: &mut World,
-    state_machine: Entity,
-    error: StateMachineError,
-) {
-    error!("{}", error);
-    if let Ok(mut entity) = world.get_entity_mut(state_machine) {
-        entity.trigger(|sm| StateMachineErrorEvent::new(sm, error.clone()));
-    }
-}
-
-/// Convenience helper to log a warning and trigger a [`StateMachineErrorEvent`] from `&mut World`.
-///
-/// Use this inside `commands.queue()` closures or other World-only contexts.
-pub(crate) fn warn_event_world(world: &mut World, state_machine: Entity, error: StateMachineError) {
-    warn!("{}", error);
-    if let Ok(mut entity) = world.get_entity_mut(state_machine) {
-        entity.trigger(|sm| StateMachineErrorEvent::new(sm, error.clone()));
-    }
-}
-
-/// Convenience helper to log a trace and trigger a [`StateMachineErrorEvent`] from `&mut World`.
-///
-/// Use this inside `commands.queue()` closures or other World-only contexts.
-#[allow(dead_code)]
-pub(crate) fn trace_event_world(
-    world: &mut World,
-    state_machine: Entity,
-    error: StateMachineError,
-) {
-    trace!("{}", error);
-    if let Ok(mut entity) = world.get_entity_mut(state_machine) {
-        entity.trigger(|sm| StateMachineErrorEvent::new(sm, error.clone()));
-    }
 }

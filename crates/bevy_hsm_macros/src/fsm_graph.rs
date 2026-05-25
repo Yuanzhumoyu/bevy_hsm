@@ -66,6 +66,8 @@ pub struct FsmGraph {
     transition_registry: TransitionRegistrationList,
     pub(crate) states: Punctuated<FsmState, Token![,]>,
     transitions: Punctuated<Transition, Token![,]>,
+    /// Optional initial state index. Defaults to 0 (first state).
+    pub(crate) init_state_index: Option<usize>,
 }
 
 impl Parse for FsmGraph {
@@ -100,6 +102,7 @@ impl Parse for FsmGraph {
             transitions,
             action_registry: ActionRegistrationList(action_registry),
             transition_registry: TransitionRegistrationList(transition_registry),
+            init_state_index: None,
         })
     }
 }
@@ -111,7 +114,10 @@ impl quote::ToTokens for FsmGraph {
             action_registry,
             transition_registry,
             transitions,
+            init_state_index,
         } = self;
+
+        let init_state_index = init_state_index.unwrap_or(0);
 
         if states.is_empty() {
             tokens.extend(quote! {
@@ -143,7 +149,7 @@ impl quote::ToTokens for FsmGraph {
 
         let mut used_states = vec![false; states.len()];
         if !used_states.is_empty() {
-            used_states[0] = true;
+            used_states[init_state_index] = true;
         }
         let mut resolve_ref = |state_ref: &StateRef| -> Result<proc_macro2::TokenStream> {
             match state_ref {
@@ -243,7 +249,7 @@ impl quote::ToTokens for FsmGraph {
             let ids = entity_mut.world_scope(move|world| -> [Entity; #ids_len] {
                 [#(#spawn_states),*]
             });
-            let init_state_id = ids[0];
+            let init_state_id = ids[#init_state_index];
             let mut graph = FsmGraph::new(init_state_id);
             #(#build_transitions)*
         });

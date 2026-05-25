@@ -118,15 +118,19 @@ impl FsmTrigger {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum FsmTriggerType {
-    /// 直接跳转下一个状态
+    /// 直接跳转到下一个状态\Directly jump to the next state
     Next(Entity),
-    /// 根据条件跳转状态
+    /// 根据条件跳转状态\Jump to state based on condition
     Guard(Entity),
-    /// 根据事件跳转状态
+    /// 根据事件跳转状态\Jump to state based on event
     Event(Box<dyn StateEventType>),
     /// 中断当前状态，保存到中断栈并跳转到目标图中的目标状态
+    ///
+    /// Interrupt current state, push to interrupt stack and jump to target state in target graph
     Interrupt(Entity, Entity),
     /// 从中断中恢复，返回到中断栈中最近保存的状态
+    ///
+    /// Resume from interrupt, returning to the most recently saved state on the interrupt stack
     Resume,
 }
 
@@ -168,6 +172,10 @@ impl Debug for FsmTriggerType {
     }
 }
 
+/// # 状态事件\State Event
+/// * 用于 FSM 事件驱动转换的事件标记 trait。实现此 trait 的类型可作为 [`FsmTrigger::with_event`] 的参数。
+/// - A marker trait for events used in FSM event-driven transitions. Types implementing this
+///   trait can be used as arguments to [`FsmTrigger::with_event`].
 pub trait StateEvent: DynClone + DynEq + DynHash + Send + Sync + Debug + 'static {}
 
 impl<T> StateEvent for T where T: Clone + Eq + PartialEq + Hash + Send + Sync + Debug + 'static {}
@@ -176,13 +184,24 @@ clone_trait_object!(StateEvent);
 eq_trait_object!(StateEvent);
 hash_trait_object!(StateEvent);
 
+/// # 状态事件类型\State Event Type
+/// * 用于匹配事件到 FSM 转换目标的 trait。实现此 trait 的类型可以在 [`OutgoingTransitions`] 中查找匹配的转换目标。
+/// - A trait for matching events to FSM transition targets. Types implementing this trait
+///   can look up matching transition targets in [`OutgoingTransitions`].
 pub trait StateEventType: DynClone + DynEq + Debug + Send + Sync {
+    /// 在给定的 [`OutgoingTransitions`] 中查找匹配的事件目标状态。
+    ///
+    /// Looks up the matching event target state in the given [`OutgoingTransitions`].
     fn get_target(&mut self, state_transitions: &OutgoingTransitions) -> Option<Entity>;
 }
 
 clone_trait_object!(StateEventType);
 eq_trait_object!(StateEventType);
 
+/// # 事件数据\Event Data
+/// * 包装一个 [`StateEvent`] 作为 [`StateEventType`]，通过具体的事件值在转换表中查找目标。
+/// - Wraps a [`StateEvent`] as a [`StateEventType`], looking up targets in the transition table
+///   using the concrete event value.
 #[derive(PartialEq, Debug, Eq, Clone)]
 pub struct EventData(Box<dyn StateEvent>);
 

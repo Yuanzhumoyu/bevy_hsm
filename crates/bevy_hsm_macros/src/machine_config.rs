@@ -184,7 +184,7 @@ impl StateMachineConfig {
                 } else {
                     return Err(syn::Error::new_spanned(
                         name,
-                        "Initial state with this name not found.",
+                        "Current state with this name not found.",
                     ));
                 }
             }
@@ -193,7 +193,7 @@ impl StateMachineConfig {
                 if index >= state_len {
                     return Err(syn::Error::new_spanned(
                         i,
-                        "Initial state index out of bounds.",
+                        "Current state index out of bounds.",
                     ));
                 }
                 index
@@ -275,7 +275,7 @@ impl Parse for StateRef {
 pub enum ConfigFn {
     Closure(syn::ExprClosure),
     Call(syn::ExprCall),
-    FnName(syn::Ident),
+    FnName(syn::Expr),
 }
 
 impl Parse for ConfigFn {

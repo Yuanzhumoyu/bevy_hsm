@@ -187,3 +187,66 @@ fn test_hsm_event() {
     world.flush();
     assert_eq!(get_curr_state(world, state_machine), ids[2]);
 }
+
+#[test]
+fn test_hsm_with_init_config() {
+    let mut app = setup();
+    let world = app.world_mut();
+
+    // Regression: init(...) with trailing comma must parse correctly.
+    let state_machine = world
+        .spawn(hsm!(
+            init(init_state = A)
+            #[state]: A(
+                #[state]: B,
+                #[state]: C,
+            )
+            StateLifecycle::default(),
+            :spawn_state_ids,
+        ))
+        .id();
+
+    // Verify the state machine entity exists and has the expected component
+    assert!(world.get::<HsmStateMachine>(state_machine).is_some());
+    let ids = world.remove_resource::<StateIds>().unwrap();
+    // The state tree flattened: A(idx 0), B(idx 1), C(idx 2)
+    assert_eq!(ids.len(), 3);
+}
+
+#[test]
+fn test_fsm_with_init_config() {
+    let mut app = setup();
+    let world = app.world_mut();
+
+    // Regression: init(...) with trailing comma must parse correctly
+    let state_machine = world
+        .spawn(fsm!(
+            init(init_state = A)
+            states: {
+                #[state]: A,
+                #[state]: B,
+                #[state]: C,
+            },
+            transitions: {
+                A => B,
+                B => C,
+            },
+            :spawn_state_ids,
+        ))
+        .id();
+
+    let ids = world.remove_resource::<StateIds>().unwrap();
+
+    let sm = world.get::<FsmStateMachine>(state_machine).unwrap();
+    assert_eq!(
+        sm.curr_state_id(),
+        ids[0],
+        "init_state should be A (index 0)"
+    );
+
+    // A -> B
+    world.trigger(FsmTrigger::with_next(state_machine, ids[1]));
+    world.flush();
+    let sm = world.get::<FsmStateMachine>(state_machine).unwrap();
+    assert_eq!(sm.curr_state_id(), ids[1]);
+}

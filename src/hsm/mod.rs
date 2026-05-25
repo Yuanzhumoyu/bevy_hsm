@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::hsm::transition_strategy::{ExitTransitionBehavior, StateTransitionStrategy};
+use crate::hsm::strategy::{ExitTransitionBehavior, StateTransitionStrategy};
 
 pub mod event;
 pub mod guards;
@@ -9,6 +9,8 @@ pub mod history;
 pub mod state_lifecycle;
 pub mod state_machine;
 pub mod state_tree;
+pub mod strategy;
+pub mod transition;
 pub mod transition_strategy;
 
 /// # HSM 状态
@@ -28,9 +30,9 @@ pub struct HsmState {
     /// 定义了当从这个状态转换出去时的行为。
     /// Defines the behavior when transitioning *out of* this state.
     pub behavior: ExitTransitionBehavior,
-    /// (当 `fsm` 特性启用时) 允许在这个 HSM 状态内部嵌套一个完整的 FSM，从而实现“状态机中的状态机”的复杂模式。
-    /// (When the `fsm` feature is enabled) Allows nesting a complete FSM within this HSM state, enabling complex "state machine within a state machine" patterns.
-    #[cfg(feature = "fsm")]
+    /// (当 `hybrid` 特性启用时) 允许在这个 HSM 状态内部嵌套一个完整的 FSM，从而实现“状态机中的状态机”的复杂模式。
+    /// (When the `hybrid` feature is enabled) Allows nesting a complete FSM within this HSM state, enabling complex "state machine within a state machine" patterns.
+    #[cfg(feature = "hybrid")]
     pub fsm_config: Option<crate::prelude::FsmBlueprint>,
 }
 
@@ -39,7 +41,7 @@ impl HsmState {
         Self {
             strategy,
             behavior,
-            #[cfg(feature = "fsm")]
+            #[cfg(feature = "hybrid")]
             fsm_config: None,
         }
     }
@@ -57,7 +59,7 @@ impl HsmState {
     }
 
     #[inline]
-    #[cfg(feature = "fsm")]
+    #[cfg(feature = "hybrid")]
     pub fn set_fsm_config(mut self, fsm_config: Option<crate::prelude::FsmBlueprint>) -> Self {
         self.fsm_config = fsm_config;
         self
