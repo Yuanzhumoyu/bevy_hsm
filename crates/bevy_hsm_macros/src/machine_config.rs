@@ -1,3 +1,9 @@
+//! Types for parsing and resolving state-machine-level configuration:
+//! `init(init_state=..., curr_state=..., ...)`.
+//!
+//! Also contains [`ConfigFn`] and [`StateRef`] which are shared across all
+//! macro entry points.
+
 use std::collections::HashMap;
 
 use crate::kw::{self};
@@ -9,15 +15,18 @@ use syn::{
     punctuated::Punctuated,
 };
 
+/// Resolved state-machine configuration ready for code generation.
+///
+/// Created by [`StateMachineConfig::to_impl`] after name→index resolution.
 #[derive(Debug, Default)]
-pub(crate) struct StateMachineConfigImpl {
+pub(crate) struct ResolvedStateMachineConfig {
     #[cfg(feature = "history")]
     pub history_capacity: Option<LitInt>,
     pub curr_state: usize,
     pub init_state: usize,
 }
 
-impl StateMachineConfigImpl {
+impl ResolvedStateMachineConfig {
     #[cfg(feature = "history")]
     fn history_capacity(&self) -> proc_macro2::TokenStream {
         match &self.history_capacity {
@@ -26,6 +35,7 @@ impl StateMachineConfigImpl {
         }
     }
 
+    /// Generates the `HsmStateMachine::new(...)` constructor expression.
     #[cfg(feature = "hsm")]
     pub fn hsm_config(&self) -> proc_macro2::TokenStream {
         let Self {
@@ -48,6 +58,7 @@ impl StateMachineConfigImpl {
         }
     }
 
+    /// Generates the `FsmStateMachine::new(...)` constructor expression.
     #[cfg(feature = "fsm")]
     pub fn fsm_config(&self) -> proc_macro2::TokenStream {
         let Self {
@@ -71,6 +82,10 @@ impl StateMachineConfigImpl {
     }
 }
 
+/// Raw state-machine configuration parsed from `init(...)`.
+///
+/// Stores unresolved [`StateRef`]s; call [`to_impl`](Self::to_impl) to resolve
+/// them to integer indices in [`ResolvedStateMachineConfig`].
 #[derive(Debug, Default)]
 pub(crate) struct StateMachineConfig {
     #[cfg(feature = "history")]
@@ -132,11 +147,12 @@ impl Parse for StateMachineConfig {
 }
 
 impl StateMachineConfig {
+    /// Resolves state names/indices to their final integer indices.
     pub fn to_impl(
         &self,
         name_to_index: &HashMap<Ident, usize>,
         state_len: usize,
-    ) -> syn::Result<StateMachineConfigImpl> {
+    ) -> syn::Result<ResolvedStateMachineConfig> {
         let init_state = match &self.init_state {
             Some(StateRef::Named(name)) => {
                 if let Some(index) = name_to_index.get(name) {
@@ -168,7 +184,7 @@ impl StateMachineConfig {
                 } else {
                     return Err(syn::Error::new_spanned(
                         name,
-                        "Initial state with this name not found.",
+                        "Current state with this name not found.",
                     ));
                 }
             }
@@ -177,7 +193,7 @@ impl StateMachineConfig {
                 if index >= state_len {
                     return Err(syn::Error::new_spanned(
                         i,
-                        "Initial state index out of bounds.",
+                        "Current state index out of bounds.",
                     ));
                 }
                 index
@@ -185,7 +201,7 @@ impl StateMachineConfig {
             None => 0,
         };
 
-        Ok(StateMachineConfigImpl {
+        Ok(ResolvedStateMachineConfig {
             #[cfg(feature = "history")]
             history_capacity: self.history_capacity.clone(),
             curr_state,
@@ -224,6 +240,7 @@ impl Parse for ConfigAttr {
     }
 }
 
+/// Reference to a state — either by name (`MyState`) or by index (`0`).
 #[derive(Debug)]
 pub enum StateRef {
     Named(Ident),
@@ -251,18 +268,25 @@ impl Parse for StateRef {
     }
 }
 
+/// A post-construction callback supplied as `: my_fn` at the end of a macro
+/// invocation.  Receives `(&mut EntityWorldMut, &[Entity; N])` — the state-
+/// machine entity and the array of spawned state entities.
 #[derive(Debug)]
 pub enum ConfigFn {
     Closure(syn::ExprClosure),
     Call(syn::ExprCall),
-    FnName(syn::Ident),
+    FnName(syn::Expr),
 }
 
 impl Parse for ConfigFn {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         input.parse::<Token![:]>()?;
         if input.peek(syn::Ident) {
-            Ok(ConfigFn::FnName(input.parse()?))
+            if input.peek2(syn::token::Paren) {
+                Ok(ConfigFn::Call(input.parse()?))
+            } else {
+                Ok(ConfigFn::FnName(input.parse()?))
+            }
         } else {
             Ok(ConfigFn::Closure(input.parse()?))
         }
@@ -273,13 +297,13 @@ impl quote::ToTokens for ConfigFn {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         tokens.extend(match self {
             ConfigFn::FnName(fn_call) => {
-                quote::quote! {#fn_call(entity_commands, &ids);}
+                quote::quote! {#fn_call(entity_mut, &ids);}
             }
             ConfigFn::Closure(closure) => {
-                quote::quote! {(#closure)(entity_commands, &ids);}
+                quote::quote! {(#closure)(entity_mut, &ids);}
             }
             ConfigFn::Call(call) => {
-                quote::quote! {#call;}
+                quote::quote! {#call(entity_mut, &ids);}
             }
         })
     }

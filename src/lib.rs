@@ -55,11 +55,15 @@ pub mod fsm;
 pub mod guards;
 #[cfg(feature = "hsm")]
 pub mod hsm;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+pub mod interrupt;
 pub mod labels;
 pub mod markers;
 pub mod state_actions;
 #[cfg(feature = "state_data")]
 pub mod state_data;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+pub mod state_machine;
 
 #[cfg(feature = "hsm")]
 use std::sync::Arc;
@@ -70,6 +74,7 @@ use bevy::prelude::*;
 
 use crate::action_dispatcher::ActionDispatch;
 use crate::guards::GuardRegistry;
+use crate::guards::registry::CompiledGuardRegistry;
 use crate::prelude::TransitionRegistry;
 use crate::state_actions::ActionRegistry;
 
@@ -115,6 +120,7 @@ impl Plugin for StateMachinePlugin {
         app.init_resource::<ActionDispatch>();
         app.init_resource::<ActionRegistry>();
         app.init_resource::<GuardRegistry>();
+        app.init_resource::<CompiledGuardRegistry>();
         app.init_resource::<TransitionRegistry>();
 
         #[cfg(feature = "hsm")]
@@ -131,7 +137,7 @@ impl Plugin for StateMachinePlugin {
 
             (self.transition_system)(app);
 
-            app.add_observer(hsm::state_machine::HsmStateMachine::handle_hsm_trigger);
+            app.add_observer(hsm::trigger_handler::handle_hsm_trigger);
         }
 
         #[cfg(feature = "fsm")]
@@ -167,9 +173,9 @@ impl Default for StateMachinePlugin {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use bevy::prelude::*;
-/// use bevy_hsm::prelude::*;
+/// use bevy_hsm::{prelude::*, system_registry};
 ///
 /// fn my_action(context: In<ActionContext>) { /* ... */ }
 /// fn another_action(context: In<ActionContext>) { /* ... */ }
@@ -190,8 +196,8 @@ macro_rules! system_registry {
 
 pub mod prelude {
     pub use crate::{
-        StateMachinePlugin, action_dispatcher::*, context::*, guards::*, markers::*,
-        state_actions::*,
+        StateMachinePlugin, action_dispatcher::*, context::*, error::StateMachineErrorEvent,
+        guards::*, interrupt::*, markers::*, state_actions::*,
     };
 
     #[cfg(feature = "state_data")]
@@ -209,8 +215,18 @@ pub mod prelude {
     #[cfg(feature = "fsm")]
     pub use crate::fsm::{FsmState, event::*, graph::*, state_machine::*};
 
+    #[cfg(feature = "hybrid")]
+    pub use crate::fsm::hybrid::*;
+
     #[cfg(feature = "fsm")]
     pub use bevy_hsm_macros::{fsm, fsm_graph};
 
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
+    pub use crate::state_machine::StateMachineState;
+
     pub use bevy_hsm_macros::combination_condition;
 }
+
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod tests;

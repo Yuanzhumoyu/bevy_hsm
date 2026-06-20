@@ -45,7 +45,7 @@ impl StateHistory {
         state: Entity,
         fsm_history: crate::fsm::history::FsmStateHistory,
     ) {
-        for HistoricalNode { left_cycle, id } in self.history.iter_mut().rev() {
+        for HistoricalNode { left_cycle, id, .. } in self.history.iter_mut().rev() {
             if state == *id
                 && let HsmStateLifecycleRecord::Update(history) = left_cycle
             {
@@ -154,11 +154,30 @@ impl<'a> DoubleEndedIterator for StateHistoryIterator<'a> {
 pub struct HistoricalNode {
     id: Entity,
     left_cycle: HsmStateLifecycleRecord,
+    /// 该状态所属的状态树
+    ///
+    /// The state tree that this state belongs to
+    state_tree_id: Entity,
+    /// 记录时刻的中断嵌套深度。0 表示正常转换，>0 表示处于中断状态。
+    ///
+    /// Interrupt nesting depth at the time of recording.
+    /// 0 = normal transition, >0 = during interrupt.
+    interrupt_depth: usize,
 }
 
 impl HistoricalNode {
-    pub fn new(id: Entity, left_cycle: HsmStateLifecycleRecord) -> Self {
-        Self { id, left_cycle }
+    pub fn new(
+        id: Entity,
+        left_cycle: HsmStateLifecycleRecord,
+        state_tree_id: Entity,
+        interrupt_depth: usize,
+    ) -> Self {
+        Self {
+            id,
+            left_cycle,
+            state_tree_id,
+            interrupt_depth,
+        }
     }
 
     pub fn left_cycle(&self) -> &HsmStateLifecycleRecord {
@@ -168,14 +187,28 @@ impl HistoricalNode {
     pub fn id(&self) -> Entity {
         self.id
     }
+
+    /// 获取该状态所属的状态树
+    ///
+    /// Get the state tree that this state belongs to
+    pub fn state_tree_id(&self) -> Entity {
+        self.state_tree_id
+    }
+
+    /// 获取记录时刻的中断嵌套深度
+    ///
+    /// Get the interrupt nesting depth at the time of recording
+    pub fn interrupt_depth(&self) -> usize {
+        self.interrupt_depth
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HsmStateLifecycleRecord {
     Enter,
-    #[cfg(feature = "fsm")]
+    #[cfg(all(feature = "history", feature = "hybrid"))]
     Update(Option<crate::fsm::history::FsmStateHistory>),
-    #[cfg(not(feature = "fsm"))]
+    #[cfg(not(all(feature = "history", feature = "hybrid")))]
     Update,
     Exit,
 }
@@ -184,9 +217,9 @@ impl From<HsmStateLifecycleRecord> for StateLifecycle {
     fn from(value: HsmStateLifecycleRecord) -> Self {
         match value {
             HsmStateLifecycleRecord::Enter => StateLifecycle::Enter,
-            #[cfg(feature = "fsm")]
+            #[cfg(all(feature = "history", feature = "hybrid"))]
             HsmStateLifecycleRecord::Update(_) => StateLifecycle::Update,
-            #[cfg(not(feature = "fsm"))]
+            #[cfg(not(all(feature = "history", feature = "hybrid")))]
             HsmStateLifecycleRecord::Update => StateLifecycle::Update,
             HsmStateLifecycleRecord::Exit => StateLifecycle::Exit,
         }
@@ -197,9 +230,9 @@ impl From<StateLifecycle> for HsmStateLifecycleRecord {
     fn from(value: StateLifecycle) -> Self {
         match value {
             StateLifecycle::Enter => HsmStateLifecycleRecord::Enter,
-            #[cfg(feature = "fsm")]
+            #[cfg(all(feature = "history", feature = "hybrid"))]
             StateLifecycle::Update => HsmStateLifecycleRecord::Update(None),
-            #[cfg(not(feature = "fsm"))]
+            #[cfg(not(all(feature = "history", feature = "hybrid")))]
             StateLifecycle::Update => HsmStateLifecycleRecord::Update,
             StateLifecycle::Exit => HsmStateLifecycleRecord::Exit,
         }

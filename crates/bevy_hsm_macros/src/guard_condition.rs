@@ -1,14 +1,24 @@
+//! Proc-macro implementation for the [`combination_condition!`] macro.
+//!
+//! Parses a guard-condition expression at compile time and emits the
+//! corresponding [`GuardCondition`] AST literal from `bevy_hsm::guards`.
+
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{Token, parse::Parse, parse_macro_input};
 
 use crate::kw;
 
+/// Entry point for `combination_condition!(...)`.
 pub fn guard_condition_impl(item: TokenStream) -> TokenStream {
     let constant_value = parse_macro_input!(item as GuardCondition);
-    quote::quote! {#constant_value}.into()
+    constant_value.to_token_stream().into()
 }
 
+/// AST for a compile-time `GuardCondition` expression.
+///
+/// Mirrors [`bevy_hsm::guards::GuardCondition`] so that the macro can emit
+/// the same enum variant constructors in generated code.
 #[derive(Clone, Debug)]
 pub(super) enum GuardCondition {
     And(Vec<GuardCondition>),
@@ -94,6 +104,8 @@ impl Parse for GuardCondition {
 }
 
 impl GuardCondition {
+    /// Parses a parenthesized, comma-separated list of sub-conditions:
+    /// `(cond1, cond2, ...)`.
     fn parse_tuple(input: syn::parse::ParseStream) -> syn::Result<Vec<Self>> {
         let content;
         syn::parenthesized!(content in input);
@@ -104,6 +116,12 @@ impl GuardCondition {
     }
 }
 
+/// A single leaf identifier inside a guard-condition expression.
+///
+/// Can be either a string literal (`"my_guard"`) or a plain identifier
+/// (`my_guard`).  The former is used for guards registered by name; the
+/// latter is the escape hatch that splices a Rust variable holding a
+/// pre-built [`GuardCondition`] (produced via `#expr` syntax).
 #[derive(Clone, Debug)]
 pub enum GuardId {
     Str(syn::LitStr),

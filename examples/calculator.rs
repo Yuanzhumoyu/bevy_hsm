@@ -1,15 +1,39 @@
+//! # 交互式计算器 / Interactive Calculator
+//!
+//! 本示例演示 HSM 与 FSM 混合架构的完整 GUI 应用：
+//! - **Hybrid 架构**: HSM 管理命令 (Clear/Equals/Backspace/ToggleSign), FSM 管理表达式解析 (Operand/Operator/Parenthesis)
+//! - **消息驱动**: 通过 `ButtonType` 消息传递 UI 按钮输入到状态机
+//! - **TransitionContext**: 在状态转换间插入隐式乘法 (e.g., `(` 前接数字自动补 `*`)
+//! - **状态历史**: HSM 使用 chain 方法在命令状态间导航, FSM 使用 next 方法做表达式状态转换
+//!
+//! This example demonstrates a full GUI app with hybrid HSM+FSM architecture:
+//! - **Hybrid architecture**: HSM manages commands (Clear/Equals/Backspace/ToggleSign), FSM manages expression parsing (Operand/Operator/Parenthesis)
+//! - **Message-driven**: UI button inputs are delivered to the state machine via `ButtonType` messages
+//! - **TransitionContext**: implicit multiplication inserted between states (e.g., number before `(` auto-inserts `*`)
+//! - **State history**: HSM uses chain for command navigation, FSM uses next for expression state transitions
+//!
+//! ## 状态结构 / State Structure
+//! ```text
+//! HSM: ProcessingInput (FsmBlueprint → FSM)
+//!  ├── Clear        (OnUpdate→ToSuper)
+//!  ├── Equals       (OnUpdate→ToSuper)
+//!  ├── Backspace    (OnUpdate→ToSuper)
+//!  └── ToggleSign   (OnUpdate→ToSuper)
+//!
+//! FSM: Start → Operand ↔ Operator ↔ LeftParenthesis ↔ RightParenthesis
+//! ```
+//!
+//! ## 操作 / Controls
+//! - **鼠标点击**: 虚拟键盘按钮输入数字、运算符和命令
+
 use bevy::{
     color::palettes::css::NAVY,
-    ecs::system::EntityCommands,
     feathers::{
-        FeathersPlugins,
-        controls::{ButtonProps, button},
-        dark_theme::create_dark_theme,
-        theme::UiTheme,
+        FeathersPlugins, controls::FeathersButton, dark_theme::create_dark_theme, theme::UiTheme,
     },
     input_focus::tab_navigation::TabGroup,
     prelude::*,
-    text::TextSpanAccess,
+    text::TextSection,
     ui_widgets::Activate,
 };
 use bevy_hsm::{prelude::*, system_registry};
@@ -90,6 +114,7 @@ struct HsmEntity(Entity);
 struct FsmMark;
 
 // --- 辅助系统和函数 ---
+#[allow(clippy::type_complexity)]
 fn debug_on_state(
     info: &str,
 ) -> impl Fn(In<ActionContext>, Query<&Name, Or<(With<HsmState>, With<FsmState>)>>) {
@@ -99,6 +124,7 @@ fn debug_on_state(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn debug_input_state(
     info: &str,
     f: impl Fn(EntityCommands),
@@ -200,10 +226,12 @@ fn hsm_exit_commands(
     In(contexts): In<Vec<ActionContext>>,
     mut commands: Commands,
 ) -> Option<Vec<ActionContext>> {
-    for context in contexts {
+    // Trigger ToSuper on every update tick: the command state runs once,
+    // triggers exit back to ProcessingInput, which resumes the nested FSM.
+    for context in &contexts {
         commands.trigger(HsmTrigger::to_super(context.state_machine));
     }
-    None
+    Some(contexts)
 }
 
 fn precedence(op: char) -> i32 {
@@ -253,7 +281,7 @@ fn on_enter_operator(
 
     // for +, -, *, /
     if let Some(prev) = fsm.history.get_at(1)
-        && prev == fsm_states.operator
+        && prev.state_id() == fsm_states.operator
     {
         // This case handles replacing an operator (e.g., 5 + -)
         calculator.operator_stack.pop();
@@ -470,21 +498,25 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
                 RightParenthesis => Operator, // e.g. (1) -> (1)+
                 RightParenthesis => RightParenthesis, // e.g. (1)) -> (1)))
             }
-            :|mut entity_commands: EntityCommands, states: &[Entity]| {
-                entity_commands.commands_mut().insert_resource(FsmStates {
-                    operand: states[1],
-                    operator: states[2],
-                    left_parenthesis: states[3],
-                    right_parenthesis: states[4],
-                });
+            :|entity_mut:&mut EntityWorldMut, states: &[Entity]| {
+                entity_mut.world_scope(|world| {
+                    world.insert_resource(FsmStates {
+                        operand: states[1],
+                        operator: states[2],
+                        left_parenthesis: states[3],
+                        right_parenthesis: states[4],
+                    });
+                })
             }
         })
         .id();
 
     commands.spawn(hsm! {
-        #[state(after_enter=inpt_enter:debug_input_state("Input Enter",|mut c|{c.insert(FsmMark);}),
-                before_exit=input_exit:debug_input_state("Input Exit",|_|{}),
-                fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
+        #[state(
+            after_enter=inpt_enter:debug_input_state("Input Enter",|mut c|{c.insert(FsmMark);}),
+            before_exit=input_exit:debug_input_state("Input Exit",|_|{}),
+            fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10)
+        )]
         :ProcessingInput(
             #[state(after_enter=on_clear, on_update="Update:hsm_exit_commands")]: Clear,
             #[state(after_enter=on_equals, on_update="Update:hsm_exit_commands")]: Equals,
@@ -492,17 +524,18 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
             #[state(after_enter=on_toggle_sign, on_update="Update:hsm_exit_commands")]: ToggleSign,
         ),
         StateLifecycle::default(),
-        :|mut entity_commands:EntityCommands, ids:&[Entity]| {
-            let state_machine_id = entity_commands.id();
-
-            entity_commands.commands_mut().insert_resource(HsmEntity(state_machine_id));
+        :|entity_mut:&mut EntityWorldMut, ids:&[Entity]| {
+            let state_machine_id = entity_mut.id();
             let mut map = StateEntityMap::default();
             map.0.insert("ProcessingInput", ids[0]);
             map.0.insert("Clear", ids[1]);
             map.0.insert("Equals", ids[2]);
             map.0.insert("Backspace", ids[3]);
             map.0.insert("ToggleSign", ids[4]);
-            entity_commands.commands_mut().insert_resource(map);
+            entity_mut.world_scope(|world| {
+                world.insert_resource(HsmEntity(state_machine_id));
+                world.insert_resource(map);
+            })
         }
     });
 }
@@ -574,64 +607,76 @@ fn setup_ui(mut commands: Commands) {
         vec![("=", ButtonType::Command(Command::Equals))],
     ];
 
-    commands.spawn((
-        Node {
+    fn virtual_keyboard<const N: usize>(buttons: [Vec<(&str, ButtonType)>; N]) -> impl Scene {
+        let keys = Vec::from_iter(buttons.map(move |row| {
+            let key_row = Vec::from_iter(row.into_iter().map(move |key| {
+                let (key, button_type) = key;
+                bsn! {
+                    @FeathersButton
+                    Node {
+                        flex_grow: 1.0,
+                    }
+                    on(
+                        move |_activate: On<Activate>,
+                            mut buttons_writer: MessageWriter<ButtonType>|
+                              -> Result {
+                            buttons_writer.write(button_type);
+                            Ok(())
+                        },
+                    )
+                    Children [
+                        Text(key)
+                    ]
+                }
+            }));
+            bsn! {
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(4),
+                }
+                Children [
+                    {key_row}
+                ]
+            }
+        }));
+        bsn! {
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+            }
+            TabGroup::new(0)
+            Children [
+                {keys}
+            ]
+        }
+    }
+
+    commands.spawn_scene(bsn! {
+        Node{
             width: percent(100),
             height: percent(100),
             align_items: AlignItems::End,
             justify_content: JustifyContent::Center,
-            ..default()
-        },
-        children![(
+        }
+        Children[(
             Node {
                 flex_direction: FlexDirection::Column,
-                border: px(5).into(),
+                border: px(5),
                 row_gap: px(5),
-                padding: px(5).into(),
+                padding: px(5),
                 align_items: AlignItems::Center,
-                margin: px(50).into(),
+                margin: px(50),
                 border_radius: BorderRadius::all(px(10)),
-                ..Default::default()
-            },
-            BackgroundColor(NAVY.into()),
-            BorderColor::all(Color::WHITE),
-            children![
-                Text::new("virtual keyboard"),
-                (
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.),
-                        ..Default::default()
-                    },
-                    TabGroup::new(0),
-                    Children::spawn(SpawnIter(buttons.into_iter().map(move |row| {
-                        (
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                column_gap: Val::Px(4.),
-                                ..Default::default()
-                            },
-                            Children::spawn(SpawnIter(row.into_iter().map(
-                                move |(key, button_type)| {
-                                    (
-                                    button(ButtonProps::default(), (), Spawn(Text::new(key))),
-                                    bevy::ui_widgets::observe(
-                                        move |_activate: On<Activate>,
-                                              mut buttons_writer: MessageWriter<ButtonType>|
-                                              -> Result {
-                                            buttons_writer.write(button_type);
-                                            Ok(())
-                                        },
-                                    ),
-                                )
-                                },
-                            ))),
-                        )
-                    })))
-                )
+            }
+            BackgroundColor(NAVY)
+            BorderColor::all(Color::WHITE)
+            Children[
+                Text("virtual keyboard"),
+                virtual_keyboard(buttons),
             ]
-        )],
-    ));
+            )
+        ]
+    });
 }
 
 fn handle_button_message(
@@ -684,9 +729,9 @@ fn update_display(
             let is_output = selector.1.is_some();
 
             if is_input {
-                *text.write_span() = calculator.current_display.clone();
+                *text.get_text_mut() = calculator.current_display.clone();
             } else if is_output {
-                *text.write_span() = calculator.history_display.clone();
+                *text.get_text_mut() = calculator.history_display.clone();
             }
         }
     }

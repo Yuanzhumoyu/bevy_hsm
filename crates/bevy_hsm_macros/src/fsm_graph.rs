@@ -1,7 +1,11 @@
+//! Proc-macro implementation for the [`fsm_graph!`] and [`fsm!`] macros.
+//!
+//! Handles parsing of FSM states, transitions, and the graph structure.
+
 use std::collections::HashMap;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{
     Expr, Ident, LitStr, Result, Token, braced, parenthesized,
     parse::{Parse, ParseStream},
@@ -10,7 +14,7 @@ use syn::{
 };
 
 use crate::{
-    action_id::{ActionRegistry, TransitionRegistry},
+    action_id::{ActionRegistrationList, TransitionRegistrationList},
     guard_condition::GuardCondition,
     kw,
     machine_config::{ConfigFn, StateRef},
@@ -18,20 +22,10 @@ use crate::{
 };
 
 pub fn fsm_graph_impl(item: TokenStream) -> TokenStream {
-    let FsmGraphImpl { graph, config_fn } = syn::parse_macro_input!(item as FsmGraphImpl);
-    quote! {
-        bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_commands: EntityCommands| {
-            use bevy_hsm::prelude::*;
-            let mut commands = entity_commands.commands();
-            #graph
-            entity_commands.insert(graph);
-            #config_fn
-        })
-    }
-    .into()
+    let graph_impl = syn::parse_macro_input!(item as FsmGraphImpl);
+    graph_impl.to_token_stream().into()
 }
 
-#[derive(Debug)]
 pub struct FsmGraphImpl {
     graph: FsmGraph,
     config_fn: Option<ConfigFn>,
@@ -40,6 +34,9 @@ pub struct FsmGraphImpl {
 impl Parse for FsmGraphImpl {
     fn parse(input: ParseStream) -> Result<Self> {
         let graph = input.parse()?;
+
+        input.parse::<Option<Token![,]>>()?;
+
         let config_fn = if input.peek(Token![:]) {
             Some(input.parse()?)
         } else {
@@ -49,12 +46,28 @@ impl Parse for FsmGraphImpl {
     }
 }
 
+impl quote::ToTokens for FsmGraphImpl {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let FsmGraphImpl { graph, config_fn } = self;
+        tokens.extend(quote! {
+            bevy_hsm::markers::SpawnStateMachine::new(move |mut entity_mut:&mut EntityWorldMut| {
+                use bevy_hsm::prelude::*;
+                #graph
+                entity_mut.insert(graph);
+                #config_fn
+            })
+        });
+    }
+}
+
 #[derive(Debug)]
 pub struct FsmGraph {
-    action_registry: ActionRegistry,
-    transition_registry: TransitionRegistry,
-    pub(crate) states: Punctuated<State, Token![,]>,
+    action_registry: ActionRegistrationList,
+    transition_registry: TransitionRegistrationList,
+    pub(crate) states: Punctuated<FsmState, Token![,]>,
     transitions: Punctuated<Transition, Token![,]>,
+    /// Optional initial state index. Defaults to 0 (first state).
+    pub(crate) init_state_index: Option<usize>,
 }
 
 impl Parse for FsmGraph {
@@ -66,7 +79,7 @@ impl Parse for FsmGraph {
         input.parse::<Token![:]>()?;
         let content;
         braced!(content in input);
-        let states = content.parse_terminated(State::parse, Token![,])?;
+        let states = content.parse_terminated(FsmState::parse, Token![,])?;
         input.parse::<Option<Token![,]>>()?;
         if !input.peek(kw::transitions) {
             return Err(input.error("expected `transitions: { ... }` block"));
@@ -87,8 +100,9 @@ impl Parse for FsmGraph {
         Ok(Self {
             states,
             transitions,
-            action_registry: ActionRegistry(action_registry),
-            transition_registry: TransitionRegistry(transition_registry),
+            action_registry: ActionRegistrationList(action_registry),
+            transition_registry: TransitionRegistrationList(transition_registry),
+            init_state_index: None,
         })
     }
 }
@@ -100,7 +114,10 @@ impl quote::ToTokens for FsmGraph {
             action_registry,
             transition_registry,
             transitions,
+            init_state_index,
         } = self;
+
+        let init_state_index = init_state_index.unwrap_or(0);
 
         if states.is_empty() {
             tokens.extend(quote! {
@@ -126,13 +143,13 @@ impl quote::ToTokens for FsmGraph {
             .iter()
             .map(|state| {
                 config_errors.extend(state.config_error());
-                quote! {commands.spawn((FsmState,#state)).id()}
+                quote! {#state.id()}
             })
             .collect::<Vec<_>>();
 
         let mut used_states = vec![false; states.len()];
         if !used_states.is_empty() {
-            used_states[0] = true;
+            used_states[init_state_index] = true;
         }
         let mut resolve_ref = |state_ref: &StateRef| -> Result<proc_macro2::TokenStream> {
             match state_ref {
@@ -222,13 +239,17 @@ impl quote::ToTokens for FsmGraph {
             resolution_errors.push(err);
         }
 
+        let ids_len = spawn_states.len();
+
         tokens.extend(quote! {
             #(#resolution_errors);*
             #(#config_errors);*
             #action_registry
             #transition_registry
-            let ids = [#(#spawn_states),*];
-            let init_state_id = ids[0];
+            let ids = entity_mut.world_scope(move|world| -> [Entity; #ids_len] {
+                [#(#spawn_states),*]
+            });
+            let init_state_id = ids[#init_state_index];
             let mut graph = FsmGraph::new(init_state_id);
             #(#build_transitions)*
         });
@@ -236,14 +257,14 @@ impl quote::ToTokens for FsmGraph {
 }
 
 #[derive(Debug)]
-pub(crate) struct State {
+pub(crate) struct FsmState {
     pub(crate) name: Option<Ident>,
     config: StateConfig,
     components: Punctuated<Expr, Token![,]>,
     span: proc_macro2::Span,
 }
 
-impl State {
+impl FsmState {
     fn push_with_content(&mut self, content: FsmStateContent) {
         match content {
             FsmStateContent::Component(component) => self.components.push(component),
@@ -289,7 +310,7 @@ impl State {
     }
 }
 
-impl Parse for State {
+impl Parse for FsmState {
     fn parse(input: ParseStream) -> Result<Self> {
         let span = input.span();
         // 解析 `#[state(...)]` 和 `#[state_data(...)]` 属性
@@ -325,28 +346,38 @@ impl Parse for State {
     }
 }
 
-impl quote::ToTokens for State {
+impl quote::ToTokens for FsmState {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let State {
+        let FsmState {
             name,
             config,
             components,
             ..
         } = self;
+        let mut fsm_state = proc_macro2::TokenStream::default();
         if let Some(name) = name {
             let str = LitStr::new(name.to_string().as_str(), name.span());
-            tokens.extend(quote::quote! {Name::new(#str),});
+            fsm_state.extend(quote::quote! {Name::new(#str),});
         }
+
+        fsm_state.extend(config.fsm_state_token_stream());
+
         if config.is_fsm_any() {
-            tokens.extend(quote::quote! {(#config),});
+            fsm_state.extend(quote::quote! {(#config),});
         }
         if !components.is_empty() {
-            tokens.extend(quote::quote! {(#components),});
+            fsm_state.extend(quote::quote! {(#components),});
         }
+
+        if let Some(scene) = &config.scene {
+            fsm_state.extend(quote::quote! {#scene,});
+        }
+
+        tokens.extend(quote::quote! {world.spawn((#fsm_state))});
     }
 }
 
-impl Default for State {
+impl Default for FsmState {
     fn default() -> Self {
         Self {
             name: Default::default(),

@@ -95,6 +95,28 @@ impl HsmTrigger {
         Self::new(state_machine, HsmTriggerType::Chain(target))
     }
 
+    /// 创建一个中断触发器，保存当前状态和状态树后跳转到目标状态树的目标状态
+    ///
+    /// Creates an interrupt trigger that saves the current state and state tree,
+    /// then jumps to the target state in the target state tree
+    pub const fn interrupt(
+        state_machine: Entity,
+        target_tree: Entity,
+        target_state: Entity,
+    ) -> Self {
+        Self::new(
+            state_machine,
+            HsmTriggerType::Interrupt(target_tree, target_state),
+        )
+    }
+
+    /// 创建一个恢复触发器，回到最近被中断的状态
+    ///
+    /// Creates a resume trigger that returns to the most recently interrupted state
+    pub const fn resume(state_machine: Entity) -> Self {
+        Self::new(state_machine, HsmTriggerType::Resume)
+    }
+
     /// 获取触发器关联的状态机实体
     ///
     /// Gets the state machine entity associated with the trigger
@@ -111,6 +133,7 @@ impl HsmTrigger {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum HsmTriggerType {
     /// 直接返回父状态
     ///
@@ -132,4 +155,13 @@ pub enum HsmTriggerType {
     ///
     /// Directly jump to specified state
     Chain(Entity),
+    /// 中断当前状态并跳转到目标状态树的指定状态处理紧急事件，处理完毕后可通过 Resume 恢复
+    ///
+    /// Interrupt current state and jump to target state in the target state tree
+    /// to handle urgent event, can resume back via Resume after handling
+    Interrupt(Entity, Entity),
+    /// 从中断中恢复，回到之前被中断的状态
+    ///
+    /// Resume from interrupt, returning to the previously interrupted state
+    Resume,
 }

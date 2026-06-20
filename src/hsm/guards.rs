@@ -4,8 +4,13 @@ use bevy::{
     prelude::*,
 };
 
+use std::ops::{Deref, DerefMut};
+
+use bevy::ecs::component::Mutable;
+
 use crate::{
-    guards::{CompiledGuard, GuardRegistry},
+    guards::GuardRegistry,
+    guards::registry::{CompiledGuardId, CompiledGuardRegistry},
     hsm::HsmState,
     labels::SystemLabel,
     prelude::GuardCondition,
@@ -32,23 +37,8 @@ impl GuardEnter {
         Self(GuardCondition::Id(name.into()))
     }
 
-    fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let conditions = world.resource::<GuardRegistry>();
-        let enter = world
-            .get::<Self>(hook_context.entity)
-            .expect("Component should be present in on_insert hook");
-        match conditions.to_combinator_condition_id(&enter.0) {
-            Ok(id) => {
-                let mut buffer = world.resource_mut::<GuardEnterCache>();
-                buffer.insert(hook_context.entity, id);
-            }
-            Err(e) => {
-                warn!(
-                    "[GuardRegistry] This condition<{:?}> does not exist for state {:?}: {}",
-                    enter.0, hook_context.entity, e
-                );
-            }
-        }
+    fn on_insert(world: DeferredWorld, hook_context: HookContext) {
+        guard_on_insert::<Self, GuardEnterCache>(world, hook_context);
     }
 
     fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
@@ -58,30 +48,11 @@ impl GuardEnter {
 }
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub(crate) struct GuardEnterCache(HashMap<Entity, CompiledGuard>);
+pub(crate) struct GuardEnterCache(HashMap<Entity, CompiledGuardId>);
 
 impl FromWorld for GuardEnterCache {
     fn from_world(world: &mut World) -> Self {
-        let collect = world.resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
-            let mut query = world.query_filtered::<(Entity, &GuardEnter), With<HsmState>>();
-            query
-                .iter(world)
-                .filter_map(|(id, condition)| {
-                    match conditions.to_combinator_condition_id(condition) {
-                        Ok(condition_id) => Some((id, condition_id)),
-                        Err(e) => {
-                            warn!(
-                                "[GuardRegistry] This condition<{:?}> does not exist: {}",
-                                condition.0, e
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-        });
-
-        Self(HashMap::from_iter(collect))
+        Self(collect_guard_cache::<GuardEnter>(world))
     }
 }
 
@@ -110,23 +81,8 @@ impl GuardExit {
         Ok(Self(GuardCondition::parse(s)?))
     }
 
-    fn on_insert(mut world: DeferredWorld, hook_context: HookContext) {
-        let conditions = world.resource::<GuardRegistry>();
-        let exit = world
-            .get::<Self>(hook_context.entity)
-            .expect("Component should be present in on_insert hook");
-        match conditions.to_combinator_condition_id(&exit.0) {
-            Ok(id) => {
-                let mut buffer = world.resource_mut::<GuardExitCache>();
-                buffer.insert(hook_context.entity, id);
-            }
-            Err(e) => {
-                warn!(
-                    "[GuardRegistry] This condition<{:?}> does not exist for state {:?}: {}",
-                    exit.0, hook_context.entity, e
-                );
-            }
-        }
+    fn on_insert(world: DeferredWorld, hook_context: HookContext) {
+        guard_on_insert::<Self, GuardExitCache>(world, hook_context);
     }
 
     fn on_remove(mut world: DeferredWorld, hook_context: HookContext) {
@@ -136,29 +92,66 @@ impl GuardExit {
 }
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub(crate) struct GuardExitCache(HashMap<Entity, CompiledGuard>);
+pub(crate) struct GuardExitCache(HashMap<Entity, CompiledGuardId>);
 
 impl FromWorld for GuardExitCache {
     fn from_world(world: &mut World) -> Self {
-        let collect = world.resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
-            let mut query = world.query_filtered::<(Entity, &GuardExit), With<HsmState>>();
-            query
-                .iter(world)
-                .filter_map(|(id, condition)| {
-                    match conditions.to_combinator_condition_id(condition) {
-                        Ok(condition_id) => Some((id, condition_id)),
-                        Err(e) => {
-                            warn!(
-                                "[GuardRegistry] This condition<{:?}> does not exist: {}",
-                                condition.0, e
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-        });
-
-        Self(HashMap::from_iter(collect))
+        Self(collect_guard_cache::<GuardExit>(world))
     }
+}
+
+/// Shared on_insert logic for GuardEnter and GuardExit.
+fn guard_on_insert<G, C>(mut world: DeferredWorld, hook_context: HookContext)
+where
+    G: Component + Deref<Target = GuardCondition> + std::fmt::Debug,
+    C: Resource<Mutability = Mutable> + DerefMut<Target = HashMap<Entity, CompiledGuardId>>,
+{
+    let conditions = world.resource::<GuardRegistry>();
+    let Some(guard) = world.get::<G>(hook_context.entity) else {
+        return;
+    };
+    match conditions.to_combinator_condition_id(guard) {
+        Ok(id) => {
+            let id = world.resource_mut::<CompiledGuardRegistry>().insert(id);
+            let mut buffer = world.resource_mut::<C>();
+            buffer.insert(hook_context.entity, id);
+        }
+        Err(e) => {
+            warn!(
+                "[GuardRegistry] This condition<{:?}> does not exist for state {:?}: {}",
+                guard, hook_context.entity, e
+            );
+        }
+    }
+}
+
+fn collect_guard_cache<G>(world: &mut World) -> HashMap<Entity, CompiledGuardId>
+where
+    G: Component + std::ops::Deref<Target = GuardCondition>,
+{
+    world.resource_scope(|world: &mut World, conditions: Mut<GuardRegistry>| {
+        world.resource_scope(
+            |world: &mut World, mut compiled_guard_registry: Mut<CompiledGuardRegistry>| {
+                let mut query = world.query_filtered::<(Entity, &G), With<HsmState>>();
+                query
+                    .iter(world)
+                    .filter_map(|(id, condition)| {
+                        match conditions.to_combinator_condition_id(condition) {
+                            Ok(condition_id) => {
+                                let condition_id = compiled_guard_registry.insert(condition_id);
+                                Some((id, condition_id))
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "[GuardRegistry] This condition<{:?}> does not exist: {}",
+                                    &**condition, e
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect::<HashMap<_, _>>()
+            },
+        )
+    })
 }

@@ -1,6 +1,6 @@
 [package]
 name = "bevy_hsm"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A hierarchical and finite state machine library for the Bevy game engine."
@@ -25,32 +25,35 @@ fsm = [
   "dep:bimap",
   "bevy_hsm_macros/fsm",
 ]
-hsm = ["bevy_hsm_macros/hsm"]
+hsm = ["dep:bimap", "bevy_hsm_macros/hsm"]
 
 [dependencies]
 bevy_hsm_macros = { version = "0.1.0", path = "crates/bevy_hsm_macros", optional = true }
-bevy = { version = "~0.18.1", default-features = false, features = [
+bevy = { version = "0.19.0", default-features = false, features = [
+  "bevy_asset",
+  "bevy_scene",
   "bevy_log",
+  "debug",
 ] }
-smallvec = "1.15.1"
+smallvec = "1.15.2"
 dyn-clone = { version = "1.0.20", optional = true }
 dyn-eq = { version = "0.1.3", optional = true }
 dyn-hash = { version = "1.0.0", optional = true }
 bimap = { version = "0.6.3", optional = true }
 
 [dev-dependencies]
-bevy = { version = "~0.18.1", default-features = false, features = [
-  "experimental_bevy_feathers",
+bevy = { version = "0.19.0", default-features = false, features = [
+  "bevy_feathers",
   "bevy_log",
   "ui",
 ] }
 
-[lints.clippy]
+[workspace.lints.clippy]
 type_complexity = "allow"
 
 [[example]]
-name = "switch_state"
-path = "examples/switch_state.rs"
+name = "guarded_counter"
+path = "examples/guarded_counter.rs"
 required-features = ["hsm", "history"]
 
 [[example]]
@@ -59,9 +62,9 @@ path = "examples/flashing_light.rs"
 required-features = ["hsm", "history"]
 
 [[example]]
-name = "more_states"
-path = "examples/more_states.rs"
-required-features = ["hybrid", "history"]
+name = "deep_chain"
+path = "examples/deep_chain.rs"
+required-features = ["hsm", "history"]
 
 [[example]]
 name = "simple_fsm"
@@ -79,9 +82,9 @@ path = "examples/macros/fsm.rs"
 required-features = ["fsm", "state_data"]
 
 [[example]]
-name = "forced_transition"
-path = "examples/forced_transition.rs"
-required-features = ["hybrid"]
+name = "character_controller"
+path = "examples/character_controller.rs"
+required-features = ["hsm"]
 
 [[example]]
 name = "vending_machine"
@@ -93,12 +96,32 @@ name = "calculator"
 path = "examples/calculator.rs"
 required-features = ["hybrid", "history"]
 
+[[example]]
+name = "hello_hsm"
+path = "examples/hello_hsm.rs"
+required-features = ["hsm"]
+
+[[example]]
+name = "guard_hsm"
+path = "examples/guard_hsm.rs"
+required-features = ["hsm"]
+
+[[example]]
+name = "interrupt_hsm"
+path = "examples/interrupt_hsm.rs"
+required-features = ["hsm", "history"]
+
+[[example]]
+name = "event_fsm"
+path = "examples/event_fsm.rs"
+required-features = ["fsm"]
+
 [[test]]
 name = "action_system"
 path = "tests/action_system.rs"
 required-features = ["hybrid", "history"]
 
 [[test]]
-name ="event"
+name = "event"
 path = "tests/event.rs"
-required-features = ["fsm","hsm"]
+required-features = ["fsm", "hsm"]

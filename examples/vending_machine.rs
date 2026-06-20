@@ -1,14 +1,28 @@
-//! 这个示例演示了如何使用带守卫（Guard）的有限状态机（FSM）。
+//! # 售货机 / Vending Machine
 //!
-//! 核心概念：
-//! - **FSM**: 一个简单的状态机，包含 `Idle` 和 `Dispensing` 两个状态。
-//! - **Guard**: 一个名为 `has_enough_money` 的 Bevy 系统，它会在状态转换前进行检查。
-//! - **事件驱动**: `Purchase` 事件触发状态转换的尝试。
+//! 本示例演示带复合守卫的有限状态机：
+//! - **FSM with Guards**: 使用 `FsmGraph::with_condition` 在转换上附加守卫
+//! - **复合守卫 (Compound Guard)**: `and("has_enough_money", "is_in_stock")` 组合多个条件
+//! - **ServiceTarget**: 守卫系统通过 `ctx.service_target` 访问售货机组件
+//! - **事件驱动**: `Purchase` 事件携带买家信息触发状态转换尝试
 //!
-//! 运行指南：
-//! - 按 `P` 键：尝试购买一件价格为 10 的商品。
-//! - 按 `M` 键：给玩家增加 10 金钱。
-//! - 按 `R` 键：向售货机添加 5 件商品库存。
+//! This example demonstrates an FSM with compound guards:
+//! - **FSM with Guards**: attach guards to transitions via `FsmGraph::with_condition`
+//! - **Compound guard**: `and("has_enough_money", "is_in_stock")` combines conditions
+//! - **ServiceTarget**: guard systems access vending machine components via `ctx.service_target`
+//! - **Event-driven**: `Purchase` event carries buyer info to trigger transition attempts
+//!
+//! ## 状态结构 / State Structure
+//! ```text
+//! Idle ──(Purchase, guard=and(has_enough_money, is_in_stock))──> Dispensing
+//!   ^                                                              │
+//!   └────────────────────────(next)────────────────────────────────┘
+//! ```
+//!
+//! ## 操作 / Controls
+//! - **P**: 尝试购买一件价格为 10 的商品 (触发 Purchase 事件)
+//! - **M**: 给玩家增加 10 金钱
+//! - **R**: 向售货机添加 5 件商品库存
 
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
@@ -129,13 +143,13 @@ fn setup(
     let id = commands.register_system(on_enter_idle);
     action_registry.insert("on_enter_idle", id);
 
-    fn create_resource(mut entity_commands: EntityCommands, states: &[Entity]) {
-        entity_commands
-            .commands()
-            .insert_resource(VendingMachineStates {
+    fn create_resource(entity_mut: &mut EntityWorldMut, states: &[Entity]) {
+        entity_mut.world_scope(|world: &mut World| {
+            world.insert_resource(VendingMachineStates {
                 idle: states[0],
                 dispensing: states[1],
             });
+        });
     }
 
     commands.spawn(fsm! {

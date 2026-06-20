@@ -1,4 +1,6 @@
-use std::{any::TypeId, fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc};
+use std::{
+    any::TypeId, borrow::Cow, fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc,
+};
 
 use bevy::{
     app::App,
@@ -229,16 +231,13 @@ impl SystemState for World {
         // 注册状态系统
         schedule
             .add_system_info(self, action_name.clone())
-            .expect("failed to add action system info");
+            .unwrap_or_else(|e| panic!("failed to add action system '{}': {}", action_name, e));
 
-        // 添加系统
-        let system = schedule.configuration_action_system(action_name.clone(), system);
         self.resource_scope(
             |world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
-                let index = schedule.push_system_index(action_name, &mut systems);
+                let index = systems.push(action_name.clone(), schedule.type_id());
                 let mut schedules = world.resource_mut::<Schedules>();
-                let schedule = schedules.entry(schedule);
-                schedule.add_systems(system.in_set(index));
+                schedule.add_system(schedules.as_mut(), action_name, system, index);
             },
         );
         self
@@ -252,10 +251,15 @@ impl SystemState for World {
         let action_name = action_name.into();
         schedule
             .remove_system_info(self, &action_name)
-            .expect("failed to remove action system info");
+            .unwrap_or_else(|e| panic!("failed to remove action system '{}': {}", action_name, e));
         schedule
-            .remove_system(self, action_name)
-            .expect("failed to remove action system from schedule");
+            .remove_system(self, action_name.clone())
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to remove action system '{}' from schedule: {}",
+                    action_name, e
+                )
+            });
         self
     }
 
@@ -266,15 +270,45 @@ impl SystemState for World {
         system: impl IntoActionSystem<M>,
     ) -> &mut Self {
         let action_name = action_name.into();
+        let action_name_clone = action_name.clone();
         schedule
             .replace_system(self, action_name, system)
-            .expect("failed to replace action system");
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to replace action system '{}': {}",
+                    action_name_clone, e
+                )
+            });
         self
     }
 }
 
-pub type GetBufferId =
-    Arc<dyn Fn(&mut World, Box<dyn FnOnce(&mut StateActionBuffer)>) + Send + Sync + 'static>;
+/// Trait for accessing a `StateActionBuffer` by schedule type.
+pub trait BufferAccess: Send + Sync {
+    fn access(&self, world: &mut World, f: Box<dyn FnOnce(&mut StateActionBuffer)>);
+}
+
+/// Concrete [`BufferAccess`] implementation for a specific schedule label type `T`.
+struct TypedBufferAccess<T: ScheduleLabel> {
+    action_name: SystemLabel,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: ScheduleLabel> BufferAccess for TypedBufferAccess<T> {
+    fn access(&self, world: &mut World, f: Box<dyn FnOnce(&mut StateActionBuffer)>) {
+        let mut buffers = world.resource_mut::<ScheduleActionBuffers<T>>();
+        let Some(buffer) = buffers.get_buffer_mut(&self.action_name) else {
+            warn!(
+                "{}",
+                StateMachineError::ActionNotFound(self.action_name.clone())
+            );
+            return;
+        };
+        f(buffer);
+    }
+}
+
+pub type GetBufferId = Arc<dyn BufferAccess>;
 
 /// 状态机系统
 ///
@@ -301,21 +335,40 @@ impl ActionDispatch {
         self.0.remove(action_name)
     }
 
-    pub(super) fn get<Q>(&self, action_name: &Q) -> Option<GetBufferId>
+    pub fn get<Q>(&self, action_name: &Q) -> Option<GetBufferId>
     where
         Q: Hash + Equivalent<SystemLabel> + ?Sized,
     {
         self.0.get(action_name).cloned()
     }
+
+    /// 返回所有已注册的系统名称
+    ///
+    /// Returns all registered system names
+    pub fn names(&self) -> impl Iterator<Item = &SystemLabel> {
+        self.0.keys()
+    }
+
+    /// 获取已注册系统的数量
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// 检查调度表是否为空
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 #[inline]
-fn action_dispatch_key<T: ScheduleLabel>(action_name: &SystemLabel) -> String {
+fn action_dispatch_key<T: ScheduleLabel>(action_name: &SystemLabel) -> Cow<'static, str> {
     let label = ShortName::of::<T>();
     if action_name.is_empty() {
-        label.to_string()
+        Cow::Borrowed(label.0)
     } else {
-        format!("{}:{}", label, action_name)
+        Cow::Owned(format!("{}:{}", label, action_name))
     }
 }
 
@@ -397,7 +450,9 @@ impl StateActionBuffer {
     /// Get the current state group
     #[inline(always)]
     pub fn current_actions(&self) -> Vec<ActionContext> {
-        self.curr.iter().cloned().collect()
+        let mut v = Vec::with_capacity(self.curr.len());
+        v.extend(self.curr.iter().copied());
+        v
     }
 
     /// 更新为当前状态组
@@ -474,12 +529,19 @@ impl StateActionBuffer {
     /// - Can add or modify state contexts in the scope
     /// * 作用域结束后，会自动更新缓存
     /// - The scope will automatically update the cache after ending
-    pub fn buffer_scope(
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `world` is an `UnsafeWorldCell` obtained from within
+    /// a system or hook context. Calling this from outside a Bevy system context results
+    /// in undefined behavior.
+    pub(crate) fn buffer_scope(
         world: UnsafeWorldCell,
         state_id: Entity,
         f: impl FnOnce(&mut StateActionBuffer) + 'static,
     ) {
-        // SAFETY: 该函数必须在系统中调用，并且保证在调用过程中不会有并发访问 `World` 的情况发生。
+        // SAFETY: The caller must guarantee this is invoked from within a Bevy system or
+        // hook, where no other code holds a mutable reference to the world.
         let world = unsafe { world.world_mut() };
         let Some(on_update_system) = world.get::<OnUpdateSystem>(state_id) else {
             return;
@@ -490,7 +552,7 @@ impl StateActionBuffer {
             return;
         };
 
-        (get_buffer_scope)(world, Box::new(f));
+        get_buffer_scope.access(world, Box::new(f));
     }
 }
 
@@ -561,7 +623,7 @@ fn create_buffer_updater_and_get_actions<T: ScheduleLabel>(
 
 pub(super) mod system_state_trait {
     use bevy::ecs::{
-        schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel},
+        schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel, Schedules},
         system::{IntoSystem, System},
         world::World,
     };
@@ -572,13 +634,12 @@ pub(super) mod system_state_trait {
             create_buffer_updater_and_get_actions, create_run_condition_for_action_system,
         },
         labels::SystemLabel,
-        prelude::ActionSystemRegistry,
     };
 
-    /// 系统状态
-    pub trait ExpandScheduleLabelFunction: Send + Sync + 'static {
+    /// ScheduleLabel 扩展方法，用于添加/移除/替换动作系统。
+    /// 保留为 trait 是因为 `ScheduleActionBuffers<T>` 需要具体的 ScheduleLabel 类型。
+    pub(crate) trait ExpandScheduleLabelFunction: Send + Sync + 'static {
         fn configuration_action_system<M>(
-            &self,
             action_name: SystemLabel,
             system: impl IntoActionSystem<M>,
         ) -> ScheduleConfigs<Box<dyn System<In = (), Out = ()> + 'static>>
@@ -591,30 +652,6 @@ pub(super) mod system_state_trait {
             action_system.run_if(create_run_condition_for_action_system::<Self>(action_name))
         }
 
-        #[inline]
-        fn push_system_index(
-            &self,
-            action_name: SystemLabel,
-            update_systems: &mut ActionSystemRegistry,
-        ) -> ActionSystemSet
-        where
-            Self: ScheduleLabel + Sized,
-        {
-            update_systems.push::<Self>(action_name)
-        }
-
-        #[inline]
-        fn replace_system_index(
-            &self,
-            action_name: &SystemLabel,
-            update_systems: &mut ActionSystemRegistry,
-        ) -> Option<ActionSystemSet>
-        where
-            Self: ScheduleLabel + Sized,
-        {
-            update_systems.replace::<Self>(action_name)
-        }
-
         fn add_system_info(
             &self,
             world: &mut World,
@@ -622,6 +659,20 @@ pub(super) mod system_state_trait {
         ) -> bevy::prelude::Result<()>
         where
             Self: Default;
+
+        fn add_system<M>(
+            self,
+            schedules: &mut Schedules,
+            action_name: SystemLabel,
+            system: impl IntoActionSystem<M>,
+            index: ActionSystemSet,
+        ) where
+            Self: ScheduleLabel + Sized,
+        {
+            let system = Self::configuration_action_system(action_name, system);
+            let schedule = schedules.entry(self);
+            schedule.add_systems(system.in_set(index));
+        }
 
         fn remove_system_info(
             &self,
@@ -667,17 +718,13 @@ impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
         buffers.insert_buffer(action_name.clone(), StateActionBuffer::default());
 
         let name = action_dispatch_key::<T>(&action_name);
-        let get_buffer_id = move |world: &mut World, f: Box<dyn FnOnce(&mut StateActionBuffer)>| {
-            let mut buffers = world.resource_mut::<ScheduleActionBuffers<T>>();
-            let Some(buffer) = buffers.get_buffer_mut(&action_name) else {
-                warn!("{}", StateMachineError::ActionNotFound(action_name.clone()));
-                return;
-            };
-            f(buffer);
-        };
+        let get_buffer_id: GetBufferId = Arc::new(TypedBufferAccess::<T> {
+            action_name: action_name.clone(),
+            _phantom: PhantomData,
+        });
 
         let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
-        hsm_action_systems.insert(name, Arc::new(get_buffer_id));
+        hsm_action_systems.insert(name, get_buffer_id);
         Ok(())
     }
 
@@ -699,7 +746,7 @@ impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
 
         let name = action_dispatch_key::<T>(action_name);
         let mut hsm_action_systems = world.get_resource_or_init::<ActionDispatch>();
-        hsm_action_systems.remove(name.as_str());
+        hsm_action_systems.remove(&SystemLabel(name));
         Ok(())
     }
 
@@ -709,7 +756,7 @@ impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
         action_name: SystemLabel,
     ) -> bevy::prelude::Result<()> {
         world.resource_scope(|world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
-            let Some(index) = systems.remove::<T>(&action_name) else {
+            let Some(index) = systems.remove(&action_name,TypeId::of::<T>()) else {
                 return Err(StateMachineError::ActionNotFound(action_name));
             };
             world.schedule_scope(self,move|world:&mut World,schedule:&mut Schedule|{
@@ -729,14 +776,14 @@ impl<T: ScheduleLabel> system_state_trait::ExpandScheduleLabelFunction for T {
     where
         Self: Clone,
     {
-        let system = self.configuration_action_system(action_name.clone(), system);
+        let system = Self::configuration_action_system(action_name.clone(), system);
         world.resource_scope(
                 |world: &mut World, mut systems: Mut<'_, ActionSystemRegistry>| {
                     let new_index=ActionSystemSet(systems.counter);
-                    let Some(index)= self.replace_system_index(&action_name,&mut systems) else {
+                    let Some(index)= systems.replace(&action_name, TypeId::of::<T>()) else {
                         return Err(StateMachineError::ActionNotFound(action_name));
                     };
-                    world.schedule_scope(self,|world: &mut World, schedule:&mut Schedule| {
+                    world.schedule_scope(self.clone(),|world: &mut World, schedule:&mut Schedule| {
                     schedule.add_systems(system.in_set(new_index));
 
                     schedule.remove_systems_in_set(index,world, bevy::ecs::schedule::ScheduleCleanupPolicy::RemoveSetAndSystemsAllowBreakages)?;
@@ -755,34 +802,37 @@ pub(crate) struct ActionSystemRegistry {
 }
 
 impl ActionSystemRegistry {
-    pub fn push<T: ScheduleLabel>(&mut self, action_name: SystemLabel) -> ActionSystemSet {
+    pub fn push(&mut self, action_name: SystemLabel, schedule_type_id: TypeId) -> ActionSystemSet {
         let index = ActionSystemSet(self.counter);
         self.systems
-            .entry(TypeId::of::<T>())
+            .entry(schedule_type_id)
             .or_default()
             .insert(action_name, index);
         self.counter += 1;
         index
     }
 
-    pub fn remove<T: ScheduleLabel>(
+    pub fn remove(
         &mut self,
         action_name: &SystemLabel,
+        schedule_type_id: TypeId,
     ) -> Option<ActionSystemSet> {
         self.systems
-            .get_mut(&TypeId::of::<T>())
+            .get_mut(&schedule_type_id)
             .and_then(|map| map.remove(action_name))
     }
 
-    pub fn replace<T: ScheduleLabel>(
+    pub fn replace(
         &mut self,
         action_name: &SystemLabel,
+        schedule_type_id: TypeId,
     ) -> Option<ActionSystemSet> {
-        let new = ActionSystemSet(self.counter);
-        self.counter += 1;
-        self.systems.get_mut(&TypeId::of::<T>()).and_then(|map| {
-            map.get_mut(action_name)
-                .map(|old| std::mem::replace(old, new))
+        self.systems.get_mut(&schedule_type_id).and_then(|map| {
+            map.get_mut(action_name).map(|old| {
+                let new = ActionSystemSet(self.counter);
+                self.counter += 1;
+                std::mem::replace(old, new)
+            })
         })
     }
 }

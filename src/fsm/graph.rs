@@ -195,13 +195,28 @@ impl FsmGraph {
         self.init_state = state;
     }
 
+    /// Removes a state and its transitions from the graph, returning the resulting
+    /// connected sub-graphs (if the graph splits into multiple disconnected components).
+    ///
+    /// Uses BFS to find connected components after removal:
+    /// 1. Removes the target state and collects all remaining nodes + predecessors
+    /// 2. Runs BFS from each unvisited node to find connected components
+    /// 3. For each component containing at least one successor of the removed state,
+    ///    builds a new [`FsmGraph`] with its own init_state and internal transitions
+    /// 4. Returns `None` if the removed state is the init_state (caller must change
+    ///    init_state first via [`FsmGraph::set_init_state`])
+    ///
+    /// # Returns
+    /// - `None` if the state is the init_state or not found in the graph
+    /// - `Some(vec![])` if the graph has no remaining nodes
+    /// - `Some(vec![...])` with one or more sub-graphs if the graph splits
     pub fn remove_state(&mut self, state: Entity) -> Option<Vec<FsmGraph>> {
         if self.init_state == state {
             return None;
         }
 
         let mut transitions = std::mem::take(&mut self.transitions);
-        let potential_roots: HashSet<Entity> = match transitions.remove(&state) {
+        let removed_state_successors: HashSet<Entity> = match transitions.remove(&state) {
             Some(outgoing) => outgoing.iter().collect(),
             None => {
                 self.transitions = transitions;
@@ -214,10 +229,15 @@ impl FsmGraph {
         for (&source, outgoing) in transitions.iter_mut() {
             outgoing.remove(state);
             all_nodes.insert(source);
-            all_nodes.extend(outgoing.iter());
             for successor in outgoing.iter() {
+                all_nodes.insert(successor);
                 predecessors.entry(successor).or_default().push(source);
             }
+        }
+
+        if all_nodes.is_empty() {
+            self.transitions = transitions;
+            return Some(Vec::new());
         }
 
         let mut all_components: Vec<HashSet<Entity>> = Vec::new();
@@ -274,10 +294,11 @@ impl FsmGraph {
                 }
             }
 
-            let init_state = potential_roots
+            let init_state = removed_state_successors
                 .iter()
                 .find(|&&root| component.contains(&root))
                 .copied()
+                // SAFETY: each SCC from Tarjan's algorithm contains at least one node.
                 .unwrap_or_else(|| *component.iter().next().unwrap());
 
             all_graphs.push(FsmGraph {
@@ -286,15 +307,15 @@ impl FsmGraph {
             });
         }
 
-        let main_graph_index = all_graphs
-            .iter()
-            .position(|g| g.transitions.contains_key(&self.init_state))
-            .expect("Main graph component with init_state should always be found");
+        let main_graph_index = all_graphs.iter().position(|g| {
+            g.transitions.contains_key(&self.init_state) || g.init_state == self.init_state
+        });
 
-        let mut main_graph = all_graphs.remove(main_graph_index);
-        main_graph.set_init_state(self.init_state);
-
-        *self = main_graph;
+        if let Some(index) = main_graph_index {
+            let mut main_graph = all_graphs.remove(index);
+            main_graph.set_init_state(self.init_state);
+            *self = main_graph;
+        }
 
         Some(all_graphs)
     }
@@ -304,7 +325,7 @@ impl FsmGraph {
             return None;
         }
 
-        if from == to || self.is_bridge(from, to) {
+        if from == to || self.can_reach(from, to) {
             return None;
         }
 
@@ -339,15 +360,15 @@ impl FsmGraph {
             .into_iter()
             .partition(|(k, _)| component_nodes.contains(k));
 
-        let mut edge_emptys = HashSet::new();
+        let mut edge_empties = HashSet::new();
         for (node, outgoing) in remaining_transitions.iter_mut() {
             outgoing.retain(|e| !component_nodes.contains(e));
             if outgoing.is_empty() {
-                edge_emptys.insert(*node);
+                edge_empties.insert(*node);
             }
         }
 
-        remaining_transitions.retain(|e, _| !edge_emptys.contains(e));
+        remaining_transitions.retain(|e, _| !edge_empties.contains(e));
         self.transitions = remaining_transitions;
 
         let mut subgraph = FsmGraph {
@@ -394,7 +415,7 @@ impl FsmGraph {
         self
     }
 
-    pub fn is_bridge(&self, from: Entity, to: Entity) -> bool {
+    pub fn can_reach(&self, from: Entity, to: Entity) -> bool {
         if from == to {
             return true;
         }
@@ -528,5 +549,71 @@ mod tests {
         graph3.with_add(ids[3], ids[6]);
         graph3.with_add(ids[3], ids[7]);
         assert_eq!(new_subgraph[0], graph3);
+    }
+
+    #[test]
+    fn test_graph_remove_nonexistent_state() {
+        let ids = [0, 1]
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
+            .to_vec();
+        let mut graph = FsmGraph::new(ids[0]);
+        // A state never referenced (neither as source nor target) is not in the graph
+        assert!(graph.remove_state(ids[1]).is_none());
+    }
+
+    #[test]
+    fn test_graph_remove_leaf_state() {
+        // Removing a state that has outgoing edges but whose targets exist as
+        // standalone entries does not split the graph. The result is Some(vec![]).
+        let ids = [0, 1, 2]
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
+            .to_vec();
+        let mut graph = FsmGraph::new(ids[0]);
+        graph.with_add(ids[0], ids[1]);
+        graph.with_add(ids[1], ids[2]);
+        graph.set_init_state(ids[1]);
+
+        // `with_add` only inserts the *source* state into the transition map.
+        // A leaf (ids[2]) is never a source, so it has no map entry.
+        // remove_state returns None when the state is not in the map.
+        assert!(graph.remove_state(ids[2]).is_none());
+    }
+
+    #[test]
+    fn test_graph_remove_bridge_state() {
+        // Chain: 0 -> 1 -> 2. Removing state 1 splits graph: {0} stays, {2} is orphaned.
+        // But {2} is not in the transition map (never a source), so it is not a
+        // valid sub-graph. Only {0} remains.
+        let ids = [0, 1, 2]
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
+            .to_vec();
+        let mut graph = FsmGraph::new(ids[0]);
+        graph.with_add(ids[0], ids[1]);
+        graph.with_add(ids[1], ids[2]);
+        graph.set_init_state(ids[0]);
+        let result = graph.remove_state(ids[1]);
+        assert!(result.is_some());
+        // Single component {0} remains → no sub-graphs
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_graph_remove_with_cycle() {
+        // Chain: 0 -> 1 -> 2 -> 1. Removing state 1: states 0 and 2 remain.
+        // State 2 (orphaned) is not in the transition map (never a source),
+        // so only state 0 stays. No sub-graphs.
+        let ids = [0, 1, 2]
+            .map(|i| Entity::from_raw_u32(i).expect("invalid raw entity id"))
+            .to_vec();
+        let mut graph = FsmGraph::new(ids[0]);
+        graph.with_add(ids[0], ids[1]);
+        graph.with_add(ids[1], ids[2]);
+        graph.with_add(ids[2], ids[1]); // cycle: 1 -> 2 -> 1
+        let result = graph.remove_state(ids[1]);
+        assert!(result.is_some());
+        // State 2 is a successor of the removed state and forms a sub-graph
+        let sub_graphs = result.unwrap();
+        assert_eq!(sub_graphs.len(), 1);
+        assert_eq!(sub_graphs[0].init_state(), ids[2]);
     }
 }

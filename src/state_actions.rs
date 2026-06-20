@@ -82,6 +82,25 @@ impl ActionRegistry {
         self.0.get(name).copied()
     }
 
+    /// 返回所有已注册的系统名称
+    ///
+    /// Returns all registered system names
+    pub fn names(&self) -> impl Iterator<Item = &SystemLabel> {
+        self.0.keys()
+    }
+
+    /// 获取已注册系统的数量
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// 检查注册表是否为空
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub(crate) fn get_action_id<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
@@ -148,10 +167,17 @@ impl TransitionRegistry {
     /// Remove a registered transition system
     pub fn remove<Q>(&mut self, name: &Q) -> Option<TransitionId>
     where
-        Q: Hash + Equivalent<SystemLabel>,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
         SystemLabel: Borrow<Q>,
     {
         self.0.remove(name)
+    }
+
+    /// 返回所有已注册的系统名称
+    ///
+    /// Returns all registered system names
+    pub fn names(&self) -> impl Iterator<Item = &SystemLabel> {
+        self.0.keys()
     }
 
     /// 获取已注册转换系统的数量
@@ -354,3 +380,14 @@ pub struct ServiceTarget(pub Entity);
 #[derive(Component, Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref)]
 #[relationship_target(relationship = ServiceTarget)]
 pub struct StateMachineForest(Vec<Entity>);
+
+/// Resolves the service target for a state machine entity.
+///
+/// If the state machine has a [`ServiceTarget`] component, returns the target entity.
+/// Otherwise returns the state machine entity itself.
+#[inline]
+pub(crate) fn get_service_target(world: &World, state_machine: Entity) -> Entity {
+    world
+        .get::<ServiceTarget>(state_machine)
+        .map_or(state_machine, |st| st.0)
+}

@@ -4,6 +4,8 @@ pub mod event;
 pub mod graph;
 #[cfg(feature = "history")]
 pub mod history;
+#[cfg(feature = "hybrid")]
+pub mod hybrid;
 pub mod state_machine;
 
 /// # FSM 状态
