@@ -161,7 +161,7 @@ fn handle_input(
             let Some(sm_comp) = world.get::<HsmStateMachine>(sm_entity) else {
                 return;
             };
-            let tree_id = sm_comp.state_tree();
+            let tree_id = sm_comp.state_graph_id();
             let Some(tree) = world.get::<StateTree>(tree_id) else {
                 return;
             };

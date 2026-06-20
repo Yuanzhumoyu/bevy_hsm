@@ -155,7 +155,7 @@ fn handle_input(
             return;
         };
 
-        let tree_id = sm_comp.state_tree();
+        let tree_id = sm_comp.state_graph_id();
         let curr = sm_comp.curr_state_id();
         let Some(tree) = world.get::<StateTree>(tree_id) else {
             return;

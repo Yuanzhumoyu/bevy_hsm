@@ -28,22 +28,9 @@
 use bevy::prelude::*;
 use bevy_hsm::prelude::*;
 
-// ── 计时器守卫 / Timer Guard ──────────────────────────────────────
-
-#[derive(Component, Default)]
-struct LightTimer(Timer);
-
-impl LightTimer {
-    fn guard_on_timer(
-        In(ctx): In<GuardContext>,
-        time: Res<Time<Fixed>>,
-        mut query: Query<&mut LightTimer>,
-    ) -> bool {
-        let mut timer = query.get_mut(ctx.service_target).unwrap();
-        timer.0.tick(time.delta());
-        timer.0.just_finished()
-    }
-}
+// 用于延迟触发跳转的目标
+#[derive(Component)]
+struct DelayTarget(Entity);
 
 // ── 动作系统 / Action Systems ─────────────────────────────────────
 
@@ -59,8 +46,17 @@ fn log_exit(In(ctx): In<ActionContext>, query: Query<&Name>) {
     }
 }
 
-fn log_light(states: In<Vec<ActionContext>>, query: Query<&Name>) -> Option<Vec<ActionContext>> {
-    for name in query.iter_many(states.iter().map(|c| c.state())) {
+fn log_light(
+    states: In<Vec<ActionContext>>,
+    mut commands: Commands,
+    query: Query<(&Name, &DelayTarget)>,
+) -> Option<Vec<ActionContext>> {
+    for ((name, delay_target), ctx) in query
+        .iter_many(states.iter().map(|c| c.state()))
+        .zip(states.iter())
+    {
+        let hsm_trigger = HsmTrigger::chain(ctx.state_machine, delay_target.0);
+        commands.delayed().secs(0.05).trigger(hsm_trigger);
         info!("~~~ Light: {}", name);
     }
     // Some(states.0)
@@ -69,52 +65,38 @@ fn log_light(states: In<Vec<ActionContext>>, query: Query<&Name>) -> Option<Vec<
 
 // ── 初始化 / Startup ──────────────────────────────────────────────
 
-fn setup(
-    mut commands: Commands,
-    mut guard_registry: ResMut<GuardRegistry>,
-    mut action_registry: ResMut<ActionRegistry>,
-) {
-    guard_registry.extend([(
-        "light_timer",
-        commands.register_system(LightTimer::guard_on_timer),
-    )]);
+fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
     action_registry.extend([
         ("log_enter", commands.register_system(log_enter)),
         ("log_exit", commands.register_system(log_exit)),
     ]);
 
-    let red = commands
-        .spawn((
-            Name::new("Red"),
-            HsmState::with(
-                StateTransitionStrategy::Parallel,
-                ExitTransitionBehavior::Rebirth,
-            ),
-            OnUpdateSystem::new("Update:log_light"),
-            AfterEnterSystem::new("log_enter"),
-            BeforeExitSystem::new("log_exit"),
-        ))
-        .id();
+    let red = commands.spawn_empty().id();
+    let yellow = commands.spawn_empty().id();
 
-    // Yellow 同时有 GuardEnter 和 GuardExit 使用同一个计时器守卫
-    // Yellow has both GuardEnter and GuardExit using the same timer guard
-    let yellow = commands
-        .spawn((
-            Name::new("Yellow"),
-            HsmState::default(),
-            OnUpdateSystem::new("Update:log_light"),
-            AfterEnterSystem::new("log_enter"),
-            BeforeExitSystem::new("log_exit"),
-            GuardEnter::new("light_timer"),
-            GuardExit::new("light_timer"),
-        ))
-        .id();
+    commands.entity(red).insert((
+        Name::new("Red"),
+        HsmState::with(
+            StateTransitionStrategy::Parallel,
+            ExitTransitionBehavior::Rebirth,
+        ),
+        OnUpdateSystem::new("Update:log_light"),
+        AfterEnterSystem::new("log_enter"),
+        BeforeExitSystem::new("log_exit"),
+        DelayTarget(yellow),
+    ));
 
-    let traversal = TraversalStrategy::default();
+    commands.entity(yellow).insert((
+        Name::new("Yellow"),
+        HsmState::default(),
+        OnUpdateSystem::new("Update:log_light"),
+        AfterEnterSystem::new("log_enter"),
+        BeforeExitSystem::new("log_exit"),
+        DelayTarget(red),
+    ));
+
     let mut state_tree = StateTree::new(red);
-    state_tree
-        .with_traversal(red, traversal)
-        .with_child(red, yellow);
+    state_tree.with_child(red, yellow);
 
     let sm = commands.spawn_empty().id();
     commands.entity(sm).insert((
@@ -127,7 +109,6 @@ fn setup(
             10,
         ),
         StateLifecycle::default(),
-        LightTimer(Timer::from_seconds(1.0, TimerMode::Repeating)),
     ));
 }
 

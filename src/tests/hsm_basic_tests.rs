@@ -17,14 +17,7 @@ fn hsm_boots_into_root_state() {
     assert_eq!(sm_comp.curr_state_id(), root_state);
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"Root:Enter".to_string()),
-        "Expected Root:Enter in {log:?}"
-    );
-    assert!(
-        log.contains(&"Root:Update".to_string()),
-        "Expected Root:Update in {log:?}"
-    );
+    assert_eq!(log, vec!["Root:Enter", "Root:Update"], "boot log");
 }
 
 #[test]
@@ -91,10 +84,7 @@ fn hsm_to_sub_and_back_lifecycle_events() {
     app.update();
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"Child:Enter".to_string()),
-        "Expected Child:Enter after ToSub, got {log:?}"
-    );
+    assert_eq!(log, vec!["Child:Enter", "Child:Update"], "ToSub log");
 
     // ToSuper → Root
     clear_log(&mut app);
@@ -102,13 +92,10 @@ fn hsm_to_sub_and_back_lifecycle_events() {
     app.update();
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"Child:Exit".to_string()),
-        "Expected Child:Exit after ToSuper, got {log:?}"
-    );
-    assert!(
-        log.contains(&"Root:Enter".to_string()),
-        "Expected Root:Enter after ToSuper (Rebirth), got {log:?}"
+    assert_eq!(
+        log,
+        vec!["Child:Exit", "Root:Enter", "Root:Update"],
+        "ToSuper log"
     );
 }
 

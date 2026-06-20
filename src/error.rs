@@ -6,6 +6,7 @@ use crate::labels::SystemLabel;
 
 /// The error type for operations within the state machine crate.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StateMachineError {
     /// A required `StateTree` component was not found on an entity.
     #[cfg(feature = "hsm")]

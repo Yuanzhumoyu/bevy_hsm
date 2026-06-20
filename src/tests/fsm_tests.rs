@@ -17,10 +17,7 @@ fn fsm_boots_into_initial_state() {
     assert_eq!(sm_comp.curr_state_id(), state_a);
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"A:Enter".to_string()),
-        "Expected A:Enter, got {log:?}"
-    );
+    assert_eq!(log, vec!["A:Enter", "A:Update"], "FSM boot log");
 }
 
 #[test]
@@ -41,14 +38,7 @@ fn fsm_next_transitions_forward() {
     assert_eq!(sm_comp.curr_state_id(), state_b);
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"A:Exit".to_string()),
-        "Expected A:Exit, got {log:?}"
-    );
-    assert!(
-        log.contains(&"B:Enter".to_string()),
-        "Expected B:Enter, got {log:?}"
-    );
+    assert_eq!(log, vec!["A:Exit", "B:Enter", "B:Update"], "FSM A->B log");
 }
 
 #[test]
@@ -109,22 +99,12 @@ fn fsm_multiple_transitions() {
     );
 
     let log = get_log(&app);
-    // Should contain both transitions: A:Exit, B:Enter, B:Exit, C:Enter
-    assert!(
-        log.contains(&"A:Exit".to_string()),
-        "Expected A:Exit, got {log:?}"
-    );
-    assert!(
-        log.contains(&"B:Enter".to_string()),
-        "Expected B:Enter, got {log:?}"
-    );
-    assert!(
-        log.contains(&"B:Exit".to_string()),
-        "Expected B:Exit, got {log:?}"
-    );
-    assert!(
-        log.contains(&"C:Enter".to_string()),
-        "Expected C:Enter, got {log:?}"
+    assert_eq!(
+        log,
+        vec![
+            "A:Exit", "B:Enter", "B:Update", "B:Exit", "C:Enter", "C:Update"
+        ],
+        "FSM A->B->C log"
     );
 }
 
@@ -494,7 +474,7 @@ fn fsm_interrupt_within_graph_and_resume() {
         state_c,
         "Should be in C after interrupt"
     );
-    assert!(sm_comp.is_interrupted());
+    assert!(sm_comp.interrupt_stack.is_interrupted());
 
     // Resume C → B (restores saved state)
     app.world_mut()
@@ -504,5 +484,5 @@ fn fsm_interrupt_within_graph_and_resume() {
 
     let sm_comp = app.world().get::<FsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_b, "Should resume to B");
-    assert!(!sm_comp.is_interrupted());
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }

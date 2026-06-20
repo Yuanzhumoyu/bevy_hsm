@@ -15,7 +15,7 @@ fn hsm_cross_tree_interrupt_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), root_a, "Should boot in RootA");
-    assert_eq!(sm_comp.state_tree(), tree_a_id);
+    assert_eq!(sm_comp.state_graph_id(), tree_a_id);
 
     // Interrupt to TreeB/RootB
     app.world_mut()
@@ -25,7 +25,7 @@ fn hsm_cross_tree_interrupt_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(
-        sm_comp.state_tree(),
+        sm_comp.state_graph_id(),
         tree_b_id,
         "Tree should switch to B after cross-tree interrupt"
     );
@@ -35,11 +35,11 @@ fn hsm_cross_tree_interrupt_and_resume() {
         "State should be RootB after cross-tree interrupt"
     );
     assert_eq!(
-        sm_comp.interrupt_depth(),
+        sm_comp.interrupt_stack.interrupt_depth(),
         1,
         "Interrupt stack should save old context"
     );
-    assert!(sm_comp.is_interrupted());
+    assert!(sm_comp.interrupt_stack.is_interrupted());
 
     // Resume back to TreeA
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -47,7 +47,7 @@ fn hsm_cross_tree_interrupt_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(
-        sm_comp.state_tree(),
+        sm_comp.state_graph_id(),
         tree_a_id,
         "Tree should switch back to A after resume"
     );
@@ -57,11 +57,11 @@ fn hsm_cross_tree_interrupt_and_resume() {
         "State should be RootA after resume"
     );
     assert_eq!(
-        sm_comp.interrupt_depth(),
+        sm_comp.interrupt_stack.interrupt_depth(),
         0,
         "Interrupt stack should be empty after resume"
     );
-    assert!(!sm_comp.is_interrupted());
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }
 
 #[test]
@@ -87,14 +87,18 @@ fn hsm_cross_tree_interrupt_to_child_and_resume() {
     app.update();
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
-    assert_eq!(sm_comp.state_tree(), tree_b_id, "Tree should switch to B");
+    assert_eq!(
+        sm_comp.state_graph_id(),
+        tree_b_id,
+        "Tree should switch to B"
+    );
     assert_eq!(sm_comp.curr_state_id(), child_b, "State should be ChildB");
     assert_eq!(
-        sm_comp.interrupt_depth(),
+        sm_comp.interrupt_stack.interrupt_depth(),
         1,
         "Should save one interrupt frame"
     );
-    assert!(sm_comp.is_interrupted());
+    assert!(sm_comp.interrupt_stack.is_interrupted());
 
     // Resume back to TreeA/ChildA
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -102,7 +106,7 @@ fn hsm_cross_tree_interrupt_to_child_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(
-        sm_comp.state_tree(),
+        sm_comp.state_graph_id(),
         tree_a_id,
         "Tree should switch back to A"
     );
@@ -112,7 +116,7 @@ fn hsm_cross_tree_interrupt_to_child_and_resume() {
         "State should be ChildA after resume"
     );
     assert_eq!(
-        sm_comp.interrupt_depth(),
+        sm_comp.interrupt_stack.interrupt_depth(),
         0,
         "Stack should be empty after resume"
     );
@@ -145,12 +149,13 @@ fn hsm_cross_tree_interrupt_exit_path_only_exits_old_tree() {
 
     // Verify final state
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
-    assert_eq!(sm_comp.state_tree(), tree_b_id);
+    assert_eq!(sm_comp.state_graph_id(), tree_b_id);
     assert_eq!(sm_comp.curr_state_id(), root_b);
 
     // Lifecycle log must contain Exit for both ChildA AND RootA,
     // and must NOT contain Enter for RootA (the old-tree parent).
     let log = get_log(&app);
+    println!("Lifecycle log: {:?}", log);
     let root_a_exits: Vec<_> = log.iter().filter(|e| *e == "RootA:Exit").collect();
     let root_a_enters: Vec<_> = log.iter().filter(|e| *e == "RootA:Enter").collect();
     let child_a_exits: Vec<_> = log.iter().filter(|e| *e == "ChildA:Exit").collect();
@@ -192,7 +197,7 @@ fn hsm_cross_tree_interrupt_only_target_state_receives_update() {
         child_b,
         "After interrupt, SM should be in ChildB"
     );
-    assert_eq!(sm_comp.state_tree(), tree_b_id);
+    assert_eq!(sm_comp.state_graph_id(), tree_b_id);
 
     clear_log(&mut app);
 
@@ -245,7 +250,7 @@ fn hsm_cross_tree_resume_only_enters_target_leaf() {
 
     // Verify final state
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
-    assert_eq!(sm_comp.state_tree(), tree_a_id);
+    assert_eq!(sm_comp.state_graph_id(), tree_a_id);
     assert_eq!(sm_comp.curr_state_id(), child_a);
 
     // The enter path must only contain Enter for the target leaf (ChildA),
@@ -335,7 +340,11 @@ fn hsm_same_tree_interrupt_and_resume() {
     );
 
     // Same-tree interrupt: A1 → B (under same root)
-    let state_tree = app.world().get::<HsmStateMachine>(sm).unwrap().state_tree();
+    let state_tree = app
+        .world()
+        .get::<HsmStateMachine>(sm)
+        .unwrap()
+        .state_graph_id();
     app.world_mut()
         .entity_mut(sm)
         .trigger(|id| HsmTrigger::interrupt(id, state_tree, b));
@@ -347,8 +356,8 @@ fn hsm_same_tree_interrupt_and_resume() {
         b,
         "Should be in B after same-tree interrupt"
     );
-    assert_eq!(sm_comp.interrupt_depth(), 1);
-    assert!(sm_comp.is_interrupted());
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 1);
+    assert!(sm_comp.interrupt_stack.is_interrupted());
 
     // Resume back to A1
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -356,6 +365,6 @@ fn hsm_same_tree_interrupt_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), a1, "Should resume to A1");
-    assert_eq!(sm_comp.interrupt_depth(), 0);
-    assert!(!sm_comp.is_interrupted());
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 0);
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }

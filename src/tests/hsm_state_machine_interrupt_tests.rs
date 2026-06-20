@@ -177,32 +177,34 @@ fn interrupt_stack_push_pop() {
         0,
     );
 
-    assert!(!sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert_eq!(sm.pop_interrupt(), None);
+    assert!(!sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert_eq!(sm.interrupt_stack.pop_interrupt(), None);
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(10));
-    assert!(sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 1);
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(10));
+    assert!(sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(20));
-    assert_eq!(sm.interrupt_depth(), 2);
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(20));
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 2);
 
     assert_eq!(
-        sm.pop_interrupt(),
+        sm.interrupt_stack.pop_interrupt(),
         Some(InterruptFrame::new(Entity::PLACEHOLDER, e(20)))
     );
-    assert_eq!(sm.interrupt_depth(), 1);
-    assert!(sm.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
+    assert!(sm.interrupt_stack.is_interrupted());
 
     assert_eq!(
-        sm.pop_interrupt(),
+        sm.interrupt_stack.pop_interrupt(),
         Some(InterruptFrame::new(Entity::PLACEHOLDER, e(10)))
     );
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert!(!sm.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert!(!sm.interrupt_stack.is_interrupted());
 
-    assert_eq!(sm.pop_interrupt(), None);
+    assert_eq!(sm.interrupt_stack.pop_interrupt(), None);
 }
 
 #[test]
@@ -214,14 +216,17 @@ fn clear_interrupt_stack() {
         0,
     );
 
-    sm.push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(1).unwrap());
-    sm.push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(2).unwrap());
-    sm.push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(3).unwrap());
-    assert_eq!(sm.interrupt_depth(), 3);
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(1).unwrap());
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(2).unwrap());
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, Entity::from_raw_u32(3).unwrap());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 3);
 
-    sm.clear_interrupt_stack();
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert!(!sm.is_interrupted());
+    sm.interrupt_stack.clear_interrupt_stack();
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert!(!sm.interrupt_stack.is_interrupted());
 }
 
 // ── Integration tests ─────────────────────────────────────────
@@ -254,8 +259,8 @@ fn basic_interrupt_and_resume() {
     // Verify state machine is in state B and interrupted
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_b);
-    assert!(sm_comp.is_interrupted());
-    assert_eq!(sm_comp.interrupt_depth(), 1);
+    assert!(sm_comp.interrupt_stack.is_interrupted());
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 1);
 
     // Resume B → A
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -273,7 +278,7 @@ fn basic_interrupt_and_resume() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), _state_a);
-    assert!(!sm_comp.is_interrupted());
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }
 
 #[test]
@@ -292,7 +297,7 @@ fn nested_interrupt() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_b);
-    assert_eq!(sm_comp.interrupt_depth(), 1);
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 1);
 
     // Nested interrupt B → C
     app.world_mut()
@@ -302,7 +307,7 @@ fn nested_interrupt() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_c);
-    assert_eq!(sm_comp.interrupt_depth(), 2);
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 2);
 
     // Resume C → B
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -310,7 +315,7 @@ fn nested_interrupt() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_b);
-    assert_eq!(sm_comp.interrupt_depth(), 1);
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 1);
 
     // Resume B → A
     app.world_mut().entity_mut(sm).trigger(HsmTrigger::resume);
@@ -318,8 +323,8 @@ fn nested_interrupt() {
 
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), _state_a);
-    assert_eq!(sm_comp.interrupt_depth(), 0);
-    assert!(!sm_comp.is_interrupted());
+    assert_eq!(sm_comp.interrupt_stack.interrupt_depth(), 0);
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }
 
 #[test]
@@ -339,7 +344,7 @@ fn resume_with_empty_stack_is_noop() {
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     // State should still be A
     assert_eq!(sm_comp.curr_state_id(), state_a);
-    assert!(!sm_comp.is_interrupted());
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }
 
 #[test]
@@ -359,7 +364,7 @@ fn interrupt_to_self_is_noop() {
     let sm_comp = app.world().get::<HsmStateMachine>(sm).unwrap();
     assert_eq!(sm_comp.curr_state_id(), state_a);
     // Stack should be empty since self-interrupt is skipped
-    assert!(!sm_comp.is_interrupted());
+    assert!(!sm_comp.interrupt_stack.is_interrupted());
 }
 
 #[test]

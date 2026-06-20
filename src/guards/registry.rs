@@ -4,6 +4,7 @@ use std::hash::Hash;
 use bevy::ecs::system::RegisteredSystemError;
 use bevy::platform::collections::{Equivalent, HashMap};
 use bevy::prelude::*;
+use bimap::BiMap;
 use smallvec::SmallVec;
 
 use super::condition::GuardCondition;
@@ -86,7 +87,7 @@ impl GuardRegistry {
     /// Remove a condition
     pub fn remove<Q>(&mut self, name: &Q) -> Option<GuardId>
     where
-        Q: Hash + Equivalent<SystemLabel>,
+        Q: Hash + Equivalent<SystemLabel> + ?Sized,
         SystemLabel: Borrow<Q>,
     {
         self.0.remove(name)
@@ -121,6 +122,100 @@ impl<S: Into<SystemLabel>, const N: usize> From<[(S, GuardId); N]> for GuardRegi
     }
 }
 
+/// 编译后守卫条件的轻量级标识符。
+///
+/// 由 [`CompiledGuardRegistry`] 分配，是一个可拷贝的 `usize` 索引。
+/// 状态守卫缓存（`GuardEnterCache` / `GuardExitCache`）存储此 ID
+/// 而非完整的 [`CompiledGuard`]，避免了重复的守卫条件占用多余内存。
+///
+/// A lightweight identifier for a compiled guard condition.
+///
+/// Allocated by [`CompiledGuardRegistry`], it is a copyable `usize` index.
+/// The state guard caches (`GuardEnterCache` / `GuardExitCache`) store this
+/// ID instead of the full [`CompiledGuard`], avoiding duplicate guard
+/// conditions consuming extra memory.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct CompiledGuardId(usize);
+
+/// [`CompiledGuard`] 的全局去重注册表。
+///
+/// 当多个 HSM 状态使用相同的守卫条件时，该条件只在此表中存储一份。
+/// 状态守卫缓存通过 [`CompiledGuardId`] 索引此表，而非各自持有副本。
+///
+/// 该表在 App 启动时由 [`GuardEnterCache`] 和 [`GuardExitCache`] 的
+/// `FromWorld` 实现填充，之后在有新状态插入时动态扩展。条目永不回收
+/// （状态通常在启动后不变更）。
+///
+/// # Example
+///
+/// ```ignore
+/// let guard = CompiledGuard::new(my_system_id);
+/// let mut registry = world.resource_mut::<CompiledGuardRegistry>();
+/// let id = registry.insert(guard);          // 插入或获取已有 ID
+/// let guard_ref = registry.get_by_id(id);   // 通过 ID 取回守卫
+/// ```
+///
+/// A global deduplication registry for [`CompiledGuard`].
+///
+/// When multiple HSM states share the same guard condition, it is stored
+/// only once in this table. State guard caches index into it via
+/// [`CompiledGuardId`] instead of holding their own copies.
+///
+/// The table is populated at App startup by the `FromWorld` implementations
+/// of [`GuardEnterCache`] and [`GuardExitCache`], then dynamically extended
+/// when new states are inserted. Entries are never reclaimed (states are
+/// expected to be stable after startup).
+#[derive(Resource, Default)]
+pub struct CompiledGuardRegistry {
+    map: BiMap<CompiledGuard, CompiledGuardId>,
+    count: usize,
+}
+
+impl CompiledGuardRegistry {
+    /// 插入一个编译后的守卫条件。如果已存在等价的守卫则返回已有 ID，
+    /// 不重复存储。
+    ///
+    /// Inserts a compiled guard condition. Returns the existing ID if the
+    /// guard already exists, without duplicating storage.
+    pub fn insert(&mut self, compiled_guard: CompiledGuard) -> CompiledGuardId {
+        if let Some(id) = self.map.get_by_left(&compiled_guard) {
+            return *id;
+        }
+        let id = self.count;
+        self.map.insert(compiled_guard, CompiledGuardId(id));
+        self.count += 1;
+        CompiledGuardId(id)
+    }
+
+    /// 通过 ID 获取编译后的守卫条件。
+    ///
+    /// Returns the compiled guard condition for the given ID.
+    pub fn get_by_id(&self, id: CompiledGuardId) -> Option<&CompiledGuard> {
+        self.map.get_by_right(&id)
+    }
+
+    /// 通过守卫条件本身查找其 ID。
+    ///
+    /// Looks up the ID for the given guard condition.
+    pub fn get_by_guard(&self, guard: &CompiledGuard) -> Option<CompiledGuardId> {
+        self.map.get_by_left(guard).copied()
+    }
+
+    /// 通过守卫条件移除条目，返回其 ID。
+    ///
+    /// Removes the entry for the given guard condition, returning its ID.
+    pub fn remove(&mut self, guard: &CompiledGuard) -> Option<CompiledGuardId> {
+        self.map.remove_by_left(guard).map(|(_, id)| id)
+    }
+
+    /// 通过 ID 移除条目，返回被移除的守卫条件。
+    ///
+    /// Removes the entry at the given ID, returning the guard.
+    pub fn remove_by_id(&mut self, id: CompiledGuardId) -> Option<CompiledGuard> {
+        self.map.remove_by_right(&id).map(|(guard, _)| guard)
+    }
+}
+
 /// # 编译后的组合守卫
 ///
 /// * 用于在运行时执行的已编译的守卫条件。
@@ -132,7 +227,7 @@ impl<S: Into<SystemLabel>, const N: usize> From<[(S, GuardId); N]> for GuardRegi
 /// * A compiled guard condition for execution at runtime.
 ///   [`CompiledGuard`] is compiled from [`GuardCondition`] and combines guard logic (like `and`, `or`, `not`)
 ///   with the actual `SystemId` for efficient execution during state transitions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompiledGuard {
     And(SmallVec<[Box<CompiledGuard>; 2]>),
     Or(SmallVec<[Box<CompiledGuard>; 2]>),

@@ -10,10 +10,11 @@ use crate::{
     error::{StateMachineError, error_event, error_event_world, trace_event},
     fsm::{event::FsmTrigger, graph::FsmGraph},
     guards::GuardCondition,
-    interrupt::{InterruptFrame, InterruptStack},
+    interrupt::InterruptStack,
     markers::Paused,
     prelude::{ActionDispatch, FsmTriggerType, GetBufferId, GuardRegistry, StateActionBuffer},
     state_actions::*,
+    state_machine::StateMachineState,
 };
 
 #[cfg(feature = "state_data")]
@@ -65,8 +66,8 @@ fn execute_transition_steps(
         state_machine_id,
         service_target,
     } = resolved;
-    if let Some((get_buff_id, ctx)) = remove_buffer {
-        (get_buff_id)(
+    if let Some((ref get_buff_id, ctx)) = remove_buffer {
+        get_buff_id.access(
             world,
             Box::new({
                 move |buffer: &mut StateActionBuffer| {
@@ -116,8 +117,8 @@ fn execute_transition_steps(
         ctx.queue_system_command(id).apply(world)?;
     }
 
-    if let Some((get_buff_id, ctx)) = add_buffer {
-        (get_buff_id)(
+    if let Some((ref get_buff_id, ctx)) = add_buffer {
+        get_buff_id.access(
             world,
             Box::new({
                 move |buffer: &mut StateActionBuffer| {
@@ -165,7 +166,7 @@ pub struct FsmStateMachine {
     pub(super) curr_state: Entity,
     /// 中断栈，保存被中断的状态图和状态以便后续恢复。支持嵌套中断。
     /// Interrupt stack that saves interrupted state graphs and states for later resume. Supports nested interrupts.
-    pub(super) interrupt_stack: InterruptStack,
+    pub(crate) interrupt_stack: InterruptStack,
     /// (当 `history` 特性启用时) 跟踪此状态机访问过的状态历史。
     /// (When the `history` feature is enabled) Tracks the history of visited states for this state machine.
     #[cfg(feature = "history")]
@@ -204,84 +205,61 @@ impl FsmStateMachine {
         }
     }
 
-    pub const fn graph_id(&self) -> Entity {
-        self.graph_id
-    }
-
-    pub const fn curr_state_id(&self) -> Entity {
-        self.curr_state
-    }
-
-    pub const fn init_state_id(&self) -> Entity {
-        self.init_state
-    }
-
     /// 设置当前状态, 并记录历史
     ///
     /// Set current state and record history
-    pub fn set_curr_state(&mut self, state: Entity) {
+    fn set_curr_state(&mut self, state: Entity) {
         #[cfg(feature = "history")]
         self.history.push(FsmHistoricalNode::new(
             state,
             self.graph_id,
-            self.interrupt_stack.interrupt_depth(),
+            self.interrupt_depth(),
         ));
         self.curr_state = state;
     }
 
-    /// 将当前状态图和状态压入中断栈，通常在触发中断前调用。
-    ///
-    /// Push the current state graph and state onto the interrupt stack.
-    #[inline]
-    pub fn push_interrupt(&mut self, graph_id: Entity, state: Entity) {
-        self.interrupt_stack.push_interrupt(graph_id, state);
-    }
+    /// Resets the state machine to its initial state, running the exit actions
+    /// for the current state and enter actions for the init state.
+    /// Used by [`Terminated::on_remove`] to gracefully shut down the state machine.
+    pub(crate) fn reset_to_init_state(
+        world: &mut DeferredWorld,
+        entity: Entity,
+    ) -> Result<(), StateMachineError> {
+        let service_target = get_service_target(world, entity);
+        let (curr_state, init_state) = {
+            let sm = world
+                .get::<FsmStateMachine>(entity)
+                .ok_or(StateMachineError::FsmStateMachineMissing(entity))?;
+            (sm.curr_state_id(), sm.init_state_id())
+        };
 
-    /// 从中断栈中弹出最近保存的状态帧，用于恢复。
-    ///
-    /// Pop the most recently saved interrupt frame from the interrupt stack for resume.
-    #[inline]
-    pub fn pop_interrupt(&mut self) -> Option<InterruptFrame> {
-        self.interrupt_stack.pop_interrupt()
-    }
+        // Run before_exit action
+        if let Some(id) = ActionRegistry::get_action_id::<BeforeExitSystem>(world, curr_state) {
+            let context = ActionContext::new(service_target, entity, curr_state);
+            context.run_system(world, id);
+        }
 
-    /// 检查状态机是否处于中断状态（即中断栈非空）。
-    ///
-    /// Check whether the state machine is currently interrupted.
-    #[inline]
-    pub fn is_interrupted(&self) -> bool {
-        self.interrupt_stack.is_interrupted()
-    }
+        #[cfg(feature = "state_data")]
+        StateScenePatch::reclaim_state_scene(world, curr_state, entity, service_target);
 
-    /// 返回当前中断嵌套深度。
-    ///
-    /// Returns the current interrupt nesting depth.
-    #[inline]
-    pub fn interrupt_depth(&self) -> usize {
-        self.interrupt_stack.interrupt_depth()
-    }
+        // Reset to init
+        if let Some(mut sm) = world.get_mut::<FsmStateMachine>(entity) {
+            sm.set_curr_state(init_state);
+        }
 
-    /// 清空中断栈，放弃所有待恢复的状态。
-    ///
-    /// Clear the interrupt stack, abandoning all pending resumes.
-    #[inline]
-    pub fn clear_interrupt_stack(&mut self) {
-        self.interrupt_stack.clear_interrupt_stack();
-    }
+        #[cfg(feature = "state_data")]
+        StateScenePatch::spawn_state_scene(world, init_state, entity, service_target);
 
-    #[cfg(feature = "history")]
-    pub fn clear_history(&mut self) {
-        self.history.clear();
+        // Run after_enter action
+        if let Some(id) = ActionRegistry::get_action_id::<AfterEnterSystem>(world, init_state) {
+            let context = ActionContext::new(service_target, entity, init_state);
+            context.run_system(world, id);
+        }
+
+        Ok(())
     }
 
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
-        #[cfg(feature = "history")]
-        let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
-            let err = StateMachineError::FsmStateMachineMissing(entity);
-            error!("{}", err);
-            return;
-        };
-        #[cfg(not(feature = "history"))]
         let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
             let err = StateMachineError::FsmStateMachineMissing(entity);
             error!("{}", err);
@@ -289,15 +267,11 @@ impl FsmStateMachine {
         };
 
         let curr_state = fsm_state_machine.curr_state_id();
-
         #[cfg(feature = "history")]
-        {
-            let graph_id = fsm_state_machine.graph_id;
-            let depth = fsm_state_machine.interrupt_stack.interrupt_depth();
-            fsm_state_machine
-                .history
-                .push(FsmHistoricalNode::new(curr_state, graph_id, depth));
-        }
+        let graph_id = fsm_state_machine.graph_id;
+        #[cfg(feature = "history")]
+        let depth = fsm_state_machine.interrupt_stack.interrupt_depth();
+
         let service_target = get_service_target(&world, entity);
 
         if let Some(id) =
@@ -323,6 +297,12 @@ impl FsmStateMachine {
                 buffer.add(context);
             },
         );
+
+        #[cfg(feature = "history")]
+        if let Some(mut sm) = world.get_mut::<FsmStateMachine>(entity) {
+            sm.history
+                .push(FsmHistoricalNode::new(curr_state, graph_id, depth));
+        }
     }
 
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
@@ -367,7 +347,7 @@ impl FsmStateMachine {
         mut commands: Commands,
         guard_registry: Res<GuardRegistry>,
         fsm_graph: Query<&FsmGraph>,
-        query: Query<&FsmStateMachine, Without<Paused>>,
+        query: Populated<&FsmStateMachine, Without<Paused>>,
     ) {
         let FsmTrigger {
             state_machine,
@@ -375,12 +355,8 @@ impl FsmStateMachine {
         } = on.event_mut();
         let state_machine_id = *state_machine;
 
+        // 当状态机不存在或暂停时，忽略事件
         let Ok(state_machine) = query.get(state_machine_id) else {
-            error_event(
-                &mut commands,
-                state_machine_id,
-                StateMachineError::FsmStateMachineMissing(state_machine_id),
-            );
             return;
         };
         let Ok(fsm_graph) = fsm_graph.get(state_machine.graph_id) else {
@@ -471,7 +447,7 @@ impl FsmStateMachine {
                         None => return Ok(()),
                     };
                     if let Some(mut sm) = world.get_mut::<FsmStateMachine>(state_machine_id) {
-                        sm.push_interrupt(save_graph, save_state);
+                        sm.interrupt_stack.push_interrupt(save_graph, save_state);
                         sm.graph_id = target_graph;
                     }
                     let resolved =
@@ -512,7 +488,7 @@ impl FsmStateMachine {
                     } {
                         trace!("Resume to same state and graph, skipping");
                         if let Some(mut sm) = world.get_mut::<FsmStateMachine>(state_machine_id) {
-                            sm.pop_interrupt();
+                            sm.interrupt_stack.pop_interrupt();
                         }
                         return Ok(());
                     }
@@ -527,7 +503,7 @@ impl FsmStateMachine {
                         else {
                             return Ok(());
                         };
-                        sm.pop_interrupt();
+                        sm.interrupt_stack.pop_interrupt();
                         (sm.graph_id != frame.graph_id).then_some(frame.graph_id)
                     };
 
@@ -586,6 +562,40 @@ impl FsmStateMachine {
             let resolved = resolve_transition_in_world(world, from, target, state_machine_id);
             execute_transition_steps(world, resolved, None)
         });
+    }
+}
+
+impl crate::state_machine::StateMachineState for FsmStateMachine {
+    #[inline]
+    fn curr_state_id(&self) -> Entity {
+        self.curr_state
+    }
+
+    #[inline]
+    fn init_state_id(&self) -> Entity {
+        self.init_state
+    }
+
+    #[inline]
+    fn state_graph_id(&self) -> Entity {
+        self.graph_id
+    }
+
+    #[inline]
+    fn interrupt_stack(&self) -> &InterruptStack {
+        &self.interrupt_stack
+    }
+
+    #[inline]
+    #[cfg(feature = "history")]
+    fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    #[inline]
+    #[cfg(feature = "history")]
+    fn clear_history(&mut self) {
+        self.history.clear();
     }
 }
 

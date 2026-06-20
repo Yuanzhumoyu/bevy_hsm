@@ -21,33 +21,33 @@ fn interrupt_stack_push_pop() {
         0,
     );
 
-    assert!(!sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert!(sm.pop_interrupt().is_none());
+    assert!(!sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert!(sm.interrupt_stack.pop_interrupt().is_none());
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(1));
-    assert!(sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 1);
+    sm.interrupt_stack.push_interrupt(Entity::PLACEHOLDER, e(1));
+    assert!(sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(2));
-    assert_eq!(sm.interrupt_depth(), 2);
+    sm.interrupt_stack.push_interrupt(Entity::PLACEHOLDER, e(2));
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 2);
 
     // LIFO order
     assert_eq!(
-        sm.pop_interrupt(),
+        sm.interrupt_stack.pop_interrupt(),
         Some(InterruptFrame::new(Entity::PLACEHOLDER, e(2)))
     );
-    assert_eq!(sm.interrupt_depth(), 1);
-    assert!(sm.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
+    assert!(sm.interrupt_stack.is_interrupted());
 
     assert_eq!(
-        sm.pop_interrupt(),
+        sm.interrupt_stack.pop_interrupt(),
         Some(InterruptFrame::new(Entity::PLACEHOLDER, e(1)))
     );
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert!(!sm.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert!(!sm.interrupt_stack.is_interrupted());
 
-    assert!(sm.pop_interrupt().is_none());
+    assert!(sm.interrupt_stack.pop_interrupt().is_none());
 }
 
 #[test]
@@ -60,15 +60,18 @@ fn clear_interrupt_stack() {
         0,
     );
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(10));
-    sm.push_interrupt(Entity::PLACEHOLDER, e(20));
-    sm.push_interrupt(Entity::PLACEHOLDER, e(30));
-    assert_eq!(sm.interrupt_depth(), 3);
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(10));
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(20));
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(30));
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 3);
 
-    sm.clear_interrupt_stack();
-    assert!(!sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 0);
-    assert!(sm.pop_interrupt().is_none());
+    sm.interrupt_stack.clear_interrupt_stack();
+    assert!(!sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
+    assert!(sm.interrupt_stack.pop_interrupt().is_none());
 }
 
 #[test]
@@ -81,12 +84,13 @@ fn set_curr_state_preserves_interrupt_stack() {
         0,
     );
 
-    sm.push_interrupt(Entity::PLACEHOLDER, e(42));
+    sm.interrupt_stack
+        .push_interrupt(Entity::PLACEHOLDER, e(42));
     sm.set_curr_state(e(99));
 
     // interrupt stack must survive normal state changes
     assert_eq!(
-        sm.pop_interrupt(),
+        sm.interrupt_stack.pop_interrupt(),
         Some(InterruptFrame::new(Entity::PLACEHOLDER, e(42)))
     );
     assert_eq!(sm.curr_state_id(), e(99));
@@ -245,7 +249,7 @@ fn create_three_state_fsm(app: &mut App) -> (Entity, Entity, Entity, Entity) {
 fn interrupt(app: &mut App, sm: Entity, target_state: Entity) {
     let graph_id = {
         let world = app.world();
-        world.get::<FsmStateMachine>(sm).unwrap().graph_id()
+        world.get::<FsmStateMachine>(sm).unwrap().state_graph_id()
     };
     app.world_mut()
         .entity_mut(sm)
@@ -318,8 +322,8 @@ fn basic_interrupt_and_resume() {
         state_b,
         "should be in B after interrupt"
     );
-    assert!(sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 1);
+    assert!(sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
 
     // Resume
     resume(&mut app, sm_id).unwrap();
@@ -330,8 +334,8 @@ fn basic_interrupt_and_resume() {
         state_a,
         "should return to A after resume"
     );
-    assert!(!sm.is_interrupted());
-    assert_eq!(sm.interrupt_depth(), 0);
+    assert!(!sm.interrupt_stack.is_interrupted());
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
 }
 
 /// Interrupting to the current state is a no-op.
@@ -343,15 +347,18 @@ fn self_interrupt_is_noop() {
 
     let before = get_sm(&app, sm_id);
     assert_eq!(before.curr_state_id(), state_a);
-    assert!(!before.is_interrupted());
+    assert!(!before.interrupt_stack.is_interrupted());
 
     // Interrupt to self
     interrupt(&mut app, sm_id, state_a);
 
     let after = get_sm(&app, sm_id);
     assert_eq!(after.curr_state_id(), state_a, "state should not change");
-    assert!(!after.is_interrupted(), "stack should be empty");
-    assert_eq!(after.interrupt_depth(), 0);
+    assert!(
+        !after.interrupt_stack.is_interrupted(),
+        "stack should be empty"
+    );
+    assert_eq!(after.interrupt_stack.interrupt_depth(), 0);
 }
 
 /// Resume with an empty interrupt stack is a no-op.
@@ -365,7 +372,7 @@ fn resume_empty_stack_is_noop() {
 
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_a);
-    assert!(!sm.is_interrupted());
+    assert!(!sm.interrupt_stack.is_interrupted());
 }
 
 /// Nested interrupts: A → B → C, then resume C → B → A.
@@ -379,25 +386,25 @@ fn nested_interrupt() {
     interrupt(&mut app, sm_id, state_b);
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_b);
-    assert_eq!(sm.interrupt_depth(), 1);
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
 
     // B → C (nested)
     interrupt(&mut app, sm_id, state_c);
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_c);
-    assert_eq!(sm.interrupt_depth(), 2);
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 2);
 
     // Resume C → B
     resume(&mut app, sm_id).unwrap();
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_b);
-    assert_eq!(sm.interrupt_depth(), 1);
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 1);
 
     // Resume B → A
     resume(&mut app, sm_id).unwrap();
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_a);
-    assert_eq!(sm.interrupt_depth(), 0);
+    assert_eq!(sm.interrupt_stack.interrupt_depth(), 0);
 }
 
 /// Interrupt preserves the state that was running at interrupt time
@@ -416,12 +423,12 @@ fn interrupt_saves_current_not_initial_state() {
     interrupt(&mut app, sm_id, state_c);
     let sm = get_sm(&app, sm_id);
     assert_eq!(sm.curr_state_id(), state_c);
-    assert!(sm.is_interrupted());
+    assert!(sm.interrupt_stack.is_interrupted());
 
     // Resume should go back to B, not A
     resume(&mut app, sm_id).unwrap();
     assert_eq!(get_sm(&app, sm_id).curr_state_id(), state_b);
-    assert!(!get_sm(&app, sm_id).is_interrupted());
+    assert!(!get_sm(&app, sm_id).interrupt_stack.is_interrupted());
 }
 
 /// Verify lifecycle event ordering during interrupt + resume.
@@ -528,7 +535,7 @@ fn multiple_interrupt_resume_cycles() {
     assert_eq!(get_sm(&app, sm_id).curr_state_id(), state_a);
 
     // Verify stack is clean
-    assert!(!get_sm(&app, sm_id).is_interrupted());
+    assert!(!get_sm(&app, sm_id).interrupt_stack.is_interrupted());
 }
 
 /// Clear the interrupt stack mid-flight and verify resume becomes a no-op.
@@ -541,16 +548,16 @@ fn clear_interrupt_stack_midflight() {
     // Nested interrupts: A → B → C
     interrupt(&mut app, sm_id, state_b);
     interrupt(&mut app, sm_id, state_c);
-    assert_eq!(get_sm(&app, sm_id).interrupt_depth(), 2);
+    assert_eq!(get_sm(&app, sm_id).interrupt_stack.interrupt_depth(), 2);
 
     // Clear the stack while still in C
     app.world_mut()
         .entity_mut(sm_id)
         .entry::<FsmStateMachine>()
-        .and_modify(|mut sm| sm.clear_interrupt_stack());
+        .and_modify(|mut sm| sm.interrupt_stack.clear_interrupt_stack());
     app.update();
 
-    assert!(!get_sm(&app, sm_id).is_interrupted());
+    assert!(!get_sm(&app, sm_id).interrupt_stack.is_interrupted());
 
     // Resume should be a no-op now
     resume(&mut app, sm_id).unwrap();

@@ -28,7 +28,6 @@
 
 use bevy::{
     color::palettes::css::NAVY,
-    ecs::system::EntityCommands,
     feathers::{
         FeathersPlugins, controls::FeathersButton, dark_theme::create_dark_theme, theme::UiTheme,
     },
@@ -227,10 +226,12 @@ fn hsm_exit_commands(
     In(contexts): In<Vec<ActionContext>>,
     mut commands: Commands,
 ) -> Option<Vec<ActionContext>> {
-    for context in contexts {
+    // Trigger ToSuper on every update tick: the command state runs once,
+    // triggers exit back to ProcessingInput, which resumes the nested FSM.
+    for context in &contexts {
         commands.trigger(HsmTrigger::to_super(context.state_machine));
     }
-    None
+    Some(contexts)
 }
 
 fn precedence(op: char) -> i32 {
@@ -511,9 +512,11 @@ fn setup(mut commands: Commands, mut calculator: ResMut<Calculator>) {
         .id();
 
     commands.spawn(hsm! {
-        #[state(after_enter=inpt_enter:debug_input_state("Input Enter",|mut c|{c.insert(FsmMark);}),
-                before_exit=input_exit:debug_input_state("Input Exit",|_|{}),
-                fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10))]
+        #[state(
+            after_enter=inpt_enter:debug_input_state("Input Enter",|mut c|{c.insert(FsmMark);}),
+            before_exit=input_exit:debug_input_state("Input Exit",|_|{}),
+            fsm_blueprint=FsmBlueprint::new(fsm_graph_id, 10)
+        )]
         :ProcessingInput(
             #[state(after_enter=on_clear, on_update="Update:hsm_exit_commands")]: Clear,
             #[state(after_enter=on_equals, on_update="Update:hsm_exit_commands")]: Equals,
@@ -609,7 +612,7 @@ fn setup_ui(mut commands: Commands) {
             let key_row = Vec::from_iter(row.into_iter().map(move |key| {
                 let (key, button_type) = key;
                 bsn! {
-                    :FeathersButton
+                    @FeathersButton
                     Node {
                         flex_grow: 1.0,
                     }
@@ -669,7 +672,7 @@ fn setup_ui(mut commands: Commands) {
             BorderColor::all(Color::WHITE)
             Children[
                 Text("virtual keyboard"),
-                :virtual_keyboard(buttons),
+                virtual_keyboard(buttons),
             ]
             )
         ]

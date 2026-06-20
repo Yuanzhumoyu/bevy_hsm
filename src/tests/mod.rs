@@ -5,3 +5,4 @@ mod hsm_chain_tests;
 mod hsm_guard_tests;
 mod hsm_interrupt_tests;
 mod hsm_misc_tests;
+mod regression_tests;

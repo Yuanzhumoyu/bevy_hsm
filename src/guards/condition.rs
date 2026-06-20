@@ -156,20 +156,24 @@ impl Display for GuardCondition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GuardCondition::And(ands) => {
-                let joined = ands
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "and({})", joined)
+                write!(f, "and(")?;
+                for (i, x) in ands.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", x)?;
+                }
+                write!(f, ")")
             }
             GuardCondition::Or(ors) => {
-                let joined = ors
-                    .iter()
-                    .map(|x| format!("{}", x))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "or({})", joined)
+                write!(f, "or(")?;
+                for (i, x) in ors.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", x)?;
+                }
+                write!(f, ")")
             }
             GuardCondition::Not(not) => write!(f, "not({})", not),
             GuardCondition::Id(id) => write!(f, "{}", id),

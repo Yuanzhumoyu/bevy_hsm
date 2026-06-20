@@ -291,7 +291,7 @@ impl ConditionRelationship {
 
 impl Debug for ConditionRelationship {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("[{} -> {}]", self.from, self.to))
+        write!(f, "[{} -> {}]", self.from, self.to)
     }
 }
 
@@ -316,11 +316,10 @@ pub enum TransitionRelationship {
 
 impl Debug for TransitionRelationship {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            TransitionRelationship::Initial(to) => format!("<{}]", to),
-            TransitionRelationship::Transition(from, to) => format!("[{} -> {}]", from, to),
-            TransitionRelationship::Final(from) => format!("[{}>", from),
-        };
-        f.write_str(&s)
+        match self {
+            TransitionRelationship::Initial(to) => write!(f, "<{}]", to),
+            TransitionRelationship::Transition(from, to) => write!(f, "[{} -> {}]", from, to),
+            TransitionRelationship::Final(from) => write!(f, "[{}>", from),
+        }
     }
 }

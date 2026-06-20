@@ -156,12 +156,12 @@ fn handle_input(
             };
             info!(
                 "Interrupt! Saving context (tree={:?}, state={:?}), jumping to Alert",
-                sm_comp.state_tree(),
+                sm_comp.state_graph_id(),
                 sm_comp.curr_state_id()
             );
             info!(
                 "  Interrupt depth before: {} (+1)",
-                sm_comp.interrupt_depth()
+                sm_comp.interrupt_stack().interrupt_depth()
             );
             world
                 .entity_mut(sm_entity)
@@ -175,10 +175,10 @@ fn handle_input(
             let Some(sm_comp) = world.get::<HsmStateMachine>(sm_entity) else {
                 return;
             };
-            if sm_comp.is_interrupted() {
+            if sm_comp.interrupt_stack().is_interrupted() {
                 info!(
                     "Resume! Restoring context, depth before: {} (-1)",
-                    sm_comp.interrupt_depth()
+                    sm_comp.interrupt_stack().interrupt_depth()
                 );
                 world.entity_mut(sm_entity).trigger(HsmTrigger::resume);
             } else {

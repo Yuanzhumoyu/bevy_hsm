@@ -380,9 +380,10 @@ fn hsm_parallel_strategy_parent_reenters_on_child_enter() {
     // Boot → Parent enters and updates
     app.update();
     let log = get_log(&app);
-    assert!(
-        log.contains(&"ParallelParent:Enter".to_string()),
-        "Parent should enter on boot, got {log:?}"
+    assert_eq!(
+        log,
+        vec!["ParallelParent:Enter", "ParallelParent:Update"],
+        "boot log"
     );
 
     clear_log(&mut app);
@@ -405,20 +406,13 @@ fn hsm_parallel_strategy_parent_reenters_on_child_enter() {
     );
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"ParallelParent:Exit".to_string()),
-        "Parent should exit during ToSub under Parallel, got {log:?}"
-    );
-    assert!(
-        log.contains(&"NestedChild:Enter".to_string()),
-        "Child should enter during ToSub, got {log:?}"
-    );
-
-    // Verify ordering: Parent:Exit happens before Child:Enter
-    let exit_pos = log.iter().position(|e| e == "ParallelParent:Exit");
-    let enter_pos = log.iter().position(|e| e == "NestedChild:Enter");
-    assert!(
-        exit_pos < enter_pos,
-        "Parent:Exit should precede Child:Enter, got {log:?}"
+    assert_eq!(
+        log,
+        vec![
+            "ParallelParent:Exit",
+            "NestedChild:Enter",
+            "NestedChild:Update"
+        ],
+        "ToSub under Parallel"
     );
 }

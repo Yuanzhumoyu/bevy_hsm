@@ -62,6 +62,8 @@ pub mod markers;
 pub mod state_actions;
 #[cfg(feature = "state_data")]
 pub mod state_data;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+pub mod state_machine;
 
 #[cfg(feature = "hsm")]
 use std::sync::Arc;
@@ -72,6 +74,7 @@ use bevy::prelude::*;
 
 use crate::action_dispatcher::ActionDispatch;
 use crate::guards::GuardRegistry;
+use crate::guards::registry::CompiledGuardRegistry;
 use crate::prelude::TransitionRegistry;
 use crate::state_actions::ActionRegistry;
 
@@ -117,6 +120,7 @@ impl Plugin for StateMachinePlugin {
         app.init_resource::<ActionDispatch>();
         app.init_resource::<ActionRegistry>();
         app.init_resource::<GuardRegistry>();
+        app.init_resource::<CompiledGuardRegistry>();
         app.init_resource::<TransitionRegistry>();
 
         #[cfg(feature = "hsm")]
@@ -133,7 +137,7 @@ impl Plugin for StateMachinePlugin {
 
             (self.transition_system)(app);
 
-            app.add_observer(hsm::state_machine::HsmStateMachine::handle_hsm_trigger);
+            app.add_observer(hsm::trigger_handler::handle_hsm_trigger);
         }
 
         #[cfg(feature = "fsm")]
@@ -216,6 +220,9 @@ pub mod prelude {
 
     #[cfg(feature = "fsm")]
     pub use bevy_hsm_macros::{fsm, fsm_graph};
+
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
+    pub use crate::state_machine::StateMachineState;
 
     pub use bevy_hsm_macros::combination_condition;
 }

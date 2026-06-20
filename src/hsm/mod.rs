@@ -12,6 +12,7 @@ pub mod state_tree;
 pub mod strategy;
 pub mod transition;
 pub mod transition_strategy;
+pub(crate) mod trigger_handler;
 
 /// # HSM 状态
 /// * 一个组件，用于将一个实体标识为层级状态机（HSM）中的一个状态，并配置其行为。

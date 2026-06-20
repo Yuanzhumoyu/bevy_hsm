@@ -76,6 +76,10 @@ impl FsmStateHistory {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.history.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.history.is_empty()
     }

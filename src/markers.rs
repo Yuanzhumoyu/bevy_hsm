@@ -1,11 +1,12 @@
-use std::sync::Arc;
-
 use bevy::{
     ecs::{lifecycle::HookContext, world::DeferredWorld},
     prelude::*,
 };
 
 use crate::{context::*, prelude::StateActionBuffer, state_actions::*};
+
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use crate::state_machine::StateMachineState;
 
 #[cfg(feature = "hsm")]
 use crate::hsm::state_machine::HsmStateMachine;
@@ -26,79 +27,12 @@ pub struct Terminated;
 impl Terminated {
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
         #[cfg(feature = "fsm")]
-        'fsm: {
-            let service_target = match world.get::<ServiceTarget>(entity) {
-                Some(service_target) => service_target.0,
-                None => entity,
-            };
-
-            let Some(fsm_state_machine) = world.get::<FsmStateMachine>(entity) else {
-                break 'fsm;
-            };
-
-            let curr_state = fsm_state_machine.curr_state_id();
-            'before_exit: {
-                let Some(before_exit) = world.get::<BeforeExitSystem>(curr_state) else {
-                    break 'before_exit;
-                };
-                let Some(id) = world.resource::<ActionRegistry>().get(before_exit) else {
-                    break 'before_exit;
-                };
-                let context = ActionContext::new(service_target, entity, curr_state);
-                context.run_system(&mut world, id);
-            }
-
-            #[cfg(feature = "state_data")]
-            crate::state_data::StateScenePatch::reclaim_state_scene(
-                &mut world,
-                curr_state,
-                entity,
-                service_target,
-            );
-
-            let Some(mut fsm_state_machine) = world.get_mut::<FsmStateMachine>(entity) else {
-                break 'fsm;
-            };
-
-            let init_state = fsm_state_machine.init_state_id();
-            fsm_state_machine.set_curr_state(init_state);
-
-            #[cfg(feature = "state_data")]
-            crate::state_data::StateScenePatch::spawn_state_scene(
-                &mut world,
-                init_state,
-                entity,
-                service_target,
-            );
-
-            'after_enter: {
-                let Some(after_enter) = world.get::<AfterEnterSystem>(init_state) else {
-                    break 'after_enter;
-                };
-                let Some(id) = world.resource::<ActionRegistry>().get(after_enter) else {
-                    break 'after_enter;
-                };
-                let context = ActionContext::new(service_target, entity, init_state);
-                context.run_system(&mut world, id);
-            }
+        {
+            let _ = FsmStateMachine::reset_to_init_state(&mut world, entity);
         }
 
         #[cfg(feature = "hsm")]
-        if let Some(mut state_machine) = world.get_mut::<HsmStateMachine>(entity) {
-            use crate::prelude::StateLifecycle;
-
-            state_machine.clear_next_states();
-            state_machine.clear_interrupt_stack();
-            #[cfg(feature = "history")]
-            state_machine.clear_history();
-
-            let init_state = state_machine.init_state();
-            state_machine.set_curr_state(init_state);
-            world
-                .commands()
-                .entity(entity)
-                .insert(StateLifecycle::Enter);
-        }
+        HsmStateMachine::reset_to_init_state(&mut world, entity);
     }
 }
 
@@ -118,35 +52,7 @@ impl Paused {
             Some(service_target) => service_target.0,
             None => entity,
         };
-
-        #[cfg(feature = "hsm")]
-        'hsm: {
-            let Some(state_machine) = world.get::<HsmStateMachine>(entity) else {
-                break 'hsm;
-            };
-            let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id);
-
-            let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
-                buff.add_filter(state_context);
-            });
-        }
-
-        #[cfg(feature = "fsm")]
-        'fsm: {
-            let Some(state_machine) = world.get::<FsmStateMachine>(entity) else {
-                break 'fsm;
-            };
-
-            let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id);
-
-            let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
-                buff.add_filter(state_context);
-            });
-        }
+        pause_resume_helper(&mut world, entity, service_target, true);
     }
 
     fn on_remove(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
@@ -154,36 +60,54 @@ impl Paused {
             Some(service_target) => service_target.0,
             None => entity,
         };
-
-        #[cfg(feature = "hsm")]
-        'hsm: {
-            let Some(state_machine) = world.get::<HsmStateMachine>(entity) else {
-                break 'hsm;
-            };
-            let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id);
-
-            let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
-                buff.add(state_context);
-            });
-        }
-
-        #[cfg(feature = "fsm")]
-        'fsm: {
-            let Some(state_machine) = world.get::<FsmStateMachine>(entity) else {
-                break 'fsm;
-            };
-
-            let curr_state_id = state_machine.curr_state_id();
-            let state_context = ActionContext::new(service_target, entity, curr_state_id);
-
-            let unsafe_world_cell = world.as_unsafe_world_cell();
-            StateActionBuffer::buffer_scope(unsafe_world_cell, curr_state_id, move |buff| {
-                buff.add(state_context);
-            });
-        }
+        pause_resume_helper(&mut world, entity, service_target, false);
     }
+}
+
+/// Helper shared by [`Paused::on_insert`] (pause) and [`Paused::on_remove`] (resume).
+/// Applies `add_filter` (pause) or `add` (resume) to the state action buffer for the
+/// current state of either an HSM or FSM state machine.
+fn pause_resume_helper(
+    world: &mut DeferredWorld,
+    entity: Entity,
+    service_target: Entity,
+    is_pause: bool,
+) {
+    #[cfg(feature = "hsm")]
+    if try_pause_resume::<HsmStateMachine>(world, entity, service_target, is_pause) {
+        return;
+    }
+
+    #[cfg(feature = "fsm")]
+    {
+        let _ = try_pause_resume::<FsmStateMachine>(world, entity, service_target, is_pause);
+    }
+}
+
+/// Applies pause/resume buffer operation for a specific state machine type.
+/// Returns `true` if the entity had this type of state machine component.
+fn try_pause_resume<S: StateMachineState + Component>(
+    world: &mut DeferredWorld,
+    entity: Entity,
+    service_target: Entity,
+    is_pause: bool,
+) -> bool {
+    let Some(sm) = world.get::<S>(entity) else {
+        return false;
+    };
+    let curr = sm.curr_state_id();
+    let ctx = ActionContext::new(service_target, entity, curr);
+    let cell = world.as_unsafe_world_cell();
+    StateActionBuffer::buffer_scope(cell, curr, move |buff| {
+        if is_pause {
+            buff.add_filter(ctx);
+        } else {
+            buff.remove_interceptor(ctx);
+            buff.remove_filter(ctx);
+            buff.add(ctx);
+        }
+    });
+    true
 }
 
 /// # 延迟生成状态机组件\Deferred State Machine Spawner
@@ -204,10 +128,11 @@ impl Paused {
 /// }));
 /// # }
 /// ```
-#[derive(Component, Clone)]
+#[derive(Component)]
+#[allow(clippy::type_complexity)]
 #[component(on_insert=Self::on_insert)]
 pub struct SpawnStateMachine(
-    Arc<dyn for<'w> Fn(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync>,
+    Option<Box<dyn for<'w> FnOnce(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync>>,
 );
 
 impl SpawnStateMachine {
@@ -216,19 +141,22 @@ impl SpawnStateMachine {
     /// Creates a new [`SpawnStateMachine`] with a closure that runs on insert.
     pub fn new<F>(f: F) -> Self
     where
-        F: for<'w> Fn(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync,
+        F: for<'w> FnOnce(&'w mut EntityWorldMut<'w>) + 'static + Send + Sync,
     {
-        Self(Arc::new(f))
+        Self(Some(Box::new(f)))
     }
 
     fn on_insert(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
-        let (entitys, mut commands) = world.entities_and_commands();
-        let Ok(entity_ref) = entitys.get(entity) else {
-            return;
-        };
-        if let Some(f) = entity_ref.get::<Self>().cloned() {
-            commands.queue(move |world: &mut World| (f.0)(&mut world.entity_mut(entity)));
-        }
-        commands.entity(entity).remove::<Self>();
+        world.commands().queue(move |world: &mut World| {
+            let mut e_ref = world.entity_mut(entity);
+            let Some(mut sp) = e_ref.get_mut::<SpawnStateMachine>() else {
+                return;
+            };
+            let Some(f) = sp.0.take() else {
+                return;
+            };
+            e_ref.remove::<Self>();
+            (f)(&mut world.entity_mut(entity));
+        });
     }
 }

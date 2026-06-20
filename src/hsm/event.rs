@@ -133,6 +133,7 @@ impl HsmTrigger {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum HsmTriggerType {
     /// 直接返回父状态
     ///

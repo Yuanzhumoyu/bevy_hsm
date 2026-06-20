@@ -117,6 +117,7 @@ impl FsmTrigger {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FsmTriggerType {
     /// 直接跳转到下一个状态\Directly jump to the next state
     Next(Entity),

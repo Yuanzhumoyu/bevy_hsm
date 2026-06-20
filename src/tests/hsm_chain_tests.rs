@@ -40,14 +40,7 @@ fn hsm_chain_to_sibling_state() {
     assert_eq!(sm_comp.curr_state_id(), b, "Should chain from A to B");
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"A:Exit".to_string()),
-        "Expected A:Exit during chain, got {log:?}"
-    );
-    assert!(
-        log.contains(&"B:Enter".to_string()),
-        "Expected B:Enter during chain, got {log:?}"
-    );
+    assert_eq!(log, vec!["A:Exit", "B:Enter", "B:Update"], "chain A->B log");
 }
 
 #[test]
@@ -86,13 +79,10 @@ fn hsm_chain_deep_lca_transition() {
     assert_eq!(sm_comp.curr_state_id(), b);
 
     let log = get_log(&app);
-    assert!(
-        log.contains(&"A1:Exit".to_string()),
-        "Expected A1:Exit, got {log:?}"
-    );
-    assert!(
-        log.contains(&"B:Enter".to_string()),
-        "Expected B:Enter, got {log:?}"
+    assert_eq!(
+        log,
+        vec!["A1:Exit", "A:Exit", "B:Enter", "B:Update"],
+        "chain A1->B log"
     );
 }
 

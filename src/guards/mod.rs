@@ -1,9 +1,9 @@
 mod condition;
 mod parser;
-mod registry;
+pub mod registry;
 
 pub use condition::GuardCondition;
-pub use registry::{CompiledGuard, GuardRegistry};
+pub use registry::{CompiledGuard, CompiledGuardId, CompiledGuardRegistry, GuardRegistry};
 
 use std::fmt::{Debug, Display};
 

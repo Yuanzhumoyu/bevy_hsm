@@ -18,6 +18,7 @@ use crate::{
         CheckOnTransitionStates, GuardEnter, GuardExit, OnUpdateSystem, ServiceTarget,
         StateActionBuffer, TransitionRegistry,
     },
+    state_machine::StateMachineState,
 };
 
 struct TransitionInfo {
@@ -26,6 +27,7 @@ struct TransitionInfo {
     prev_transition: Transition,
     curr_transition: Transition,
     curr_state_id: Entity,
+    graph_id: Entity,
     hsm_state: StateLifecycle,
 }
 
@@ -174,13 +176,14 @@ impl StateLifecycle {
             return Err(StateMachineError::HsmStateMachineMissing(state_machine_id));
         };
 
+        let graph_id = state_machine.state_graph_id();
         let curr_state_id = state_machine.curr_state_id();
         let curr = Transition::with_lifecycle(curr_state_id, lifecycle);
         let prev = state_machine.replace_prev_state(curr);
         #[cfg(feature = "history")]
         {
             let depth = state_machine.interrupt_depth();
-            let tree_id = state_machine.state_tree();
+            let tree_id = state_machine.state_graph_id();
             state_machine.push_history(HistoricalNode::new(
                 curr_state_id,
                 lifecycle.into(),
@@ -195,6 +198,7 @@ impl StateLifecycle {
             state_machine_id,
             prev_transition: prev,
             curr_transition: curr,
+            graph_id,
             curr_state_id,
             state_context,
             hsm_state: lifecycle,
@@ -215,6 +219,7 @@ impl StateLifecycle {
             prev_transition,
             curr_transition,
             curr_state_id,
+            graph_id,
             state_context,
             hsm_state,
         } = transition_info;
@@ -231,7 +236,13 @@ impl StateLifecycle {
                 );
             }
             StateLifecycle::Update => {
-                Self::handle_update(&mut world, state_machine_id, curr_state_id, state_context);
+                Self::handle_update(
+                    &mut world,
+                    state_machine_id,
+                    graph_id,
+                    curr_state_id,
+                    state_context,
+                );
             }
             StateLifecycle::Exit => {
                 Self::handle_exit(
@@ -245,7 +256,12 @@ impl StateLifecycle {
             }
         };
 
-        Self::process_transition_queue(&mut world, state_machine_id);
+        if world
+            .get::<HsmStateMachine>(state_machine_id)
+            .is_some_and(|sm| !sm.transition_queue_is_empty())
+        {
+            Self::process_transition_queue(&mut world, state_machine_id);
+        }
     }
 
     fn handle_enter(
@@ -316,25 +332,23 @@ impl StateLifecycle {
     fn handle_update(
         world: &mut DeferredWorld,
         state_machine_id: Entity,
+        graph_id: Entity,
         curr_state_id: Entity,
         state_context: ActionContext,
     ) {
         // Only track for guard checking when guards actually exist
-        let has_guards = world
-            .get::<HsmStateMachine>(state_machine_id)
-            .is_some_and(|sm| {
-                let tree_id = sm.state_tree();
-                world.get::<StateTree>(tree_id).is_some_and(|tree| {
-                    world.entity(curr_state_id).contains::<GuardExit>()
-                        || tree
-                            .get_sub_states(curr_state_id)
-                            .map(|subs| {
-                                subs.iter()
-                                    .any(|&sub| world.entity(sub).contains::<GuardEnter>())
-                            })
-                            .unwrap_or(false)
-                })
-            });
+        let has_guards = world.get::<StateTree>(graph_id).is_some_and(|tree| {
+            world.entity(curr_state_id).contains::<GuardExit>()
+                || tree
+                    .get_sub_states(curr_state_id)
+                    .map(|subs| {
+                        world
+                            .entity(subs)
+                            .iter()
+                            .any(|sub| sub.contains::<GuardEnter>())
+                    })
+                    .unwrap_or(false)
+        });
 
         if has_guards {
             let mut check_on_transition_states = world.resource_mut::<CheckOnTransitionStates>();
@@ -347,6 +361,7 @@ impl StateLifecycle {
                 curr_state_id,
                 move |buff| {
                     buff.remove_filter(state_context);
+                    buff.remove_interceptor(state_context);
                     buff.add(state_context);
                 },
             );
