@@ -299,6 +299,7 @@ impl StateMachineErrorEvent {
     }
 }
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 macro_rules! define_error_event {
     ($fn_name:ident, $world_fn_name:ident, $log_level:ident) => {
         /// Convenience helper to log and trigger a [`StateMachineErrorEvent`].
@@ -329,10 +330,13 @@ macro_rules! define_error_event {
     };
 }
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 define_error_event!(error_event, error_event_world, error);
+#[cfg(feature = "hsm")]
 define_error_event!(warn_event, warn_event_world, warn);
 
 /// Convenience helper to log a trace and trigger a [`StateMachineErrorEvent`].
+#[cfg(feature = "fsm")]
 pub(crate) fn trace_event(
     commands: &mut Commands,
     state_machine: Entity,

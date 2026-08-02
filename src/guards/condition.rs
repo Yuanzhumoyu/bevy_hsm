@@ -209,6 +209,7 @@ impl FromStr for GuardCondition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     use bevy_hsm_macros::combination_condition;
 
     #[test]
@@ -266,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     fn test_hsm_combination_condition() {
         let and_condition = combination_condition!(and("a", "b"));
         assert_eq!(format!("{}", and_condition), "and(a, b)");

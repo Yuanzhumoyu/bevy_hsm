@@ -1,10 +1,9 @@
 use std::fmt::Debug;
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use bevy::ecs::world::DeferredWorld;
 use bevy::{
-    ecs::{
-        system::{RegisteredSystemError, SystemId},
-        world::DeferredWorld,
-    },
+    ecs::system::{RegisteredSystemError, SystemId},
     prelude::*,
 };
 
@@ -73,6 +72,7 @@ impl<T: context_type::ContextRelationship> StateContext<T> {
     /// * `service_target` - 服务目标实体
     /// * `state_machine` - 状态机实体
     /// * `relationship` - 关系数据
+    #[cfg(feature = "hsm")]
     pub(crate) const fn with(
         service_target: Entity,
         state_machine: Entity,
@@ -93,6 +93,7 @@ impl<T: context_type::ContextRelationship> StateContext<T> {
     }
 
     #[inline]
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) fn run_system(self, world: &mut DeferredWorld, id: SystemId<In<Self>, ()>)
     where
         Self: Send + 'static,
@@ -127,6 +128,7 @@ impl<T: Default + context_type::ContextRelationship> Default for StateContext<T>
 }
 
 impl ActionContext {
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) const fn new(service_target: Entity, state_machine: Entity, state: Entity) -> Self {
         Self {
             service_target,
@@ -154,6 +156,7 @@ impl Debug for ActionContext {
 }
 
 impl GuardContext {
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) const fn new(
         service_target: Entity,
         state_machine: Entity,
@@ -193,6 +196,7 @@ impl Debug for GuardContext {
 }
 
 impl TransitionContext {
+    #[cfg(feature = "fsm")]
     pub(crate) const fn with_transition(
         service_target: Entity,
         state_machine: Entity,
@@ -206,6 +210,7 @@ impl TransitionContext {
         }
     }
 
+    #[cfg(feature = "fsm")]
     pub(crate) const fn with_final(
         service_target: Entity,
         state_machine: Entity,
@@ -218,6 +223,7 @@ impl TransitionContext {
         }
     }
 
+    #[cfg(feature = "fsm")]
     pub(crate) const fn with_initial(
         service_target: Entity,
         state_machine: Entity,

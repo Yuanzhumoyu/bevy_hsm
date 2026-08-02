@@ -2,19 +2,20 @@ use std::{
     any::TypeId, borrow::Cow, fmt::Debug, hash::Hash, marker::PhantomData, mem::swap, sync::Arc,
 };
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use bevy::ecs::world::unsafe_world_cell::UnsafeWorldCell;
 use bevy::{
     app::App,
-    ecs::{
-        schedule::{IntoScheduleConfigs, ScheduleLabel},
-        world::unsafe_world_cell::UnsafeWorldCell,
-    },
+    ecs::schedule::{IntoScheduleConfigs, ScheduleLabel},
     platform::collections::{Equivalent, HashMap, HashSet},
     prelude::*,
 };
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use crate::state_actions::*;
 use crate::{
     action_dispatcher::system_state_trait::ExpandScheduleLabelFunction, context::*,
-    error::StateMachineError, labels::SystemLabel, state_actions::*,
+    error::StateMachineError, labels::SystemLabel,
 };
 
 /// # 一个对状态机系统的抽象\An abstraction of a state machine system
@@ -535,6 +536,7 @@ impl StateActionBuffer {
     /// The caller must ensure that `world` is an `UnsafeWorldCell` obtained from within
     /// a system or hook context. Calling this from outside a Bevy system context results
     /// in undefined behavior.
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) fn buffer_scope(
         world: UnsafeWorldCell,
         state_id: Entity,

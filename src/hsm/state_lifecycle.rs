@@ -3,13 +3,15 @@ use bevy::{
     prelude::*,
 };
 
+#[cfg(feature = "hybrid")]
+use crate::error::StateMachineErrorEvent;
 #[cfg(feature = "history")]
 use crate::hsm::history::HistoricalNode;
 #[cfg(feature = "state_data")]
 use crate::prelude::StateScenePatch;
 use crate::{
     context::{ActionContext, TransitionContext},
-    error::{StateMachineError, StateMachineErrorEvent, warn_event_world},
+    error::{StateMachineError, warn_event_world},
     hsm::{state_machine::*, state_tree::StateTree, transition::Transition},
     labels::SystemLabel,
     markers::Terminated,
@@ -120,7 +122,9 @@ impl StateLifecycle {
 
     #[cfg(feature = "hybrid")]
     fn handle_hybrid_exit(world: &mut DeferredWorld, state_machine_id: Entity, state_id: Entity) {
-        use crate::{fsm::hybrid::HsmOwnedFsms, prelude::FsmStateMachine};
+        use crate::fsm::hybrid::HsmOwnedFsms;
+        #[cfg(feature = "history")]
+        use crate::prelude::FsmStateMachine;
 
         // 当没有[`HsmOwnedFsms`]组件时直接退出, 直接退出
         let Some(mut mapping) = world.get_mut::<HsmOwnedFsms>(state_machine_id) else {

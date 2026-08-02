@@ -20,6 +20,7 @@ use crate::{
 #[cfg(feature = "state_data")]
 use crate::state_data::StateScenePatch;
 
+#[cfg(feature = "history")]
 use crate::fsm::history::{FsmHistoricalNode, FsmStateHistory};
 
 /// # 预解析转换\Pre-resolved Transition
@@ -55,6 +56,7 @@ fn execute_transition_steps(
     resolved: ResolvedTransition,
     new_graph_id: Option<Entity>,
 ) -> bevy::prelude::Result<()> {
+    #[cfg_attr(not(feature = "state_data"), allow(unused_variables))]
     let ResolvedTransition {
         remove_buffer,
         exit_action,

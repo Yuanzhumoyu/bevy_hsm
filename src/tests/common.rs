@@ -66,6 +66,7 @@ pub(crate) fn clear_log(app: &mut App) {
 
 /// Creates a two-level HSM tree: Root → Child (Nested + Rebirth).
 /// Returns (state_machine_id, root_state, child_state).
+#[cfg(feature = "hsm")]
 pub(crate) fn create_two_level_hsm(app: &mut App) -> (Entity, Entity, Entity) {
     register_log_systems(app);
 
@@ -119,6 +120,7 @@ pub(crate) fn create_two_level_hsm(app: &mut App) -> (Entity, Entity, Entity) {
 
 /// Creates a tree: Root → A → A1, Root → B.
 /// Returns (sm, root, a, a1, b).
+#[cfg(feature = "hsm")]
 pub(crate) fn create_deep_chain_hsm(app: &mut App) -> (Entity, Entity, Entity, Entity, Entity) {
     register_log_systems(app);
 
@@ -168,6 +170,7 @@ pub(crate) fn create_deep_chain_hsm(app: &mut App) -> (Entity, Entity, Entity, E
 
 /// Creates two independent HSM trees.
 /// Returns (sm, tree_a_id, root_a, child_a, tree_b_id, root_b, child_b).
+#[cfg(feature = "hsm")]
 pub(crate) fn create_two_tree_hsm(
     app: &mut App,
 ) -> (Entity, Entity, Entity, Entity, Entity, Entity, Entity) {
@@ -251,6 +254,7 @@ pub(crate) fn create_two_tree_hsm(
 // ── FSM: Linear graph ─────────────────────────────────────────────
 
 /// Creates a linear FSM: A → B → C, starting in A.
+#[cfg(feature = "fsm")]
 pub(crate) fn create_linear_fsm(app: &mut App) -> (Entity, Entity, Entity, Entity) {
     register_log_systems(app);
 
@@ -302,36 +306,45 @@ pub(crate) fn create_linear_fsm(app: &mut App) -> (Entity, Entity, Entity, Entit
 
 // ── HSM: Guard helpers ────────────────────────────────────────────
 
+#[cfg(feature = "hsm")]
 #[derive(Component)]
 pub(crate) struct AllowEnter(pub bool);
 
+#[cfg(feature = "hsm")]
 pub(crate) fn guard_allow_enter(ctx: In<GuardContext>, query: Query<&AllowEnter>) -> bool {
     query.get(ctx.state_machine).map(|a| a.0).unwrap_or(false)
 }
 
+#[cfg(feature = "hsm")]
 #[derive(Component)]
 pub(crate) struct AllowExit(pub bool);
 
+#[cfg(feature = "hsm")]
 pub(crate) fn guard_allow_exit(ctx: In<GuardContext>, query: Query<&AllowExit>) -> bool {
     query.get(ctx.state_machine).map(|a| a.0).unwrap_or(false)
 }
 
+#[cfg(feature = "hsm")]
 #[derive(Component)]
 pub(crate) struct GuardA(pub bool);
 
+#[cfg(feature = "hsm")]
 #[derive(Component)]
 pub(crate) struct GuardB(pub bool);
 
+#[cfg(feature = "hsm")]
 pub(crate) fn guard_check_a(ctx: In<GuardContext>, query: Query<&GuardA>) -> bool {
     query.get(ctx.state_machine).map(|a| a.0).unwrap_or(false)
 }
 
+#[cfg(feature = "hsm")]
 pub(crate) fn guard_check_b(ctx: In<GuardContext>, query: Query<&GuardB>) -> bool {
     query.get(ctx.state_machine).map(|b| b.0).unwrap_or(false)
 }
 
 // ── HSM: Transition system helpers ────────────────────────────────
 
+#[cfg(feature = "hsm")]
 pub(crate) fn log_before_enter(ctx: In<TransitionContext>, mut log: ResMut<EventLog>) {
     log.0.push(format!(
         "BeforeEnter:from={:?}:to={:?}",
@@ -340,6 +353,7 @@ pub(crate) fn log_before_enter(ctx: In<TransitionContext>, mut log: ResMut<Event
     ));
 }
 
+#[cfg(feature = "hsm")]
 pub(crate) fn log_after_exit(ctx: In<TransitionContext>, mut log: ResMut<EventLog>) {
     log.0.push(format!(
         "AfterExit:from={:?}:to={:?}",
@@ -350,9 +364,11 @@ pub(crate) fn log_after_exit(ctx: In<TransitionContext>, mut log: ResMut<EventLo
 
 // ── HSM: ServiceTarget helpers ────────────────────────────────────
 
+#[cfg(feature = "hsm")]
 #[derive(Component, Default)]
 pub(crate) struct ActionFired(pub bool);
 
+#[cfg(feature = "hsm")]
 pub(crate) fn action_on_service_target(ctx: In<ActionContext>, mut commands: Commands) {
     commands
         .entity(ctx.service_target)
@@ -361,12 +377,16 @@ pub(crate) fn action_on_service_target(ctx: In<ActionContext>, mut commands: Com
 
 // ── FSM: Event/guard helpers ──────────────────────────────────────
 
+#[cfg(feature = "fsm")]
 pub(crate) const EVENT_GO_TO_B: i32 = 1;
+#[cfg(feature = "fsm")]
 pub(crate) const EVENT_GO_TO_C: i32 = 2;
 
+#[cfg(feature = "fsm")]
 #[derive(Component)]
 pub(crate) struct FsmAllowGuard(pub bool);
 
+#[cfg(feature = "fsm")]
 pub(crate) fn fsm_guard(ctx: In<GuardContext>, query: Query<&FsmAllowGuard>) -> bool {
     query.get(ctx.state_machine).map(|g| g.0).unwrap_or(false)
 }

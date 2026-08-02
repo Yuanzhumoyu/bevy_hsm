@@ -3,7 +3,9 @@ mod parser;
 pub mod registry;
 
 pub use condition::GuardCondition;
-pub use registry::{CompiledGuard, CompiledGuardId, CompiledGuardRegistry, GuardRegistry};
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+pub use registry::CompiledGuardRegistry;
+pub use registry::{CompiledGuard, CompiledGuardId, GuardRegistry};
 
 use std::fmt::{Debug, Display};
 

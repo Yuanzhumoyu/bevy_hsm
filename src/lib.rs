@@ -74,6 +74,7 @@ use bevy::prelude::*;
 
 use crate::action_dispatcher::ActionDispatch;
 use crate::guards::GuardRegistry;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 use crate::guards::registry::CompiledGuardRegistry;
 use crate::prelude::TransitionRegistry;
 use crate::state_actions::ActionRegistry;
@@ -120,6 +121,7 @@ impl Plugin for StateMachinePlugin {
         app.init_resource::<ActionDispatch>();
         app.init_resource::<ActionRegistry>();
         app.init_resource::<GuardRegistry>();
+        #[cfg(any(feature = "hsm", feature = "fsm"))]
         app.init_resource::<CompiledGuardRegistry>();
         app.init_resource::<TransitionRegistry>();
 
@@ -145,6 +147,7 @@ impl Plugin for StateMachinePlugin {
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for StateMachinePlugin {
     fn default() -> Self {
         Self {
@@ -197,8 +200,11 @@ macro_rules! system_registry {
 pub mod prelude {
     pub use crate::{
         StateMachinePlugin, action_dispatcher::*, context::*, error::StateMachineErrorEvent,
-        guards::*, interrupt::*, markers::*, state_actions::*,
+        guards::*, markers::*, state_actions::*,
     };
+
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
+    pub use crate::interrupt::*;
 
     #[cfg(feature = "state_data")]
     pub use crate::state_data::*;
@@ -224,6 +230,7 @@ pub mod prelude {
     #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub use crate::state_machine::StateMachineState;
 
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub use bevy_hsm_macros::combination_condition;
 }
 

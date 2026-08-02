@@ -1,8 +1,11 @@
 use std::borrow::Cow;
 
-use bevy::{ecs::entity::Entity, prelude::Deref};
+use bevy::prelude::Deref;
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 use crate::error::StateMachineError;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use bevy::ecs::entity::Entity;
 
 /// # 系统标签\System Label
 /// * 用于标识已注册系统的唯一名称，支持从多种字符串类型构造。
@@ -12,6 +15,7 @@ pub struct SystemLabel(pub Cow<'static, str>);
 
 impl SystemLabel {
     /// 找不到该系统的错误
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) fn not_found_error(&self, state: Entity) -> StateMachineError {
         StateMachineError::SystemNotFound {
             system_name: self.clone(),

@@ -3,7 +3,10 @@ use bevy::{
     prelude::*,
 };
 
-use crate::{context::*, prelude::StateActionBuffer, state_actions::*};
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use crate::state_actions::ServiceTarget;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use crate::{context::*, prelude::StateActionBuffer};
 
 #[cfg(any(feature = "hsm", feature = "fsm"))]
 use crate::state_machine::StateMachineState;
@@ -67,6 +70,8 @@ impl Paused {
 /// Helper shared by [`Paused::on_insert`] (pause) and [`Paused::on_remove`] (resume).
 /// Applies `add_filter` (pause) or `add` (resume) to the state action buffer for the
 /// current state of either an HSM or FSM state machine.
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+#[allow(clippy::needless_return)]
 fn pause_resume_helper(
     world: &mut DeferredWorld,
     entity: Entity,
@@ -86,6 +91,7 @@ fn pause_resume_helper(
 
 /// Applies pause/resume buffer operation for a specific state machine type.
 /// Returns `true` if the entity had this type of state machine component.
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 fn try_pause_resume<S: StateMachineState + Component>(
     world: &mut DeferredWorld,
     entity: Entity,

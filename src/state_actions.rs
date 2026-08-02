@@ -6,9 +6,10 @@ use bevy::{
     prelude::*,
 };
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
+use crate::error::StateMachineError;
 use crate::{
     context::{ActionId, TransitionId},
-    error::StateMachineError,
     labels::SystemLabel,
 };
 
@@ -101,6 +102,7 @@ impl ActionRegistry {
         self.0.is_empty()
     }
 
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) fn get_action_id<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
@@ -196,6 +198,7 @@ impl TransitionRegistry {
         self.0.is_empty()
     }
 
+    #[cfg(any(feature = "hsm", feature = "fsm"))]
     pub(crate) fn get_transition_id<T: Component + std::ops::Deref<Target = SystemLabel>>(
         world: &bevy::ecs::world::DeferredWorld,
         state_id: Entity,
@@ -386,6 +389,7 @@ pub struct StateMachineForest(Vec<Entity>);
 /// If the state machine has a [`ServiceTarget`] component, returns the target entity.
 /// Otherwise returns the state machine entity itself.
 #[inline]
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 pub(crate) fn get_service_target(world: &World, state_machine: Entity) -> Entity {
     world
         .get::<ServiceTarget>(state_machine)

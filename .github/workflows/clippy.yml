@@ -1,0 +1,80 @@
+name: Clippy (feature matrix)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 主 crate bevy_hsm:全部"有效"feature 组合的 clippy 矩阵
+  # 组合规则:
+  # - hybrid 已包含 hsm + fsm(Cargo.toml 中 hybrid = ["hsm", "fsm", ...]),
+  #   因此含 hybrid 的组合不再显式列出 hsm / fsm(否则 cfg 状态重复,组合冗余);
+  # - history / state_data 不能单独出现(须与 hsm / fsm 搭配才有意义),故排除单例;
+  # - 其余每个"不同 cfg 状态"各取一个代表,共 18 个(另含空组合)。
+  # 空字符串 "" 表示空组合(仅 --no-default-features)。
+  clippy:
+    name: "clippy (${{ matrix.features || 'no-features' }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        features:
+          - ""
+          - hybrid
+          - fsm
+          - hsm
+          - hybrid,state_data
+          - hybrid,history
+          - state_data,history
+          - state_data,fsm
+          - state_data,hsm
+          - history,fsm
+          - history,hsm
+          - fsm,hsm
+          - hybrid,state_data,history
+          - state_data,history,fsm
+          - state_data,history,hsm
+          - state_data,fsm,hsm
+          - history,fsm,hsm
+          - state_data,history,fsm,hsm
+    steps:
+      - uses: actions/checkout@v4
+      # bevy 的 dev-dependencies(ui/audio 等)在 Linux 上编译需要系统库:
+      # - libwayland-dev:wayland-client.pc(wayland-sys 的 pkg-config 硬依赖)
+      # - libasound2-dev / libudev-dev:bevy_audio / bevy_gilrs 所需
+      # - libxkbcommon-dev:winit 键盘输入所需
+      # 与 bevy 官方 CI 的 install-linux-deps 保持一致
+      - name: Install Linux dependencies
+        if: runner.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (no default features)
+        if: matrix.features == ''
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: "Clippy (features: ${{ matrix.features }})"
+        if: matrix.features != ''
+        run: cargo clippy --all-targets --no-default-features --features "${{ matrix.features }}" -- -D warnings
+
+  # bevy_hsm_macros 自身的全部 features 单独检查
+  # (作为依赖被编译时不会被 clippy lint,因此需要独立 job)
+  macros:
+    name: clippy (bevy_hsm_macros, all features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p bevy_hsm_macros --all-features -- -D warnings

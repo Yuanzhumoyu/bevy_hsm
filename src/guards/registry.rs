@@ -4,6 +4,7 @@ use std::hash::Hash;
 use bevy::ecs::system::RegisteredSystemError;
 use bevy::platform::collections::{Equivalent, HashMap};
 use bevy::prelude::*;
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 use bimap::BiMap;
 use smallvec::SmallVec;
 
@@ -165,12 +166,14 @@ pub struct CompiledGuardId(usize);
 /// of [`GuardEnterCache`] and [`GuardExitCache`], then dynamically extended
 /// when new states are inserted. Entries are never reclaimed (states are
 /// expected to be stable after startup).
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 #[derive(Resource, Default)]
 pub struct CompiledGuardRegistry {
     map: BiMap<CompiledGuard, CompiledGuardId>,
     count: usize,
 }
 
+#[cfg(any(feature = "hsm", feature = "fsm"))]
 impl CompiledGuardRegistry {
     /// 插入一个编译后的守卫条件。如果已存在等价的守卫则返回已有 ID，
     /// 不重复存储。

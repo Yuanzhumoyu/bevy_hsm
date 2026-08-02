@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-#[cfg(all(feature = "history", feature = "hybrid"))]
+#[cfg(feature = "history")]
 use bevy::ecs::entity::Entity;
 
 use crate::hsm::state_lifecycle::StateLifecycle;
