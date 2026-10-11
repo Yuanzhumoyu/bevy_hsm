@@ -78,3 +78,21 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -p bevy_hsm_macros --all-features -- -D warnings
+
+  # 单元测试 + 集成测试 + 文档测试(全 feature)。
+  # 此前 CI 只跑 clippy,测试仅在本机执行,这里补上真正的测试门。
+  test:
+    name: test (all features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 与 clippy job 相同的 Linux 依赖:bevy 的 dev-dependencies(ui/audio 等)需要系统库
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+      - run: cargo test -p bevy_hsm_macros --all-features

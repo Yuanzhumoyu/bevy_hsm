@@ -67,7 +67,8 @@
   分配 `Arc<dyn Fn(&mut App)>`；`StateMachinePlugin::with_schedule` 不再要求调度标签实现 `Clone`。
   公共构造方式（`StateMachinePlugin::default()` / `StateMachinePlugin::with_schedule(Last)`）保持不变。
 - 清理 4 处未使用导入，`cargo clippy -- -D warnings` 在全部 feature 组合下通过。
-- 发布包不再包含 `crates/` 下不属于本库的目录。
+- 发布包不再包含 `crates/` 下不属于本库的目录，并显式包含两份许可证文件。
+- CI 增加 `test (all features)` job（此前只有 clippy 矩阵，测试仅在本机执行）。
 
 ### 已知限制
 
