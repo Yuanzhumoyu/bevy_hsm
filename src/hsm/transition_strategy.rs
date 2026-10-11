@@ -149,9 +149,12 @@ fn handle_enter_transitions(
     query_state_machines: Populated<(Entity, &HsmStateMachine), Without<Paused>>,
     query_states: Query<&HsmState, With<HsmState>>,
 ) {
-    for (state_machine_id, state_machine) in
-        query_state_machines.iter_many(check_on_transition_states.iter())
-    {
+    // Bevy 0.20: `Query::iter_many` 的项变为 `Result<_, QueryEntityError>`。
+    // 集合中已失效的实体显式跳过，与 0.19 的隐式跳过语义一致。
+    for entry in query_state_machines.iter_many(check_on_transition_states.iter()) {
+        let Ok((state_machine_id, state_machine)) = entry else {
+            continue;
+        };
         let curr_state_id = state_machine.curr_state_id();
         let state_tree_id = state_machine.state_graph_id();
         let Ok(strategy) = query_states
@@ -307,9 +310,12 @@ fn handle_exit_transitions(
     query_state_trees: Query<&StateTree>,
 ) {
     // 条件为空的状态
-    for (state_machine_id, state_machine) in
-        query_state_machines.iter_many(check_on_transition_states.iter())
-    {
+    // Bevy 0.20: `Query::iter_many` 的项变为 `Result<_, QueryEntityError>`，
+    // 逐项解包并显式跳过已失效实体。
+    for entry in query_state_machines.iter_many(check_on_transition_states.iter()) {
+        let Ok((state_machine_id, state_machine)) = entry else {
+            continue;
+        };
         let curr_state_id = state_machine.curr_state_id();
         let state_tree_id = state_machine.state_graph_id();
         let Ok(true) = query_on_exit_conditions.get(curr_state_id) else {

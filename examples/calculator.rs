@@ -658,7 +658,7 @@ fn setup_ui(mut commands: Commands) {
             align_items: AlignItems::End,
             justify_content: JustifyContent::Center,
         }
-        Children[(
+        Children [
             Node {
                 flex_direction: FlexDirection::Column,
                 border: px(5),
@@ -670,11 +670,11 @@ fn setup_ui(mut commands: Commands) {
             }
             BackgroundColor(NAVY)
             BorderColor::all(Color::WHITE)
-            Children[
-                Text("virtual keyboard"),
-                virtual_keyboard(buttons),
+            Children [
+                Text("virtual keyboard")
+                --
+                @virtual_keyboard(buttons)
             ]
-            )
         ]
     });
 }

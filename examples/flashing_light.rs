@@ -51,8 +51,10 @@ fn log_light(
     mut commands: Commands,
     query: Query<(&Name, &DelayTarget)>,
 ) -> Option<Vec<ActionContext>> {
+    // Bevy 0.20: `iter_many` 产出 `Result`，这里用 `.unwrapped()` 恢复 0.19 的迭代形态。
     for ((name, delay_target), ctx) in query
         .iter_many(states.iter().map(|c| c.state()))
+        .unwrapped()
         .zip(states.iter())
     {
         let hsm_trigger = HsmTrigger::chain(ctx.state_machine, delay_target.0);

@@ -41,7 +41,7 @@
 
 ```toml
 [dependencies]
-bevy_hsm = "0.19"
+bevy_hsm = "0.20"
 ```
 
 在 Bevy 应用中注册插件：
@@ -236,7 +236,7 @@ fsm!(
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.19", default-features = false, features = ["hsm", "history"] }
+bevy_hsm = { version = "0.20", default-features = false, features = ["hsm", "history"] }
 ```
 
 ---

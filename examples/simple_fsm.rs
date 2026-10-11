@@ -51,7 +51,11 @@ fn log_on_transition(label: &str) -> impl Fn(In<TransitionContext>) {
 }
 
 fn log_update(contexts: In<Vec<ActionContext>>, query: Query<&Name>) -> Option<Vec<ActionContext>> {
-    for name in query.iter_many(contexts.iter().map(|c| c.state())) {
+    // Bevy 0.20: `iter_many` 产出 `Result`，`.unwrapped()` 恢复 0.19 的迭代形态。
+    for name in query
+        .iter_many(contexts.iter().map(|c| c.state()))
+        .unwrapped()
+    {
         info!("--- Update [{}]", name);
     }
     Some(contexts.0)

@@ -41,7 +41,7 @@ Add the dependency in `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy_hsm = "0.19"
+bevy_hsm = "0.20"
 ```
 
 Register the plugin in your Bevy app:
@@ -236,7 +236,7 @@ Custom configuration:
 
 ```toml
 [dependencies]
-bevy_hsm = { version = "0.19", default-features = false, features = ["hsm", "history"] }
+bevy_hsm = { version = "0.20", default-features = false, features = ["hsm", "history"] }
 ```
 
 ---

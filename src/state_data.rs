@@ -22,7 +22,7 @@ use bevy::{
 ///     .create_state_scene_patch(bsn! {
 ///         SomeComponent
 ///         Children[
-///             ChildComponent,
+///             ChildComponent
 ///         ]
 ///     })
 ///     .unwrap();
@@ -260,8 +260,9 @@ mod tests {
             .create_state_scene_patch(bsn! {
                 ComponentB
                 Children[
-                    ComponentC,
-                    ComponentC,
+                    ComponentC
+                    --
+                    ComponentC
                 ]
             })
             .unwrap();

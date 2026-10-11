@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::{context::*, prelude::*};
+use crate::prelude::*;
 
 // ── Shared test helpers ───────────────────────────────────────────
 

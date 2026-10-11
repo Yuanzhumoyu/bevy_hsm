@@ -1,5 +1,3 @@
-use bevy::prelude::*;
-
 use crate::{
     StateMachinePlugin, context::*, guards::GuardRegistry, prelude::SystemState, state_actions::*,
 };
@@ -52,7 +50,10 @@ fn set_condition_false(
     contexts: In<Vec<ActionContext>>,
     mut query: Query<&mut Condition>,
 ) -> Option<Vec<ActionContext>> {
-    let mut iter = query.iter_many_mut(contexts.0.iter().map(|a| a.state_machine));
+    // Bevy 0.20: `iter_many_mut().fetch_next()` 产出 `Result<&mut T, QueryEntityError>`。
+    let mut iter = query
+        .iter_many_mut(contexts.0.iter().map(|a| a.state_machine))
+        .unwrapped();
     while let Some(mut condition) = iter.fetch_next() {
         condition.0 = false;
     }

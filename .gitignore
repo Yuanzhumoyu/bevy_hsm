@@ -1,2 +1,5 @@
 /target
 .trae/
+
+# 子 crate 属于同一个 workspace，锁文件只保留仓库根目录那一份
+/crates/bevy_hsm_macros/Cargo.lock
