@@ -2,6 +2,13 @@
 name = "bevy_hsm_macros"
 version = "0.20.0"
 edition = "2024"
+description = "Procedural macros for bevy_hsm: declarative HSM/FSM definitions for the Bevy game engine."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Yuanzhumoyu/bevy_hsm"
+readme = "README.md"
+keywords = ["bevy", "hsm", "fsm", "state-machine", "macros"]
+categories = ["game-development"]
+include = ["/src", "/README.md"]
 
 [lib]
 name = "bevy_hsm_macros"
