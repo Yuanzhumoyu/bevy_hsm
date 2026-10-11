@@ -1,6 +1,6 @@
 # Bevy HSM — Hybrid State Machine System
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/Yuanzhumoyu/bevy_hsm#license)
 [中文](../../README.md)
 
 A powerful hybrid state machine system designed for the [Bevy Game Engine](https://bevyengine.org/). It seamlessly integrates **Hierarchical State Machine (HSM)** and **Finite State Machine (FSM)**, letting you choose the right tool for every scenario:

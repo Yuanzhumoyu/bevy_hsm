@@ -69,7 +69,7 @@ pub mod state_machine;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 
-use crate::action_dispatcher::ActionDispatch;
+use crate::action_dispatcher::{ActionDispatch, ActionSystemRegistry};
 use crate::guards::GuardRegistry;
 #[cfg(any(feature = "hsm", feature = "fsm"))]
 use crate::guards::registry::CompiledGuardRegistry;
@@ -122,6 +122,11 @@ impl Plugin for StateMachinePlugin {
         #[cfg(any(feature = "hsm", feature = "fsm"))]
         app.init_resource::<CompiledGuardRegistry>();
         app.init_resource::<TransitionRegistry>();
+        // 动作系统的调度注册表：`add_action_system` / `remove_action_system` /
+        // `replace_action_system` 在 hsm、fsm 任一开启时都可用（它们本身不被 feature 门控），
+        // 因此该资源也必须无条件注册，否则 fsm-only 构建一调用就 panic
+        // （"resource does not exist: ActionSystemRegistry"）。
+        app.init_resource::<ActionSystemRegistry>();
 
         #[cfg(feature = "hsm")]
         {
@@ -135,7 +140,6 @@ impl Plugin for StateMachinePlugin {
             app.init_resource::<CheckOnTransitionStates>();
             app.init_resource::<GuardEnterCache>();
             app.init_resource::<GuardExitCache>();
-            app.init_resource::<prelude::ActionSystemRegistry>();
 
             match self.transition_schedule {
                 Some(schedule) => install_transition_systems(app, schedule),

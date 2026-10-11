@@ -61,6 +61,15 @@
   `Populated` 校验失败会静默跳过整个观察者，导致到达暂停状态机的触发器
   （含 `Resume` / `Interrupt`）被无声丢弃。现在这类情况可在调用点观测与调试。
 
+### 修复
+
+- **仅启用 `fsm`（不启用 `hsm`）时的 panic**：`ActionSystemRegistry` 资源此前只在 `hsm` 分支注册，
+  而 `add_action_system` / `remove_action_system` / `replace_action_system` 在 `fsm` 开启时同样可用，
+  于是 `fsm`-only 构建一调用就 panic（`resource does not exist:
+  bevy_hsm::action_dispatcher::ActionSystemRegistry`）。该资源现在无条件注册。
+  这是 0.19 就存在的旧问题——此前 CI 只跑 clippy，而本机测试跑的是默认 feature（含 `hsm`），
+  所以从未暴露。已由新增的 feature 测试矩阵覆盖（`fsm` 单开从 17/20 失败变为 37/37 通过）。
+
 ### 内部改进
 
 - `StateMachinePlugin` 直接持有调度标签（`Interned<dyn ScheduleLabel>`），不再为延迟安装转换系统
@@ -68,7 +77,10 @@
   公共构造方式（`StateMachinePlugin::default()` / `StateMachinePlugin::with_schedule(Last)`）保持不变。
 - 清理 4 处未使用导入，`cargo clippy -- -D warnings` 在全部 feature 组合下通过。
 - 发布包不再包含 `crates/` 下不属于本库的目录，并显式包含两份许可证文件。
-- CI 增加 `test (all features)` job（此前只有 clippy 矩阵，测试仅在本机执行）。
+- CI 增加 `test` 矩阵 job：按最小正交子集（`hsm` / `fsm` / `hybrid`，以及 `state_data`、`history`
+  的代表组合，共 8 组）运行测试；另有 `bevy_hsm_macros` 的独立测试 job。
+  此前 CI 只有 clippy 矩阵，测试仅在本机执行（上面那个 `fsm`-only panic 正是因此漏掉的）。
+- README 许可证徽章指向本仓库（原先误指向 Bevy 官方仓库）。
 
 ### 已知限制
 

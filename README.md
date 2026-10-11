@@ -1,6 +1,6 @@
 # Bevy HSM — 混合状态机系统
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/Yuanzhumoyu/bevy_hsm#协议)
 [English](docs/en/README-en.md)
 
 一个为 [Bevy 游戏引擎](https://bevyengine.org/) 设计的、强大的混合状态机系统。它无缝集成了**层级状态机 (HSM)** 和**有限状态机 (FSM)**，让您可以为不同的场景选择最合适的工具：
