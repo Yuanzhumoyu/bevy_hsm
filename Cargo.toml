@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "A hierarchical and finite state machine library for the Bevy game engine."
 repository = "https://github.com/Yuanzhumoyu/bevy_hsm"
 keywords = ["bevy", "hsm", "fsm", "state-machine", "ecs"]
-include = ["/src", "/crates", "/examples", "/tests"]
+include = ["/src", "/crates/bevy_hsm_macros", "/examples", "/tests"]
 readme = "README.md"
 
 [workspace]

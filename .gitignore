@@ -3,3 +3,10 @@
 
 # 子 crate 属于同一个 workspace，锁文件只保留仓库根目录那一份
 /crates/bevy_hsm_macros/Cargo.lock
+
+# 本地 AI/索引工具的状态目录，不属于本库内容
+.claude/
+.codegraph/
+.reasonix/
+/reasonix.toml
+
