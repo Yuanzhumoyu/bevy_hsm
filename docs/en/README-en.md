@@ -1,6 +1,9 @@
 # Bevy HSM — Hybrid State Machine System
 
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/Yuanzhumoyu/bevy_hsm#license)
+[![crates.io](https://img.shields.io/crates/v/bevy_hsm)](https://crates.io/crates/bevy_hsm)
+[![docs.rs](https://docs.rs/bevy_hsm/badge.svg)](https://docs.rs/bevy_hsm)
+[![Following released Bevy versions](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://bevy.org/learn/quick-start/plugin-development/#main-branch-tracking)
 [中文](../../README.md)
 
 A powerful hybrid state machine system designed for the [Bevy Game Engine](https://bevyengine.org/). It seamlessly integrates **Hierarchical State Machine (HSM)** and **Finite State Machine (FSM)**, letting you choose the right tool for every scenario:
@@ -57,6 +60,15 @@ fn main() {
         .run();
 }
 ```
+
+### Compatible Versions
+
+This crate follows Bevy's **released versions** (it does not track Bevy `main`); the `bevy_hsm` version number is aligned with the Bevy version it supports:
+
+| Bevy | bevy_hsm |
+| ----------- | ----------- |
+| 0.20 | 0.20 |
+| 0.19 | 0.19 |
 
 ### Your First HSM
 
@@ -170,6 +182,17 @@ See [examples/](../../examples/) and [examples/README.md](../../examples/README.
 | `FsmTrigger` | FSM transition trigger; supports `next` / `guard` / `event` / `interrupt` / `resume` |
 | `FsmBlueprint` | FSM blueprint for nesting an FSM inside an HSM state (Hybrid architecture) |
 
+### System Sets and Scheduling
+
+How this plugin occupies the schedule (in Bevy plugins, `SystemSet`s and their execution order are part of the public contract, so they are documented here explicitly):
+
+| Item | Location | Notes |
+| ----------- | ----------- | ----------- |
+| `ActionSystemSet(usize)` | **the schedule you pass in** | The only public `SystemSet`. Every action system registered via `add_action_system(schedule, "name", system)` gets its own instance and is inserted into `schedule`; instance indices come from an internal counter and therefore have **no ordering guarantees between each other**. Removing/replacing a system also removes its set. |
+| HSM transition systems | **`Last`** by default | `handle_enter_transitions` → `handle_exit_transitions`, strictly ordered via `.chain()`; they mutate state machines and the transition cache through `commands.queue`, so the order is required. |
+| `with_schedule` override | — | `StateMachinePlugin::with_schedule(S)` moves both transition systems into `S`; **this API only exists under the `hsm` feature**. |
+| HSM / FSM trigger handling | — | `handle_hsm_trigger` / `handle_fsm_trigger` are registered as observers and do not occupy schedule order. |
+
 ### Interrupt Mechanism
 
 Both HSM and FSM support a stack-based interrupt/resume mechanism. On interrupt, the current state and graph are saved, and execution jumps to a handler state; after handling, `Resume` restores the previous state. Nested interrupts and cross-graph/tree jumps are supported.
@@ -238,6 +261,12 @@ Custom configuration:
 [dependencies]
 bevy_hsm = { version = "0.20", default-features = false, features = ["hsm", "history"] }
 ```
+
+### Bevy Dependency and Platform Support
+
+- This crate depends on Bevy with `default-features = false`, enabling only what it needs: `bevy_asset`, `bevy_scene`, `bevy_log`, `debug`. Cargo features are additive — Bevy features enabled by a crate cannot be disabled by its dependents, so only the minimal set is kept here (development/examples additionally need `bevy_feathers` and `ui`, which appear only in dev-dependencies and do not affect users).
+- **`std` only**: this crate is not adapted for `no_std` and relies on Bevy's `std` (provided by `bevy_platform`'s default features).
+- Released package contents are pinned by the `include` allow-list in `Cargo.toml` (`/src`, `/crates/bevy_hsm_macros`, `/examples`, `/tests` and the two license files), which is equivalent to the `exclude` field recommended by Bevy's plugin guide.
 
 ---
 

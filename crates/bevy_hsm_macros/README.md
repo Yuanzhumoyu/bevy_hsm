@@ -31,6 +31,17 @@ bevy_hsm = "0.20"
 本 crate 与 `bevy_hsm` 版本号保持一致，并且和所支持的 Bevy 版本号对齐
 （例如 `0.20.x` 同时表示 `bevy_hsm` 0.20 与 Bevy 0.20）。
 
+跟随 Bevy 的**已发布版本**（不跟踪 Bevy `main` 分支）：
+
+| Bevy | bevy_hsm_macros |
+| ----------- | ----------- |
+| 0.20 | 0.20 |
+| 0.19 | 0.19 |
+
+## 平台支持
+
+仅支持 `std`（未做 `no_std` 适配）；生成代码依赖的 `bevy` API 由使用方的 `bevy` 版本提供。
+
 ## 许可
 
 MIT OR Apache-2.0，详见仓库根目录的 `LICENSE-MIT.txt` 与 `LICENSE-APACHE.txt`。

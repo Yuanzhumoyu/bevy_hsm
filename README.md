@@ -1,6 +1,9 @@
 # Bevy HSM — 混合状态机系统
 
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/Yuanzhumoyu/bevy_hsm#协议)
+[![crates.io](https://img.shields.io/crates/v/bevy_hsm)](https://crates.io/crates/bevy_hsm)
+[![docs.rs](https://docs.rs/bevy_hsm/badge.svg)](https://docs.rs/bevy_hsm)
+[![Following released Bevy versions](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://bevy.org/learn/quick-start/plugin-development/#main-branch-tracking)
 [English](docs/en/README-en.md)
 
 一个为 [Bevy 游戏引擎](https://bevyengine.org/) 设计的、强大的混合状态机系统。它无缝集成了**层级状态机 (HSM)** 和**有限状态机 (FSM)**，让您可以为不同的场景选择最合适的工具：
@@ -57,6 +60,15 @@ fn main() {
         .run();
 }
 ```
+
+### 兼容版本
+
+本 crate 跟随 Bevy 的**已发布版本**（不跟踪 Bevy `main` 分支），`bevy_hsm` 的版本号与所支持的 Bevy 版本号对齐：
+
+| Bevy | bevy_hsm |
+| ----------- | ----------- |
+| 0.20 | 0.20 |
+| 0.19 | 0.19 |
 
 ### 第一个 HSM 示例
 
@@ -170,6 +182,17 @@ fn setup(mut commands: Commands, mut action_registry: ResMut<ActionRegistry>) {
 | `FsmTrigger` | FSM 转换触发器，支持 `next` / `guard` / `event` / `interrupt` / `resume` |
 | `FsmBlueprint` | FSM 蓝图，用于 Hybrid 架构中在 HSM 状态内嵌套 FSM |
 
+### 系统集与调度
+
+本插件对调度阶段的占用如下（`SystemSet` 与执行顺序在 Bevy 插件中属于对外契约，故在此明确）：
+
+| 项目 | 位置 | 说明 |
+| ----------- | ----------- | ----------- |
+| `ActionSystemSet(usize)` | **你指定的调度** | 唯一的公开 `SystemSet`。每个通过 `add_action_system(schedule, "名字", 系统)` 注册的动作系统各占一个实例并被插入到 `schedule`；实例编号由内部计数器递增，**彼此之间没有相对顺序保证**。移除/替换系统时对应的集合会被一并清理。 |
+| HSM 转换系统 | 默认 **`Last`** | `handle_enter_transitions` → `handle_exit_transitions`，二者以 `.chain()` 强顺序执行；内部通过 `commands.queue` 修改状态机与转换缓存，因此顺序是必需的。 |
+| `with_schedule` 覆盖点 | —— | `StateMachinePlugin::with_schedule(S)` 把上面两个转换系统改到 `S`；**该 API 仅在 `hsm` feature 下存在**。 |
+| HSM / FSM 触发器处理 | —— | `handle_hsm_trigger` / `handle_fsm_trigger` 以观察者形式注册，不占用调度顺序。 |
+
 ### 中断机制
 
 HSM 和 FSM 均支持基于栈的中断/恢复机制。中断时保存当前状态和图，跳转到处理器状态；处理后通过 `Resume` 恢复。支持嵌套中断和跨图/树跳转。
@@ -238,6 +261,12 @@ fsm!(
 [dependencies]
 bevy_hsm = { version = "0.20", default-features = false, features = ["hsm", "history"] }
 ```
+
+### Bevy 依赖与平台支持
+
+- 本 crate 以 `default-features = false` 引入 Bevy，仅启用实际需要的特性：`bevy_asset`、`bevy_scene`、`bevy_log`、`debug`。Cargo 特性是加法式的——crate 启用的 Bevy 特性无法被下游关闭，因此这里只保留最小集（开发/示例另需 `bevy_feathers`、`ui`，只出现在 dev-dependencies 中，不影响使用者）。
+- **仅支持 `std`**：本 crate 未针对 `no_std` 做适配，依赖 Bevy 的 `std`（由 `bevy_platform` 的默认特性提供）。
+- 发布包内容由 `Cargo.toml` 的 `include` 白名单精确控制（`/src`、`/crates/bevy_hsm_macros`、`/examples`、`/tests` 与两份许可证文件），效果等同于官方指南推荐的 `exclude`。
 
 ---
 

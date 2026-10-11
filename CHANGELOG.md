@@ -81,6 +81,10 @@
   的代表组合，共 8 组）运行测试；另有 `bevy_hsm_macros` 的独立测试 job。
   此前 CI 只有 clippy 矩阵，测试仅在本机执行（上面那个 `fsm`-only panic 正是因此漏掉的）。
 - README 许可证徽章指向本仓库（原先误指向 Bevy 官方仓库）。
+- 按 Bevy 官方插件指南补齐对外元信息：中英 README 增加 **Bevy ↔ bevy_hsm 兼容版本表**、
+  crates.io / docs.rs / 「Bevy tracking-released version」徽章、**系统集与调度**说明
+  （`ActionSystemSet` 的唯一性与无顺序保证、HSM 转换系统默认装在 `Last`、`with_schedule` 的
+  `hsm` 门控），以及 Bevy 依赖最小化与「仅支持 `std`」的说明；宏 crate README 同步补兼容表与平台说明。
 
 ### 已知限制
 
