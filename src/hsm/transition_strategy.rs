@@ -146,9 +146,15 @@ pub(crate) fn install_transition_systems<T: ScheduleLabel>(app: &mut App, schedu
 fn handle_enter_transitions(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
-    query_state_machines: Populated<(Entity, &HsmStateMachine), Without<Paused>>,
+    query_state_machines: Query<(Entity, &HsmStateMachine), Without<Paused>>,
     query_states: Query<&HsmState, With<HsmState>>,
 ) {
+    // 显式运行时门控（而非 `Populated`）：`Populated` 在查询为空时会静默跳过整个系统，
+    // 这里把「无可转换状态机」写成函数内可读、可观测的早退。
+    if query_state_machines.is_empty() {
+        return;
+    }
+
     // Bevy 0.20: `Query::iter_many` 的项变为 `Result<_, QueryEntityError>`。
     // 集合中已失效的实体显式跳过，与 0.19 的隐式跳过语义一致。
     for entry in query_state_machines.iter_many(check_on_transition_states.iter()) {
@@ -305,10 +311,15 @@ pub(super) fn handle_enter_transition(
 fn handle_exit_transitions(
     mut commands: Commands,
     check_on_transition_states: Res<CheckOnTransitionStates>,
-    query_state_machines: Populated<(Entity, &HsmStateMachine), Without<Paused>>,
+    query_state_machines: Query<(Entity, &HsmStateMachine), Without<Paused>>,
     query_on_exit_conditions: Query<Has<GuardExit>, With<HsmState>>,
     query_state_trees: Query<&StateTree>,
 ) {
+    // 显式运行时门控，理由同 `handle_enter_transitions`。
+    if query_state_machines.is_empty() {
+        return;
+    }
+
     // 条件为空的状态
     // Bevy 0.20: `Query::iter_many` 的项变为 `Result<_, QueryEntityError>`，
     // 逐项解包并显式跳过已失效实体。

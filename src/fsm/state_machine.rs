@@ -349,8 +349,14 @@ impl FsmStateMachine {
         mut commands: Commands,
         guard_registry: Res<GuardRegistry>,
         fsm_graph: Query<&FsmGraph>,
-        query: Populated<&FsmStateMachine, Without<Paused>>,
+        query: Query<&FsmStateMachine, Without<Paused>>,
     ) {
+        // 显式运行时门控（而非 `Populated`）：`Populated` 在「没有未暂停状态机」时
+        // 会静默跳过整个观察者，暂停状态机上的触发器（含 Resume）将被无声丢弃。
+        if query.is_empty() {
+            return;
+        }
+
         let FsmTrigger {
             state_machine,
             typed,

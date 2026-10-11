@@ -66,9 +66,6 @@ pub mod state_data;
 pub mod state_machine;
 
 #[cfg(feature = "hsm")]
-use std::sync::Arc;
-
-#[cfg(feature = "hsm")]
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 
@@ -95,8 +92,12 @@ use crate::state_actions::ActionRegistry;
 ///     .run();
 /// ```
 pub struct StateMachinePlugin {
+    /// HSM 转换系统的运行调度。`None` 表示默认的 [`Last`]。
+    ///
+    /// The schedule the HSM transition systems run in; `None` means the default [`Last`].
+    /// 存放调度标签本身，而不是「安装系统的闭包」，因此不需要额外的 `Arc` 分配。
     #[cfg(feature = "hsm")]
-    transition_system: Arc<dyn for<'a> Fn(&'a mut App) + Send + Sync>,
+    transition_schedule: Option<bevy::ecs::intern::Interned<dyn ScheduleLabel>>,
 }
 
 #[cfg(feature = "hsm")]
@@ -106,12 +107,9 @@ impl StateMachinePlugin {
     ///
     /// Creates a new [`StateMachinePlugin`] and specifies in which schedule the HSM's transition systems should run.
     /// By default, the systems run in the [`Last`] schedule.
-    pub fn with_schedule<T: ScheduleLabel + Clone>(schedule: T) -> Self {
-        let f = move |app: &mut App| {
-            crate::hsm::transition_strategy::install_transition_systems(app, schedule.clone());
-        };
+    pub fn with_schedule<T: ScheduleLabel>(schedule: T) -> Self {
         StateMachinePlugin {
-            transition_system: Arc::new(f),
+            transition_schedule: Some(schedule.intern()),
         }
     }
 }
@@ -129,7 +127,9 @@ impl Plugin for StateMachinePlugin {
         {
             use crate::hsm::{
                 guards::{GuardEnterCache, GuardExitCache},
-                transition_strategy::CheckOnTransitionStates,
+                transition_strategy::{
+                    CheckOnTransitionStates, install_transition_systems,
+                },
             };
 
             app.init_resource::<CheckOnTransitionStates>();
@@ -137,7 +137,10 @@ impl Plugin for StateMachinePlugin {
             app.init_resource::<GuardExitCache>();
             app.init_resource::<prelude::ActionSystemRegistry>();
 
-            (self.transition_system)(app);
+            match self.transition_schedule {
+                Some(schedule) => install_transition_systems(app, schedule),
+                None => install_transition_systems(app, Last),
+            }
 
             app.add_observer(hsm::trigger_handler::handle_hsm_trigger);
         }
@@ -152,9 +155,7 @@ impl Default for StateMachinePlugin {
     fn default() -> Self {
         Self {
             #[cfg(feature = "hsm")]
-            transition_system: Arc::new(|app: &mut App| {
-                crate::hsm::transition_strategy::install_transition_systems(app, Last);
-            }),
+            transition_schedule: None,
         }
     }
 }

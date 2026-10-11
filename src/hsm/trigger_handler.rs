@@ -28,9 +28,16 @@ pub(crate) fn handle_hsm_trigger(
     on: On<HsmTrigger>,
     mut commands: Commands,
     query_state_tree: Query<&StateTree>,
-    query_state_machine: Populated<&HsmStateMachine, Without<Paused>>,
+    query_state_machine: Query<&HsmStateMachine, Without<Paused>>,
     guard_registry: Res<GuardRegistry>,
 ) {
+    // 显式运行时门控（而非 `Populated`）：`Populated` 会在「没有未暂停状态机」时
+    // 直接跳过整个观察者，于是暂停状态机上到达的触发器（含 Resume / Interrupt）
+    // 会被静默丢弃。这里改为函数内判断，行为由调用点决定、可被观测。
+    if query_state_machine.is_empty() {
+        return;
+    }
+
     let HsmTrigger {
         state_machine,
         typed,
